@@ -250,14 +250,14 @@ async def _finalizar_na_pagina(page, sistema: str, status: dict):
 async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dict:
     """
     Executa a digitação completa na FluxAsset.
-    Mantém browser visível (headless=False) para passar o Cloudflare Turnstile —
+    Mantém browser visível (headless=True) para passar o Cloudflare Turnstile —
     clique manualmente em "Confirme que é humano" se aparecer.
     """
     log = lambda msg: status["logs"].append(msg)
     faturas_dados = status.get("faturas_cache", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
         log(f"🔐 Fazendo login na FluxAsset ({sistema})...")
@@ -353,7 +353,7 @@ async def finalizar_fluxasset(sistema: str, status: dict):
     data_op = _data_operacao_str()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await fazer_login_fluxasset(page, sistema)
         await navegar_para_digitacao(page)

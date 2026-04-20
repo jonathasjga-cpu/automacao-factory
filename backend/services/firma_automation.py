@@ -250,7 +250,7 @@ async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
     faturas_dados = status.get("faturas_cache", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, channel="chrome")
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
         log(f"🔐 Fazendo login na Firma ({sistema})...")
@@ -351,7 +351,7 @@ async def finalizar_firma(sistema: str, sequencial, status: dict):
     data_op = _data_operacao_str()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await fazer_login_firma(page, sistema)
         await navegar_para_digitacao(page)
