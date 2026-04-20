@@ -1,0 +1,24 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+
+# Debug screenshots
+backend/debug*.png
+backend/debug*.py
+backend/debug*.json
+
+# Logs
+*.log
+backend/uvicorn.log
+
+# Historico local
+backend/operacoes_historico.json
+
+# Credentials
+.automacao_factory/
+
+# Build
+{backend,frontend
