@@ -1287,13 +1287,17 @@ async function carregarArquivos() {
       const arqList = (p.arquivos || []).map(a =>
         `<li style="color:var(--text2);font-size:12px;padding:2px 0">• ${a.nome} <span style="color:var(--muted)">(${(a.tamanho/1024).toFixed(1)} KB)</span></li>`
       ).join('');
+      const usuarioHtml = p.usuario
+        ? `<span style="color:var(--text2);font-size:12px">· por <strong style="color:var(--text)">${p.usuario}</strong></span>`
+        : '';
       return `
         <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:12px">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
             <div style="flex:1;min-width:0">
-              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
                 <span style="font-family:monospace;font-size:11px;color:var(--accent);background:var(--accent-s);padding:2px 8px;border-radius:12px">#${p.op_id}</span>
                 <span style="font-weight:600;font-size:14px">${p.titulo || p.op_id}</span>
+                ${usuarioHtml}
               </div>
               <div style="color:var(--text2);font-size:12px;margin-bottom:8px">
                 ${dtFmt} · ${qtd} arquivo(s) · ${(totalTam/1024).toFixed(1)} KB

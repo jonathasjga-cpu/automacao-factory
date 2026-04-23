@@ -177,8 +177,9 @@ async def debug_complemento():
         "exemplo_chave": com_chave[0] if com_chave else None,
     }
 
-@app.post("/api/executar", dependencies=[Depends(get_current_user)])
-async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks):
+@app.post("/api/executar")
+async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
+                   current_user = Depends(get_current_user)):
     op_id = str(len(status_operacoes) + 1)
 
     from services.excel_processor import _cache_faturas
@@ -205,6 +206,7 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks):
         "fim": None,
         "arquivos": {},
         "pasta_destino": req.pasta_destino or "",
+        "usuario": current_user.login,
     }
     background_tasks.add_task(executar_automacao, op_id, req.faturas)
     return {"operacao_id": op_id}
@@ -423,10 +425,9 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
     try:
         arquivos = status.get("arquivos") or {}
         if arquivos:
-            hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
             factories_nomes = [FACTORY_NAMES.get(s, s) for s in status.get("factories", {}).keys()]
-            titulo = f"{hoje} — {', '.join(factories_nomes) or 'Operação'}"
-            salvar_pacote(op_id, arquivos, titulo=titulo)
+            titulo = ", ".join(factories_nomes) or "Operação"
+            salvar_pacote(op_id, arquivos, titulo=titulo, usuario=status.get("usuario", ""))
     except Exception as e:
         status["logs"].append(f"⚠️ Falha ao persistir arquivos recentes: {e}")
 

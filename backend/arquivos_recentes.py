@@ -19,7 +19,7 @@ def _meta_path(op_id: str) -> Path:
     return ROOT / op_id / "_meta.json"
 
 
-def salvar_pacote(op_id: str, arquivos: dict[str, bytes], titulo: str = "") -> None:
+def salvar_pacote(op_id: str, arquivos: dict[str, bytes], titulo: str = "", usuario: str = "") -> None:
     """Salva os arquivos de uma operação em disco."""
     if not arquivos:
         return
@@ -31,6 +31,7 @@ def salvar_pacote(op_id: str, arquivos: dict[str, bytes], titulo: str = "") -> N
     meta = {
         "op_id": op_id,
         "titulo": titulo or op_id,
+        "usuario": usuario or "",
         "criado_em": datetime.now().isoformat(),
         "arquivos": [
             {"nome": n, "tamanho": len(b or b"")}
