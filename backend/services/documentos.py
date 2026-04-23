@@ -301,71 +301,95 @@ async def baixar_faturas_pdf(
                             except Exception:
                                 pass
 
-                    # Instala no CONTEXTO antes do clique — cobre popup desde o primeiro request
+                    # Instala route no contexto antes do clique — cobre popup desde o primeiro request
                     await context.route("**/*", _ctx_rota_fat)
                     try:
-                        async with context.expect_page(timeout=15000) as _popup_fat_info:
-                            if _click_sel_fat:
-                                await page.locator(_click_sel_fat).first.click()
-                                log(f"  Clicou: {_click_sel_fat}")
-                            else:
-                                await page.evaluate(
-                                    "() => { if (typeof popFatura==='function') popFatura('1'); }"
-                                )
-                                log("  Clique: popFatura JS (fallback)")
+                        # Sobrescreve window.open pra capturar a URL sem depender de popup
+                        # (popup não funciona confiavelmente em headless)
+                        await page.evaluate("""() => {
+                            window._capturedPopupUrls = [];
+                            const _orig = window.open;
+                            window.open = function(u, ...rest) {
+                                if (u) window._capturedPopupUrls.push(u);
+                                // retorna um objeto fake para não quebrar chamadas subsequentes
+                                return { closed: false, close: ()=>{}, focus: ()=>{}, location: { href: u } };
+                            };
+                        }""")
 
-                        popup_fat = await _popup_fat_info.value
-
-                        # Aguarda popup navegar para URL real (S3) — sai tão logo muda de about:blank
+                        # Estratégia 1: expect_page pro caso do popup funcionar (fluxo original)
+                        popup_fat = None
+                        popup_url_fat = ""
                         try:
-                            await popup_fat.wait_for_url(
-                                lambda u: u not in ("about:blank", ""),
-                                timeout=30000,
-                            )
+                            async with context.expect_page(timeout=8000) as _popup_fat_info:
+                                if _click_sel_fat:
+                                    await page.locator(_click_sel_fat).first.click()
+                                    log(f"  Clicou: {_click_sel_fat}")
+                                else:
+                                    await page.evaluate(
+                                        "() => { if (typeof popFatura==='function') popFatura('1'); }"
+                                    )
+                                    log("  Clique: popFatura JS (fallback)")
+                            popup_fat = await _popup_fat_info.value
+                            try:
+                                await popup_fat.wait_for_url(
+                                    lambda u: u not in ("about:blank", ""),
+                                    timeout=20000,
+                                )
+                            except Exception:
+                                pass
+                            popup_url_fat = popup_fat.url
+                            log(f"  Popup URL: {popup_url_fat[:80]}")
                         except Exception:
-                            pass
+                            # Popup não abriu (headless). Usa a URL capturada via window.open hook.
+                            log("  Popup não abriu; tentando URL capturada de window.open")
+                            urls = await page.evaluate("() => window._capturedPopupUrls || []")
+                            if urls:
+                                popup_url_fat = urls[-1]
+                                log(f"  URL via window.open: {popup_url_fat[:80]}")
 
-                        popup_url_fat = popup_fat.url
-                        log(f"  Popup URL: {popup_url_fat[:80]}")
-
-                        # Aguarda route interceptar o PDF (máx 20s a partir daqui)
-                        for _t in range(14):
-                            await asyncio.sleep(1.5)
-                            if _pdf_fat_holder.get("bytes"):
-                                break
-
+                        # Aguarda route interceptar o PDF (se popup abriu e fez request)
+                        if popup_fat:
+                            for _t in range(14):
+                                await asyncio.sleep(1.5)
+                                if _pdf_fat_holder.get("bytes"):
+                                    break
                         pdf_bytes = _pdf_fat_holder.get("bytes")
 
-                        # Fallback: GET direto na URL S3 do popup (não precisa de cookies)
+                        # Fallback: GET direto na URL capturada
                         if not pdf_bytes and popup_url_fat and "about:blank" not in popup_url_fat:
+                            # Primeiro via context.request (herda cookies do GW)
                             try:
-                                import httpx as _httpx
-                                async with _httpx.AsyncClient(follow_redirects=True, timeout=30) as _hc:
-                                    _hr = await _hc.get(popup_url_fat)
-                                    _hb = _hr.content
-                                log(f"  GET S3 status={_hr.status_code}, size={len(_hb)}")
-                                if _hb and b"%PDF" in _hb[:10]:
-                                    pdf_bytes = _hb
-                                    log(f"  ✅ PDF via GET S3: {len(pdf_bytes):,} bytes")
+                                abs_url = popup_url_fat
+                                if abs_url.startswith("/"):
+                                    abs_url = f"{BASE_GW}{abs_url}"
+                                elif not abs_url.startswith("http"):
+                                    abs_url = f"{BASE_GW}/{abs_url}"
+                                resp_fat = await context.request.get(abs_url)
+                                body_fat = await resp_fat.body()
+                                log(f"  context.request status={resp_fat.status}, size={len(body_fat)}")
+                                if body_fat and b"%PDF" in body_fat[:10]:
+                                    pdf_bytes = body_fat
+                                    log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
+                                elif resp_fat.status in (301, 302) or resp_fat.status == 200:
+                                    # Pode ter redirecionado para S3 — segue manual
+                                    import httpx as _httpx
+                                    async with _httpx.AsyncClient(follow_redirects=True, timeout=30) as _hc:
+                                        _hr = await _hc.get(abs_url)
+                                        _hb = _hr.content
+                                    if _hb and b"%PDF" in _hb[:10]:
+                                        pdf_bytes = _hb
+                                        log(f"  ✅ PDF via httpx follow: {len(pdf_bytes):,} bytes")
                             except Exception as e:
-                                log(f"  GET S3: {e}")
-                                # Tenta via context.request (usa cookies do browser)
-                                try:
-                                    resp_fat = await context.request.get(popup_url_fat)
-                                    body_fat = await resp_fat.body()
-                                    if body_fat and b"%PDF" in body_fat[:10]:
-                                        pdf_bytes = body_fat
-                                        log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
-                                except Exception as e2:
-                                    log(f"  context.request: {e2}")
+                                log(f"  Erro ao fetch popup URL: {e}")
 
-                        try:
-                            await popup_fat.close()
-                        except Exception:
-                            pass
+                        if popup_fat:
+                            try:
+                                await popup_fat.close()
+                            except Exception:
+                                pass
 
                     except Exception as e:
-                        log(f"  expect_page falhou: {e}")
+                        log(f"  Erro capturando fatura PDF: {e}")
                     finally:
                         await context.unroute("**/*", _ctx_rota_fat)
 
