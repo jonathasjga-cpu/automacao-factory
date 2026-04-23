@@ -3,6 +3,7 @@ import re
 import httpx
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page
+from browser_config import launch_kwargs
 from config_manager import get_credencial
 
 def _data_operacao_str() -> str:
@@ -539,7 +540,7 @@ async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
     faturas_dados = status.get("faturas_cache", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=True))
         page = await browser.new_page()
 
         log(f"[LOGIN] Fazendo login na Firma ({sistema})...")

@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Page
+from browser_config import launch_kwargs
 
 from config_manager import get_credencial
 
@@ -56,7 +57,7 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
     log(f"  GW — gerando remessa para conta '{conta}'...")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=True))
         context = await browser.new_context(accept_downloads=True)
         page    = await context.new_page()
 
@@ -442,7 +443,7 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
 
     # ── Etapas 2–3: importar e preencher na GC ───────────────────────────────
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=True))
         page    = await browser.new_page()
 
         log(f"🔑 GC {sistema} — fazendo login...")

@@ -3,6 +3,7 @@ import re
 import httpx
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page
+from browser_config import launch_kwargs
 from config_manager import get_credencial
 
 
@@ -664,9 +665,10 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True,
-            channel="chrome",
-            args=["--disable-blink-features=AutomationControlled"],
+            **launch_kwargs(
+                headless=True,
+                extra_args=["--disable-blink-features=AutomationControlled"],
+            ),
             ignore_default_args=["--enable-automation"],
         )
         page = await browser.new_page()

@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
+from browser_config import launch_kwargs
 from config_manager import get_credencial
 
 BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
@@ -97,7 +98,7 @@ async def baixar_faturas_pdf(
     resumo_docs = status.setdefault("resumo_documentos", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=False))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
@@ -411,7 +412,7 @@ async def baixar_ctes_pdf(
     resumo_docs = status.setdefault("resumo_documentos", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=False))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 

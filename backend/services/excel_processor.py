@@ -7,6 +7,7 @@ import tempfile
 import os
 
 from playwright.async_api import async_playwright
+from browser_config import launch_kwargs
 from config_manager import get_credencial
 
 DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "automacao_factory"
@@ -307,7 +308,7 @@ async def baixar_relatorios_gw() -> tuple[Path, Path | None]:
     meus_rel_url = f"{base}/RelatorioControlador?acao=abrirTelaMeusRelatorios"
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, channel="chrome")
+        browser = await p.chromium.launch(**launch_kwargs(headless=False))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
