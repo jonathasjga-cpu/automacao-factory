@@ -284,29 +284,41 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         """)
         if not saca_nome_ok:
             log(f"  [INFO] saca_nome vazio apos popup — re-disparando lookup para {cnpj_limpo}...")
-            # Limpa e re-preenche #saca_id para forçar o lookup do sacado recém-cadastrado
-            saca_field = page.locator('#saca_id').first
-            await saca_field.fill("")
-            await page.wait_for_timeout(200)
-            await saca_field.fill(cnpj_limpo)
-            await saca_field.press("Tab")
 
-            # Aguarda #saca_nome ser preenchido pelo lookup (máx 6 s)
-            for _ in range(30):
-                await page.wait_for_timeout(200)
-                saca_nome_ok = await page.evaluate("""
-                    () => {
-                        const el = document.getElementById('saca_nome');
-                        return el && el.value && el.value.trim().length > 1;
-                    }
-                """)
+            # Servidor Firma pode demorar pra indexar o cadastro recém-criado
+            # (em headless os tempos são mais sensíveis). Tenta 3 vezes com waits progressivos.
+            for tentativa in range(1, 4):
+                # Dá tempo do servidor processar antes de consultar
+                await page.wait_for_timeout(1500 * tentativa)
+
+                saca_field = page.locator('#saca_id').first
+                await saca_field.fill("")
+                await page.wait_for_timeout(300)
+                await saca_field.fill(cnpj_limpo)
+                await saca_field.press("Tab")
+
+                # Aguarda #saca_nome ser preenchido (até 12s por tentativa)
+                for _ in range(60):
+                    await page.wait_for_timeout(200)
+                    saca_nome_ok = await page.evaluate("""
+                        () => {
+                            const el = document.getElementById('saca_nome');
+                            return el && el.value && el.value.trim().length > 1;
+                        }
+                    """)
+                    if saca_nome_ok:
+                        break
+
                 if saca_nome_ok:
+                    log(f"  [OK] Lookup bem-sucedido na tentativa {tentativa}")
                     break
+                else:
+                    log(f"  [WARN] Tentativa {tentativa}/3 de lookup falhou, tentando novamente...")
 
             if not saca_nome_ok:
                 raise Exception(
                     f"Sacado {cnpj_limpo} salvo no cadastro mas nao vinculado no formulario "
-                    f"(#saca_nome permanece vazio apos re-lookup)"
+                    f"(#saca_nome permanece vazio apos 3 tentativas de re-lookup)"
                 )
 
         log(f"  [OK] Sacado cadastrado e vinculado: {nome_usar}")
