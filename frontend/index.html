@@ -7,24 +7,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:       #F1F5F9;
-    --surface:  #FFFFFF;
-    --surface2: #F8FAFC;
-    --border:   #E2E8F0;
-    --border2:  #CBD5E1;
-    --accent:   #2563EB;
-    --accent-h: #1D4ED8;
-    --accent-s: #DBEAFE;
-    --green:    #16A34A;
-    --green-s:  #DCFCE7;
-    --red:      #DC2626;
-    --red-s:    #FEE2E2;
-    --yellow:   #D97706;
-    --yellow-s: #FEF3C7;
-    --blue-s:   #EFF6FF;
-    --text:     #1E293B;
-    --text2:    #475569;
-    --muted:    #94A3B8;
+    --bg:       #0B0F1A;
+    --surface:  #111827;
+    --surface2: #1A2234;
+    --border:   #1F2D40;
+    --border2:  #2A3A50;
+    --accent:   #4F8EF7;
+    --accent-h: #3B7EF0;
+    --accent-s: rgba(79,142,247,0.12);
+    --green:    #10B981;
+    --green-s:  rgba(16,185,129,0.12);
+    --red:      #EF4444;
+    --red-s:    rgba(239,68,68,0.12);
+    --yellow:   #F59E0B;
+    --yellow-s: rgba(245,158,11,0.12);
+    --blue-s:   rgba(79,142,247,0.08);
+    --text:     #E2E8F0;
+    --text2:    #94A3B8;
+    --muted:    #64748B;
     --font:     'Inter', system-ui, -apple-system, sans-serif;
   }
 
@@ -34,71 +34,96 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font);
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
     font-size: 14px;
+    height: 100vh;
+    overflow: hidden;
   }
 
-  /* ─── HEADER ─────────────────────────────────────────── */
-  header {
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 32px;
+  /* ─── LAYOUT ──────────────────────────────────────────── */
+  .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .topbar {
+    height: 56px;
+    background: #070C15;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: 60px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    padding: 0 24px;
+    flex-shrink: 0;
+    z-index: 200;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+    border-bottom: 1px solid rgba(79,142,247,0.15);
   }
 
   .logo {
     font-size: 16px;
     font-weight: 700;
-    color: var(--accent);
+    color: #60A5FA;
     display: flex;
     align-items: center;
     gap: 8px;
     letter-spacing: -.3px;
   }
-
   .logo svg { width: 22px; height: 22px; }
 
-  .nav-tabs {
+  .layout {
     display: flex;
-    gap: 2px;
-    background: var(--bg);
-    padding: 4px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
+    flex: 1;
+    height: calc(100vh - 56px);
+    overflow: hidden;
   }
 
-  .nav-tab {
-    padding: 6px 16px;
-    border-radius: 7px;
+  .sidebar {
+    width: 220px;
+    background: #0D1424;
+    flex-shrink: 0;
+    height: 100%;
+    overflow-y: auto;
+    padding: 12px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border-right: 1px solid rgba(79,142,247,0.1);
+  }
+
+  .sidebar-section {
+    padding: 16px 16px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #334155;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    color: #64748B;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
-    border: none;
-    background: transparent;
-    color: var(--text2);
     transition: all .15s;
-    font-family: var(--font);
+    border-left: 3px solid transparent;
+    user-select: none;
   }
-
-  .nav-tab:hover { background: var(--surface); color: var(--text); }
-  .nav-tab.active { background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .sidebar-item:hover { background: rgba(255,255,255,.05); color: #CBD5E1; }
+  .sidebar-item.active { color: #60A5FA; background: rgba(96,165,250,.08); border-left-color: #60A5FA; font-weight: 600; }
+  .sidebar-item svg { width: 16px; height: 16px; flex-shrink: 0; }
 
   /* ─── MAIN ───────────────────────────────────────────── */
   main {
     flex: 1;
     padding: 28px 32px;
-    max-width: 1200px;
-    margin: 0 auto;
-    width: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-width: 0;
+    height: 100%;
   }
 
   .page { display: none; }
@@ -127,11 +152,11 @@
   .btn-success:hover { background: #15803D; }
 
   .btn-ghost {
-    background: var(--surface);
+    background: rgba(255,255,255,.04);
     color: var(--text2);
     border: 1px solid var(--border2);
   }
-  .btn-ghost:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+  .btn-ghost:hover { background: rgba(255,255,255,.08); color: var(--text); border-color: rgba(79,142,247,.4); }
 
   .btn-danger {
     background: var(--surface);
@@ -176,9 +201,9 @@
     box-shadow: 0 1px 3px rgba(0,0,0,.04);
   }
 
-  table { width: 100%; border-collapse: collapse; }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); }
 
-  thead { background: var(--surface2); border-bottom: 1px solid var(--border); }
+  thead { background: var(--surface2) !important; border-bottom: 1px solid var(--border); }
 
   th {
     padding: 11px 16px;
@@ -199,7 +224,7 @@
   }
 
   tr:last-child td { border-bottom: none; }
-  tbody tr:hover td { background: var(--blue-s); }
+  tbody tr:hover td { background: rgba(79,142,247,.04) !important; }
 
   .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
 
@@ -244,9 +269,12 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 24px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.3);
+    transition: border-color .2s ease;
   }
+  .card:hover { border-color: var(--border2); }
 
   /* ─── STATUS PAGE ────────────────────────────────────── */
   .status-header {
@@ -265,37 +293,39 @@
     font-weight: 600;
   }
 
-  .pill-aguardando  { background: var(--yellow-s);   color: var(--yellow); }
-  .pill-executando  { background: var(--blue-s);     color: var(--accent); }
-  .pill-concluido   { background: var(--green-s);    color: var(--green); }
-  .pill-erro        { background: var(--red-s);      color: var(--red); }
+  .pill-aguardando  { background: rgba(245,158,11,.15);  color: #F59E0B; }
+  .pill-executando  { background: rgba(79,142,247,.15);  color: #60A5FA; }
+  .pill-concluido   { background: rgba(16,185,129,.15);  color: #10B981; }
+  .pill-erro        { background: rgba(239,68,68,.15);   color: #EF4444; }
 
   .progress-bar {
-    background: var(--border);
-    border-radius: 99px;
     height: 6px;
+    background: var(--surface2);
+    border-radius: 99px;
     overflow: hidden;
     margin-bottom: 20px;
   }
 
   .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent), #60A5FA);
+    background: linear-gradient(90deg, var(--accent), #818CF8);
     border-radius: 99px;
-    transition: width .5s ease;
+    transition: width .5s cubic-bezier(.4,0,.2,1);
+    box-shadow: 0 0 8px rgba(79,142,247,.5);
   }
 
   /* ─── LOG AREA ───────────────────────────────────────── */
   .log-area {
-    background: var(--surface2);
+    background: #070C15;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-    height: 300px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 12px;
     line-height: 1.7;
+    max-height: 200px;
+    overflow-y: auto;
+    color: #94A3B8;
   }
 
   .log-line {
@@ -360,32 +390,56 @@
   .confirm-box p  { color: var(--text2); font-size: 13px; margin-bottom: 20px; }
 
   /* ─── CONFIG ─────────────────────────────────────────── */
-  .config-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 16px;
+  .cred-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--muted);
+    margin-bottom: 10px;
   }
 
-  .config-card { padding: 22px; }
+  .cred-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+  }
 
-  .config-card h3 {
-    font-size: 14px;
-    font-weight: 700;
-    margin-bottom: 16px;
+  .cred-row-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: var(--text);
+    justify-content: space-between;
+    padding: 15px 20px;
   }
 
-  .config-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--muted);
-    flex-shrink: 0;
+  .cred-row-header:hover { background: var(--surface2); }
+
+  .cred-divider { height: 1px; background: var(--border); margin: 0 20px; }
+
+  .cred-form {
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
   }
-  .config-dot.ok { background: var(--green); }
+
+  .cred-edit-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    font-family: var(--font);
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background .1s;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .cred-edit-btn:hover { background: var(--accent-s); }
 
   .field { margin-bottom: 12px; }
 
@@ -399,42 +453,44 @@
     margin-bottom: 5px;
   }
 
-  input[type="text"], input[type="password"] {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border2);
+  input[type="text"], input[type="password"], input[type="url"], input[type="email"], select, textarea {
+    background: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 8px;
-    color: var(--text);
+    color: var(--text) !important;
     padding: 9px 12px;
     font-family: var(--font);
     font-size: 13px;
     outline: none;
     transition: border-color .15s, box-shadow .15s;
   }
+  .field input[type="text"], .field input[type="password"], .field input[type="url"],
+  .field input[type="email"], .field select, .field textarea { width: 100%; }
 
-  input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-s);
+  input:focus, select:focus {
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 3px var(--accent-s) !important;
   }
 
   /* ─── EMPTY STATE ────────────────────────────────────── */
   .empty-state {
     text-align: center;
-    padding: 80px 0;
+    padding: 60px 20px;
     color: var(--muted);
   }
 
   .empty-state .icon {
-    font-size: 44px;
-    margin-bottom: 14px;
+    font-size: 48px;
     display: block;
+    margin-bottom: 16px;
+    opacity: .5;
   }
 
   .empty-state h3 {
     font-size: 16px;
     font-weight: 600;
-    margin-bottom: 6px;
     color: var(--text2);
+    margin-bottom: 8px;
   }
 
   .empty-state p { font-size: 13px; }
@@ -442,22 +498,68 @@
   /* ─── KPI GRID ───────────────────────────────────────── */
   .kpi-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
     margin-bottom: 24px;
+  }
+  @media (max-width: 700px) {
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   }
 
   .kpi-card {
-    background: var(--surface);
+    background: linear-gradient(135deg, var(--surface) 0%, var(--surface2) 100%);
     border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,.04);
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    position: relative;
+    overflow: hidden;
   }
 
-  .kpi-icon { font-size: 20px; margin-bottom: 8px; display: block; }
-  .kpi-val  { font-size: 22px; font-weight: 700; font-family: 'SF Mono', monospace; line-height: 1.2; }
-  .kpi-lbl  { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-top: 4px; }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--kpi-accent, var(--accent));
+    border-radius: 14px 0 0 14px;
+    opacity: .8;
+  }
+
+  .kpi-card::after {
+    content: '';
+    position: absolute;
+    top: -30px; right: -30px;
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--kpi-accent, var(--accent)) 0%, transparent 70%);
+    opacity: .04;
+    pointer-events: none;
+  }
+
+  .kpi-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .kpi-icon-box {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .kpi-icon-box svg { width: 20px; height: 20px; }
+
+  .kpi-lbl  { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); line-height: 1.3; }
+  .kpi-val  { font-size: clamp(22px, 2.2vw, 32px); font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* ─── SECTION HEADER ─────────────────────────────────── */
   .section-header {
@@ -478,24 +580,159 @@
   /* ─── VALOR / CNPJ helpers ───────────────────────────── */
   .valor { font-family: 'SF Mono', monospace; color: var(--green); font-weight: 600; }
   .cnpj  { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  /* ─── FACTORY CARDS ──────────────────────────────────── */
+  .factory-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    overflow: hidden;
+    background: var(--surface);
+    transition: border-color .2s;
+  }
+
+  .factory-card-header {
+    padding: 13px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    transition: background .1s;
+  }
+
+  .factory-card-header:hover { background: var(--surface2); }
+
+  .factory-card-logs {
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+    padding: 10px 14px;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+
+  /* ─── ANIMATIONS ─────────────────────────────────────── */
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes cardGlowPulse {
+    0%, 100% { box-shadow: 0 0 0 1px var(--border), 0 4px 20px rgba(0,0,0,.4); }
+    50%       { box-shadow: 0 0 0 1px rgba(79,142,247,.3), 0 4px 24px rgba(79,142,247,.08); }
+  }
+  @keyframes sidebarItemIn {
+    from { opacity: 0; transform: translateX(-8px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .page.active { animation: fadeSlideIn .35s ease both; }
+
+  .kpi-card {
+    animation: cardGlowPulse 4s ease-in-out infinite;
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+  .kpi-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 0 0 1px rgba(79,142,247,.4), 0 8px 32px rgba(79,142,247,.12) !important;
+    animation: none;
+  }
+
+  .sidebar-item {
+    animation: sidebarItemIn .3s ease both;
+    transition: all .2s ease;
+  }
+  .sidebar-item:nth-child(1) { animation-delay: .05s; }
+  .sidebar-item:nth-child(2) { animation-delay: .10s; }
+  .sidebar-item:nth-child(3) { animation-delay: .15s; }
+  .sidebar-item:nth-child(4) { animation-delay: .20s; }
+  .sidebar-item:hover { transform: translateX(4px); }
 </style>
 </head>
 <body>
 
-<header>
+<!-- ── LOGIN OVERLAY ─────────────────────────────────────── -->
+<div id="login-overlay" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px 36px;width:100%;max-width:380px;box-shadow:0 12px 48px rgba(0,0,0,.6)">
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="display:inline-flex;align-items:center;gap:8px;font-size:22px;font-weight:700;color:var(--accent)">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        AutoFactory
+      </div>
+      <div id="auth-subtitle" style="margin-top:8px;color:var(--text2);font-size:13px">Entre para continuar</div>
+    </div>
+    <form id="login-form" onsubmit="event.preventDefault(); submeterAuth();">
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Login</label>
+        <input id="login-user" type="text" autocomplete="username" autofocus
+          style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
+      </div>
+      <div style="margin-bottom:14px">
+        <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Senha</label>
+        <input id="login-pass" type="password" autocomplete="current-password"
+          style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
+      </div>
+      <div id="login-pass2-wrap" style="display:none;margin-bottom:14px">
+        <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Confirmar senha</label>
+        <input id="login-pass2" type="password" autocomplete="new-password"
+          style="width:100%;height:40px;padding:0 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px;box-sizing:border-box">
+      </div>
+      <div id="login-erro" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--red-s);border-radius:6px"></div>
+      <div id="login-ok" style="display:none;color:var(--green);font-size:12px;margin-bottom:12px;padding:8px 12px;background:var(--green-s);border-radius:6px"></div>
+      <button type="submit" class="btn btn-primary" id="btn-login" style="width:100%;height:42px;font-size:14px;justify-content:center">
+        Entrar
+      </button>
+      <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--text2)">
+        <span id="auth-toggle-text">Não tem conta? </span>
+        <a href="#" id="auth-toggle-link" style="color:var(--accent);text-decoration:none" onclick="event.preventDefault(); alternarModoAuth();">Criar conta</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="app-shell">
+
+<div class="topbar">
   <div class="logo">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
     </svg>
     AutoFactory
   </div>
-  <div class="nav-tabs">
-    <button class="nav-tab active" onclick="showPage('faturas')">Faturas</button>
-    <button class="nav-tab" onclick="showPage('status')">Operações</button>
-    <button class="nav-tab" onclick="showPage('relatorios')">Relatórios</button>
-    <button class="nav-tab" onclick="showPage('config')">Configurações</button>
+  <div id="user-box" style="margin-left:auto;display:none;align-items:center;gap:10px;color:var(--text2);font-size:13px">
+    <span id="user-label"></span>
+    <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px" onclick="fazerLogout()">Sair</button>
   </div>
-</header>
+</div>
+
+<div class="layout">
+<nav class="sidebar">
+  <div class="sidebar-section">Principal</div>
+  <div class="sidebar-item active" onclick="showPage('faturas')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+    Faturas
+  </div>
+  <div class="sidebar-item" onclick="showPage('status')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+    Operações
+  </div>
+  <div class="sidebar-section">Análise</div>
+  <div class="sidebar-item" onclick="showPage('relatorios')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+    Relatórios
+  </div>
+  <div class="sidebar-section">Sistema</div>
+  <div class="sidebar-item" onclick="showPage('config')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Configurações
+  </div>
+  <div class="sidebar-item" id="sidebar-usuarios" style="display:none" onclick="showPage('usuarios')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    Usuários
+  </div>
+</nav>
 
 <main>
 
@@ -511,12 +748,29 @@
         Executar Selecionadas
       </button>
       <button class="btn btn-ghost" onclick="selecionarTodas()">Selecionar Todas</button>
+      <select id="filtro-filial" onchange="renderFaturas()" style="height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;width:auto;flex-shrink:0;">
+        <option value="">Todas as filiais</option>
+        <option value="matriz">Matriz</option>
+        <option value="sp">Filial SP</option>
+      </select>
       <button class="btn btn-danger" id="btn-excluir" onclick="excluirSelecionadas()" disabled>
         <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
         Excluir
       </button>
       <div class="count-badge" id="count-badge">0 faturas</div>
     </div>
+
+    <!-- Pasta de destino — apenas local -->
+    <div id="box-pasta" style="display:none;margin:0 0 12px 0;padding:10px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--text2);white-space:nowrap">📁 Pasta de destino:</span>
+      <input id="input-pasta" type="text" placeholder="Nenhuma pasta selecionada — arquivos disponíveis para download" readonly
+        style="flex:1;min-width:260px;height:32px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);color:var(--text1);font-size:13px;cursor:default">
+      <button class="btn btn-ghost" onclick="selecionarPasta()" style="white-space:nowrap;font-size:13px;padding:6px 14px">
+        📂 Selecionar pasta
+      </button>
+      <button class="btn btn-ghost" onclick="limparPasta()" style="font-size:13px;padding:6px 10px;color:var(--muted)" title="Limpar seleção">✕</button>
+    </div>
+
     <div id="faturas-container">
       <div class="empty-state">
         <span class="icon">📄</span>
@@ -546,48 +800,498 @@
 
   <!-- ── CONFIG ───────────────────────────────────────── -->
   <div class="page" id="page-config">
-    <div class="config-grid" id="config-grid"></div>
+    <div id="config-container" style="max-width:720px"></div>
+  </div>
+
+  <!-- ── USUÁRIOS (só admin) ───────────────────────────── -->
+  <div class="page" id="page-usuarios">
+    <div style="max-width:900px">
+      <div class="toolbar" style="margin-bottom:16px">
+        <button class="btn btn-primary" onclick="abrirNovoUsuario()">
+          <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z"/></svg>
+          Novo usuário
+        </button>
+      </div>
+      <div id="usuarios-container"></div>
+      <!-- Modal novo/editar -->
+      <div id="usuario-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9998;align-items:center;justify-content:center">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;width:100%;max-width:380px">
+          <h3 id="um-titulo" style="margin:0 0 16px 0">Novo usuário</h3>
+          <input type="hidden" id="um-id">
+          <div style="margin-bottom:10px">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Login</label>
+            <input id="um-login" type="text" style="width:100%;height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box">
+          </div>
+          <div style="margin-bottom:10px">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Senha <span id="um-senha-hint" style="color:var(--muted);font-size:11px">(deixe em branco para manter)</span></label>
+            <input id="um-senha" type="password" style="width:100%;height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px;box-sizing:border-box">
+          </div>
+          <div style="margin-bottom:14px">
+            <label style="display:block;font-size:12px;color:var(--text2);margin-bottom:6px">Papel</label>
+            <select id="um-role" style="width:100%;height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:13px">
+              <option value="usuario">Usuário comum</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div id="um-erro" style="display:none;color:var(--red);font-size:12px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="fecharUsuarioModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="salvarUsuario()">Salvar</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
 </main>
+</div><!-- .layout -->
+</div><!-- .app-shell -->
 
 <script>
-const API = "/api";
+const API = location.protocol === 'file:' ? 'http://localhost:8000/api' : '/api';
+
+// ─── AUTH ─────────────────────────────────────────────────
+let _authToken = localStorage.getItem('auth_token') || '';
+let _authUser  = JSON.parse(localStorage.getItem('auth_user') || 'null');
+
+// Envolve fetch para incluir Authorization automaticamente em chamadas /api e tratar 401
+const _origFetch = window.fetch.bind(window);
+window.fetch = async function(url, opts = {}) {
+  const isApi = typeof url === 'string' && (url.includes('/api/') || url.startsWith(API));
+  if (isApi && _authToken) {
+    opts.headers = { ...(opts.headers || {}), 'Authorization': `Bearer ${_authToken}` };
+  }
+  const r = await _origFetch(url, opts);
+  if (isApi && r.status === 401 && !url.includes('/auth/login')) {
+    // Token expirou ou inválido — limpa e manda pra tela de login
+    fazerLogout();
+  }
+  return r;
+};
+
+function mostrarLogin() {
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('user-box').style.display = 'none';
+}
+
+function esconderLogin() {
+  document.getElementById('login-overlay').style.display = 'none';
+  document.getElementById('user-box').style.display = 'flex';
+  document.getElementById('user-label').textContent =
+    `${_authUser?.login || ''} (${_authUser?.role || ''})`;
+  // Mostra aba de Usuários só para admin
+  document.getElementById('sidebar-usuarios').style.display =
+    _authUser?.role === 'admin' ? '' : 'none';
+}
+
+let _authModo = 'login';  // 'login' | 'registro'
+
+function alternarModoAuth() {
+  _authModo = _authModo === 'login' ? 'registro' : 'login';
+  const isReg = _authModo === 'registro';
+  document.getElementById('auth-subtitle').textContent =
+    isReg ? 'Crie sua conta (aguardará aprovação)' : 'Entre para continuar';
+  document.getElementById('login-pass2-wrap').style.display = isReg ? '' : 'none';
+  document.getElementById('btn-login').textContent = isReg ? 'Criar conta' : 'Entrar';
+  document.getElementById('auth-toggle-text').textContent =
+    isReg ? 'Já tem conta? ' : 'Não tem conta? ';
+  document.getElementById('auth-toggle-link').textContent =
+    isReg ? 'Entrar' : 'Criar conta';
+  document.getElementById('login-erro').style.display = 'none';
+  document.getElementById('login-ok').style.display = 'none';
+}
+
+async function submeterAuth() {
+  if (_authModo === 'registro') { await fazerRegistro(); }
+  else { await fazerLogin(); }
+}
+
+async function fazerLogin() {
+  const login = document.getElementById('login-user').value.trim();
+  const senha = document.getElementById('login-pass').value;
+  const erroEl = document.getElementById('login-erro');
+  const okEl = document.getElementById('login-ok');
+  const btn = document.getElementById('btn-login');
+  erroEl.style.display = 'none'; okEl.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Entrando...';
+  try {
+    const r = await _origFetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, senha }),
+    });
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.detail || 'Login falhou');
+    }
+    const data = await r.json();
+    _authToken = data.access_token;
+    _authUser  = data.user;
+    localStorage.setItem('auth_token', _authToken);
+    localStorage.setItem('auth_user', JSON.stringify(_authUser));
+    esconderLogin();
+  } catch (e) {
+    erroEl.textContent = e.message;
+    erroEl.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Entrar';
+  }
+}
+
+async function fazerRegistro() {
+  const login = document.getElementById('login-user').value.trim();
+  const senha = document.getElementById('login-pass').value;
+  const senha2= document.getElementById('login-pass2').value;
+  const erroEl = document.getElementById('login-erro');
+  const okEl = document.getElementById('login-ok');
+  const btn = document.getElementById('btn-login');
+  erroEl.style.display = 'none'; okEl.style.display = 'none';
+  if (!login || !senha) {
+    erroEl.textContent = 'Preencha login e senha'; erroEl.style.display='block'; return;
+  }
+  if (senha !== senha2) {
+    erroEl.textContent = 'As senhas não conferem'; erroEl.style.display='block'; return;
+  }
+  btn.disabled = true; btn.textContent = 'Criando...';
+  try {
+    const r = await _origFetch(`${API}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ login, senha }),
+    });
+    const data = await r.json().catch(()=>({}));
+    if (!r.ok) throw new Error(data.detail || 'Erro no cadastro');
+    okEl.textContent = data.mensagem || 'Cadastro enviado. Aguarde aprovação.';
+    okEl.style.display = 'block';
+    // Volta pro modo login automaticamente após 2s
+    setTimeout(() => {
+      if (_authModo === 'registro') alternarModoAuth();
+      document.getElementById('login-pass').value = '';
+    }, 2000);
+  } catch (e) {
+    erroEl.textContent = e.message;
+    erroEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = _authModo === 'registro' ? 'Criar conta' : 'Entrar';
+  }
+}
+
+function fazerLogout() {
+  _authToken = ''; _authUser = null;
+  localStorage.removeItem('auth_token');
+  localStorage.removeItem('auth_user');
+  mostrarLogin();
+}
+
+// Ao carregar a página: se já tem token, valida; se não, mostra login
+async function _bootstrapAuth() {
+  if (!_authToken) { mostrarLogin(); return; }
+  try {
+    const r = await _origFetch(`${API}/auth/me`, {
+      headers: { 'Authorization': `Bearer ${_authToken}` }
+    });
+    if (!r.ok) throw new Error('token inválido');
+    const u = await r.json();
+    _authUser = u;
+    localStorage.setItem('auth_user', JSON.stringify(u));
+    esconderLogin();
+  } catch (_) {
+    fazerLogout();
+  }
+}
+document.addEventListener('DOMContentLoaded', _bootstrapAuth);
+
+// ─── USUÁRIOS (CRUD — só admin) ──────────────────────────
+async function carregarUsuarios() {
+  const cont = document.getElementById('usuarios-container');
+  cont.innerHTML = '<div style="color:var(--text2)">Carregando...</div>';
+  try {
+    const r = await fetch(`${API}/users`);
+    if (!r.ok) throw new Error('Erro ao listar');
+    const users = await r.json();
+    if (!users.length) {
+      cont.innerHTML = '<div class="empty-state"><span class="icon">👥</span><h3>Nenhum usuário</h3></div>';
+      return;
+    }
+    const pendentes = users.filter(u => !u.ativo);
+    const alerta = pendentes.length > 0 ? `
+      <div style="background:var(--yellow-s);border:1px solid var(--yellow);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:var(--yellow)">
+        ⏳ <strong>${pendentes.length}</strong> cadastro(s) aguardando aprovação
+      </div>` : '';
+    cont.innerHTML = alerta + `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--surface2);text-align:left">
+              <th style="padding:12px 16px;font-size:12px;color:var(--text2);font-weight:600">Login</th>
+              <th style="padding:12px 16px;font-size:12px;color:var(--text2);font-weight:600">Papel</th>
+              <th style="padding:12px 16px;font-size:12px;color:var(--text2);font-weight:600">Status</th>
+              <th style="padding:12px 16px;text-align:right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${users.map(u => `
+              <tr style="border-top:1px solid var(--border);${!u.ativo?'background:var(--yellow-s)':''}">
+                <td style="padding:12px 16px;font-size:14px">${u.login}</td>
+                <td style="padding:12px 16px;font-size:13px">
+                  <span style="padding:3px 10px;border-radius:12px;background:${u.role==='admin'?'var(--accent-s)':'var(--surface2)'};color:${u.role==='admin'?'var(--accent)':'var(--text2)'};font-size:11px">
+                    ${u.role === 'admin' ? 'Admin' : 'Usuário'}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;font-size:13px">
+                  <span style="color:${u.ativo?'var(--green)':'var(--yellow)'}">
+                    ${u.ativo ? '● Ativo' : '⏳ Aguardando aprovação'}
+                  </span>
+                </td>
+                <td style="padding:12px 16px;text-align:right">
+                  ${!u.ativo ?
+                    `<button class="btn btn-primary" style="font-size:12px;padding:4px 12px;margin-right:6px" onclick="aprovarUsuario(${u.id})">Aprovar</button>` : ''
+                  }
+                  <button class="btn btn-ghost" style="font-size:12px;padding:4px 10px;margin-right:6px" onclick='editarUsuario(${JSON.stringify(u)})'>Editar</button>
+                  ${u.id === _authUser?.id ? '' :
+                    `<button class="btn btn-ghost" style="font-size:12px;padding:4px 10px;color:var(--red)" onclick="deletarUsuario(${u.id}, '${u.login}')">Excluir</button>`
+                  }
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    cont.innerHTML = `<div style="color:var(--red)">Erro: ${e.message}</div>`;
+  }
+}
+
+function abrirNovoUsuario() {
+  document.getElementById('um-titulo').textContent = 'Novo usuário';
+  document.getElementById('um-id').value = '';
+  document.getElementById('um-login').value = '';
+  document.getElementById('um-login').disabled = false;
+  document.getElementById('um-senha').value = '';
+  document.getElementById('um-senha-hint').style.display = 'none';
+  document.getElementById('um-role').value = 'usuario';
+  document.getElementById('um-erro').style.display = 'none';
+  document.getElementById('usuario-modal').style.display = 'flex';
+}
+
+function editarUsuario(u) {
+  document.getElementById('um-titulo').textContent = 'Editar usuário';
+  document.getElementById('um-id').value = u.id;
+  document.getElementById('um-login').value = u.login;
+  document.getElementById('um-login').disabled = true;
+  document.getElementById('um-senha').value = '';
+  document.getElementById('um-senha-hint').style.display = '';
+  document.getElementById('um-role').value = u.role;
+  document.getElementById('um-erro').style.display = 'none';
+  document.getElementById('usuario-modal').style.display = 'flex';
+}
+
+function fecharUsuarioModal() {
+  document.getElementById('usuario-modal').style.display = 'none';
+}
+
+async function salvarUsuario() {
+  const id    = document.getElementById('um-id').value;
+  const login = document.getElementById('um-login').value.trim();
+  const senha = document.getElementById('um-senha').value;
+  const role  = document.getElementById('um-role').value;
+  const erroEl= document.getElementById('um-erro');
+  erroEl.style.display = 'none';
+  try {
+    let r;
+    if (id) {
+      // Editar
+      const body = { role };
+      if (senha) body.senha = senha;
+      r = await fetch(`${API}/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } else {
+      // Criar
+      if (!login || !senha) throw new Error('Login e senha são obrigatórios');
+      r = await fetch(`${API}/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ login, senha, role }),
+      });
+    }
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.detail || 'Erro ao salvar');
+    }
+    fecharUsuarioModal();
+    carregarUsuarios();
+  } catch (e) {
+    erroEl.textContent = e.message;
+    erroEl.style.display = 'block';
+  }
+}
+
+async function deletarUsuario(id, nome) {
+  if (!confirm(`Excluir usuário ${nome}?`)) return;
+  const r = await fetch(`${API}/users/${id}`, { method: 'DELETE' });
+  if (r.ok) carregarUsuarios();
+  else alert('Erro ao excluir');
+}
+
+async function aprovarUsuario(id) {
+  const r = await fetch(`${API}/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ativo: true }),
+  });
+  if (r.ok) carregarUsuarios();
+  else {
+    const d = await r.json().catch(()=>({}));
+    alert(d.detail || 'Erro ao aprovar');
+  }
+}
+
+// ─────────────────────────────────────────────────────────
 let faturas = [];
+let checkState = {};   // índice real → bool (estado do checkbox entre filtros)
+let pastaDestino = '';
+
+// Mostra box de pasta apenas no localhost
+if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const box = document.getElementById('box-pasta');
+    if (box) box.style.display = 'flex';
+  });
+}
 let operacaoAtual = null;
 let poolingInterval = null;
 let operacaoStartTime = null;   // Marcado no clique em "Carregar do GW"
+let expandedFactories = new Set();   // factories com logs visíveis
+let _conclusaoScrollado = false;   // evita scroll repetido a cada polling
+
+function toggleFactoryCard(sistema) {
+  if (expandedFactories.has(sistema)) {
+    expandedFactories.delete(sistema);
+  } else {
+    expandedFactories.add(sistema);
+  }
+  const logsEl = document.getElementById('fc-logs-' + sistema);
+  const arrow  = document.getElementById('fc-arrow-' + sistema);
+  const open   = expandedFactories.has(sistema);
+  if (logsEl) { logsEl.style.display = open ? 'block' : 'none'; if (open) logsEl.scrollTop = logsEl.scrollHeight; }
+  if (arrow)  arrow.style.transform = open ? 'rotate(90deg)' : '';
+}
+
+function renderFactoryCard(sistema, fs) {
+  const isRunning = fs.status === 'executando';
+  const isOpen    = expandedFactories.has(sistema);
+
+  const borderColor = { concluido:'var(--green)', erro:'var(--red)', executando:'var(--accent)' }[fs.status] || 'var(--border)';
+  const pillClass   = { aguardando:'pill-aguardando', executando:'pill-executando', concluido:'pill-concluido', erro:'pill-erro' }[fs.status] || 'pill-aguardando';
+  const pillLabel   = { aguardando:'Aguardando', executando:'Executando', concluido:'Concluído', erro:'Erro' }[fs.status] || fs.status;
+
+  const logsHtml = renderLogLines(fs.logs || [], isRunning);
+  const hasErrors = (fs.erros || []).length > 0;
+
+  return `
+  <div class="factory-card" style="border-color:${borderColor}">
+    <div class="factory-card-header" onclick="toggleFactoryCard('${sistema}')">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span id="fc-arrow-${sistema}" style="font-size:9px;color:var(--muted);transition:transform .2s${isOpen?';transform:rotate(90deg)':''}">▶</span>
+        <span style="font-weight:600;font-size:13px">${fs.nome || sistema}</span>
+        <span class="status-pill ${pillClass}" style="font-size:11px;padding:2px 9px">${pillLabel}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${hasErrors ? `<span style="font-size:11px;color:var(--red)">${fs.erros.length} erro(s)</span>` : ''}
+        <span style="font-size:12px;font-family:monospace;color:var(--text2)">${fs.concluidas}/${fs.total}</span>
+        ${isRunning ? '<span class="log-spinner" style="width:10px;height:10px;border-width:1.5px"></span>' : ''}
+      </div>
+    </div>
+    <div class="factory-card-logs" id="fc-logs-${sistema}" style="display:${isOpen?'block':'none'}">
+      ${logsHtml || '<span style="color:var(--muted);font-size:12px">Aguardando início...</span>'}
+    </div>
+  </div>`;
+}
 
 // ── NAV ──────────────────────────────────────────────────
 function showPage(name, fromHash) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.sidebar-item').forEach(t => t.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  const tabs = {faturas:0, status:1, relatorios:2, config:3};
+  const tabs = {faturas:0, status:1, relatorios:2, config:3, usuarios:4};
   if (tabs[name] !== undefined)
-    document.querySelectorAll('.nav-tab')[tabs[name]].classList.add('active');
+    document.querySelectorAll('.sidebar-item')[tabs[name]].classList.add('active');
   if (name === 'config')    carregarConfig();
   if (name === 'relatorios') carregarRelatorios();
+  if (name === 'usuarios')  carregarUsuarios();
   location.hash = name;
 }
 
 // ── FATURAS ──────────────────────────────────────────────
+let _carregarPollId = null;
+let _carregarAtivo = false;  // flag para evitar que poll sobrescreva a lista renderizada
+
+function _renderProgressoCarregar(data) {
+  if (!_carregarAtivo) return;  // guard: só atualiza se ainda estamos carregando
+  const container = document.getElementById('faturas-container');
+  if (!container) return;
+  const logs = data.logs || [];
+  const logsHtml = logs.length
+    ? logs.map(l => `<div style="padding:2px 0">${l}</div>`).join('')
+    : '<div style="color:var(--text-muted)">Aguardando início...</div>';
+  container.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin:20px 0">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <span class="btn-spinner" style="border-top-color:var(--primary)"></span>
+        <strong style="font-size:15px">Baixando relatórios do GW...</strong>
+      </div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;max-height:280px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.7" id="log-carregar">
+        ${logsHtml}
+      </div>
+    </div>`;
+  const la = document.getElementById('log-carregar');
+  if (la) la.scrollTop = la.scrollHeight;
+}
+
+async function _pollProgressoCarregar() {
+  if (!_carregarAtivo) return;
+  try {
+    const r = await fetch(`${API}/faturas-progresso`);
+    if (!r.ok) return;
+    const data = await r.json();
+    _renderProgressoCarregar(data);
+  } catch (_) { /* ignora erros de polling */ }
+}
+
+function _pararPollingCarregar() {
+  _carregarAtivo = false;
+  if (_carregarPollId) { clearInterval(_carregarPollId); _carregarPollId = null; }
+}
+
 async function carregarFaturas() {
-  operacaoStartTime = Date.now();   // Inicia temporizador da operação completa
+  operacaoStartTime = Date.now();
   const btn = document.getElementById('btn-carregar');
   btn.disabled = true;
   btn.innerHTML = '<span class="btn-spinner"></span> Baixando...';
 
+  _carregarAtivo = true;
+  await _pollProgressoCarregar();
+  _carregarPollId = setInterval(_pollProgressoCarregar, 1000);
+
   try {
     const resp = await fetch(`${API}/faturas`);
+    // Para o polling IMEDIATAMENTE antes de renderizar — evita race com o último tick
+    _pararPollingCarregar();
     if (!resp.ok) throw new Error((await resp.json()).detail || 'Erro no servidor');
     const data = await resp.json();
     faturas = data.faturas || [];
+    checkState = {};
     renderFaturas();
     document.getElementById('btn-executar').disabled = faturas.length === 0;
   } catch(e) {
+    _pararPollingCarregar();
     alert('Erro ao carregar faturas:\n' + e.message);
   } finally {
+    _pararPollingCarregar();
     btn.disabled = false;
     btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg> Carregar do GW';
   }
@@ -597,15 +1301,36 @@ function renderFaturas() {
   const container = document.getElementById('faturas-container');
   const badge     = document.getElementById('count-badge');
 
+  // Salva estado atual dos checkboxes antes de re-renderizar
+  faturas.forEach((_, i) => {
+    const chk = document.getElementById(`chk-${i}`);
+    if (chk) checkState[i] = chk.checked;
+  });
+
   if (!faturas.length) {
     container.innerHTML = '<div class="empty-state"><span class="icon">📭</span><h3>Sem faturas para hoje</h3><p>Nenhuma fatura encontrada com emissão hoje</p></div>';
     badge.textContent = '0 faturas';
     return;
   }
 
-  badge.textContent = `${faturas.length} fatura(s)`;
+  const filtroFilial = document.getElementById('filtro-filial')?.value || '';
+  const faturasFiltradas = faturas.filter((f, i) => {
+    if (!filtroFilial) return true;
+    const isSP = f.filial?.includes('SP');
+    if (filtroFilial === 'sp') return isSP;
+    if (filtroFilial === 'matriz') return !isSP;
+    return true;
+  });
 
-  const rows = faturas.map((f, i) => {
+  badge.textContent = `${faturas.length} fatura(s)${filtroFilial ? ` — ${faturasFiltradas.length} filtrada(s)` : ''}`;
+
+  if (!faturasFiltradas.length) {
+    container.innerHTML = '<div class="empty-state"><span class="icon">🔍</span><h3>Nenhuma fatura para essa filial</h3></div>';
+    return;
+  }
+
+  const rows = faturasFiltradas.map((f, i) => {
+    const i_real = faturas.indexOf(f);
     const filialBadge = f.filial?.includes('SP')
       ? `<span class="badge badge-sp">Filial SP</span>`
       : `<span class="badge badge-matriz">Matriz</span>`;
@@ -614,23 +1339,25 @@ function renderFaturas() {
       ? `<span class="badge badge-normal">Normal</span>`
       : `<span class="badge badge-descontada">Descontada</span>`;
 
-    const sugestao = f.factory_sugerida || 'ignorar';
     const isSP = f.filial?.includes('SP');
+    // GC é o padrão — ignora firma_* que vem do backend (padrão legado)
+    const _s = f.factory_sugerida || '';
+    const sugestao = (_s && !_s.startsWith('firma_')) ? _s : (isSP ? 'gc_sp' : 'gc_matriz');
 
     const opcoesMatriz = `
+      <option value="gc_matriz"        ${sugestao==='gc_matriz'       ?'selected':''}>GC Matriz</option>
       <option value="firma_matriz"     ${sugestao==='firma_matriz'    ?'selected':''}>Firma Matriz</option>
       <option value="fluxasset_matriz" ${sugestao==='fluxasset_matriz'?'selected':''}>FluxAsset Matriz</option>
-      <option value="gc_matriz"        ${sugestao==='gc_matriz'       ?'selected':''}>GC Matriz</option>
-      <option value="ignorar">— Ignorar</option>`;
+      <option value="ignorar"          ${sugestao==='ignorar'         ?'selected':''}>— Ignorar</option>`;
     const opcoesSP = `
+      <option value="gc_sp"            ${sugestao==='gc_sp'       ?'selected':''}>GC SP</option>
       <option value="firma_sp"         ${sugestao==='firma_sp'    ?'selected':''}>Firma SP</option>
       <option value="fluxasset_sp"     ${sugestao==='fluxasset_sp'?'selected':''}>FluxAsset SP</option>
-      <option value="gc_sp"            ${sugestao==='gc_sp'       ?'selected':''}>GC SP</option>
-      <option value="ignorar">— Ignorar</option>`;
+      <option value="ignorar"          ${sugestao==='ignorar'     ?'selected':''}>— Ignorar</option>`;
 
     return `<tr>
       <td style="width:36px;padding-left:18px">
-        <input type="checkbox" id="chk-${i}" checked onchange="atualizarContador()"
+        <input type="checkbox" id="chk-${i_real}" ${checkState[i_real] !== false ? 'checked' : ''} onchange="atualizarContador()"
           style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)">
       </td>
       <td class="mono" style="color:var(--text2)">${f.numero}</td>
@@ -643,7 +1370,7 @@ function renderFaturas() {
       <td class="valor">R$ ${Number(f.valor).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
       <td>${sitBadge}</td>
       <td>
-        <select class="factory-select ${sugestao}" id="factory-${i}" onchange="updateSelectStyle(this)">
+        <select class="factory-select ${sugestao}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
           ${isSP ? opcoesSP : opcoesMatriz}
         </select>
       </td>
@@ -655,7 +1382,11 @@ function renderFaturas() {
       <table>
         <thead>
           <tr>
-            <th style="width:36px"></th>
+            <th style="width:36px;padding-left:18px">
+              <input type="checkbox" id="chk-master" title="Selecionar / desmarcar todas"
+                onchange="toggleMaster(this)"
+                style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)">
+            </th>
             <th>Nº Fatura</th>
             <th>Cliente</th>
             <th>Filial</th>
@@ -677,14 +1408,23 @@ function updateSelectStyle(sel) {
 }
 
 function selecionarTodas() {
-  document.querySelectorAll('[id^="chk-"]').forEach(c => c.checked = true);
+  // Marca apenas as visíveis (filtradas) no DOM
+  document.querySelectorAll('[id^="chk-"]').forEach(c => {
+    c.checked = true;
+    const idx = parseInt(c.id.replace('chk-', ''));
+    checkState[idx] = true;
+  });
   atualizarContador();
 }
 
 function atualizarContador() {
+  _syncMaster();
   const selecionadas = document.querySelectorAll('[id^="chk-"]:checked').length;
+  const filtro = document.getElementById('filtro-filial')?.value || '';
+  const visiveis = document.querySelectorAll('[id^="chk-"]').length;
+  const label = filtro ? `${faturas.length} fatura(s) — ${visiveis} filtrada(s)` : `${faturas.length} fatura(s)`;
   document.getElementById('count-badge').textContent =
-    `${faturas.length} fatura(s) — ${selecionadas} selecionada(s)`;
+    selecionadas > 0 ? `${label} — ${selecionadas} selecionada(s)` : label;
   const btnExcluir = document.getElementById('btn-excluir');
   if (btnExcluir) btnExcluir.disabled = selecionadas === 0;
 }
@@ -699,12 +1439,29 @@ function excluirSelecionadas() {
   document.getElementById('btn-executar').disabled = faturas.length === 0;
 }
 
+async function cancelarAutomacao() {
+  if (!operacaoAtual) return;
+  const confirmar = confirm('Tem certeza que deseja cancelar a automação em andamento?\n\nAs faturas já digitadas serão mantidas.');
+  if (!confirmar) return;
+  try {
+    await fetch(`${API}/cancelar/${operacaoAtual}`, { method: 'POST' });
+  } catch (e) { /* ignora erro de rede */ }
+}
+
 async function executarAutomacao() {
+  const filtroFilial = document.getElementById('filtro-filial')?.value || '';
+
   const selecionadas = [];
   faturas.forEach((f, i) => {
-    const chk     = document.getElementById(`chk-${i}`);
+    // Aplica filtro de filial: se houver filtro ativo, ignora faturas fora dele
+    if (filtroFilial) {
+      const isSP = f.filial?.includes('SP');
+      if (filtroFilial === 'sp' && !isSP) return;
+      if (filtroFilial === 'matriz' && isSP) return;
+    }
+    const chk    = document.getElementById(`chk-${i}`);
     const factory = document.getElementById(`factory-${i}`);
-    if (chk?.checked) selecionadas.push({ numero: f.numero, factory: factory?.value || 'ignorar' });
+    if (chk?.checked) selecionadas.push({ numero: f.numero, factory: factory?.value || f.factory_sugerida || 'ignorar' });
   });
 
   if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
@@ -715,12 +1472,13 @@ async function executarAutomacao() {
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ faturas: selecionadas }),
+    body: JSON.stringify({ faturas: selecionadas, pasta_destino: pastaDestino || null, inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null }),
   });
 
   const data = await resp.json();
   operacaoAtual = data.operacao_id;
-  document.querySelectorAll('.nav-tab')[1].click();
+  _conclusaoScrollado = false;
+  showPage('status');
   iniciarPolling();
 }
 
@@ -732,13 +1490,15 @@ function iniciarPolling() {
 
 async function atualizarStatus() {
   if (!operacaoAtual) return;
-  const resp = await fetch(`${API}/status/${operacaoAtual}`);
-  const s = await resp.json();
-  renderStatus(s);
-  if (['concluido', 'erro'].includes(s.status)) clearInterval(poolingInterval);
-  // Mantém polling durante salvamento de documentos
-  if (s.status === 'salvando_documentos' && !poolingInterval) {
-    poolingInterval = setInterval(pollStatus, 1500);
+  try {
+    const resp = await fetch(`${API}/status/${operacaoAtual}`);
+    if (!resp.ok) return; // erro de rede — mantém polling
+    const s = await resp.json();
+    renderStatus(s);
+    const terminal = ['concluido', 'concluido_com_erros', 'erro', 'cancelado'];
+    if (terminal.includes(s.status)) clearInterval(poolingInterval);
+  } catch (e) {
+    // falha de rede temporária — mantém polling
   }
 }
 
@@ -807,75 +1567,113 @@ function renderStatus(s) {
   const pct = s.total > 0 ? Math.round((s.concluidas / s.total) * 100) : 0;
 
   const pillClass = {
-    iniciando:             'pill-aguardando',
-    executando:            'pill-executando',
-    aguardando_confirmacao:'pill-aguardando',
-    finalizando:           'pill-executando',
-    salvando_documentos:   'pill-executando',
-    concluido:             'pill-concluido',
-    erro:                  'pill-erro',
+    iniciando:'pill-aguardando', executando:'pill-executando',
+    salvando_documentos:'pill-executando', concluido:'pill-concluido',
+    concluido_com_erros:'pill-erro', erro:'pill-erro', cancelado:'pill-erro',
   }[s.status] || 'pill-aguardando';
 
   const labels = {
-    iniciando:             'Iniciando...',
-    executando:            'Executando',
-    aguardando_confirmacao:'Aguardando confirmação',
-    finalizando:           'Finalizando...',
-    salvando_documentos:   'Salvando documentos...',
-    concluido:             'Concluído',
-    erro:                  'Erro',
+    iniciando:'Iniciando...', executando:'Executando',
+    salvando_documentos:'Salvando documentos...', concluido:'Concluído',
+    concluido_com_erros:'Concluído c/ erros', erro:'Erro', cancelado:'Cancelado',
   };
 
-  const isRunning = ['iniciando','executando','finalizando','salvando_documentos'].includes(s.status);
-  const logs = renderLogLines(s.logs || [], isRunning);
+  const isRunning = ['iniciando','executando','salvando_documentos'].includes(s.status);
 
-  // Caixa de conclusão — aparece quando status é "concluido"
+  // Auto-expande factories em execução ou com erro
+  Object.entries(s.factories || {}).forEach(([sistema, fs]) => {
+    if (fs.status === 'executando' || fs.status === 'erro') expandedFactories.add(sistema);
+  });
+
+  // Cards por factory
+  const factories = s.factories || {};
+  const factoryCards = Object.entries(factories).map(([sis, fs]) => renderFactoryCard(sis, fs)).join('');
+
+  // Logs globais (salvamento de docs, mensagem final) — só mostra quando há factory cards
+  // (se não há cards, o fallback já exibe s.logs; evita duplicação)
+  const temFactoryCards = Object.keys(factories).length > 0;
+  const globalLogs = temFactoryCards ? (s.logs || []) : [];
+  const globalLogsHtml = globalLogs.length ? `
+    <div style="margin-top:12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;max-height:120px;overflow-y:auto;font-family:monospace;font-size:12px;line-height:1.7" id="log-area">
+      ${renderLogLines(globalLogs, isRunning && s.status === 'salvando_documentos')}
+    </div>` : '';
+
+  // Caixa de conclusão — aparece no TOPO e faz scroll automático (uma vez só)
   const tempoTotal = operacaoStartTime ? _formatarTempo(Date.now() - operacaoStartTime) : null;
-  const confirmBox = s.status === 'concluido' ? `
-    <div style="background:linear-gradient(135deg,#F0FDF4,#EFF6FF);border:1px solid #86EFAC;border-radius:12px;padding:28px;text-align:center;margin-top:20px">
-      <div style="font-size:36px;margin-bottom:12px">✅</div>
-      <h3 style="font-size:18px;font-weight:700;margin-bottom:8px;color:var(--text)">Digitação concluída!</h3>
-      ${tempoTotal ? `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:4px 14px;font-size:12px;color:var(--text2);margin-bottom:14px">⏱ Tempo total: <strong style="color:var(--text)">${tempoTotal}</strong></div>` : ''}
-      <p style="color:var(--text2);font-size:14px;margin-bottom:20px;max-width:480px;margin-left:auto;margin-right:auto">
+  const isConcluido = ['concluido','concluido_com_erros'].includes(s.status);
+  const isCancelado = s.status === 'cancelado';
+  if ((isConcluido || isCancelado) && !_conclusaoScrollado) {
+    _conclusaoScrollado = true;
+    setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 80);
+  }
+
+  const cancelBox = isCancelado ? `
+    <div style="background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);border:1px solid rgba(239,68,68,0.25);border-radius:14px;padding:32px 28px;text-align:center;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 8px 32px rgba(0,0,0,.4),0 0 40px rgba(239,68,68,0.04);position:relative;overflow:hidden">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--red);border-radius:14px 0 0 14px"></div>
+      <div style="width:48px;height:48px;border-radius:12px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#EF4444" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </div>
+      <h3 style="font-size:17px;font-weight:700;margin-bottom:8px;color:var(--text)">Operação cancelada</h3>
+      ${tempoTotal ? `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 14px;font-size:12px;color:var(--text2);margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Tempo decorrido: <strong style="color:var(--text)">${tempoTotal}</strong></div>` : ''}
+      <p style="color:var(--text2);font-size:13px;max-width:440px;margin:0 auto">
+        A automação foi interrompida. As faturas já digitadas até este ponto foram mantidas.
+      </p>
+    </div>` : '';
+
+  const temErros = s.status === 'concluido_com_erros';
+  const confirmBox = isConcluido ? `
+    <div style="background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);border:1px solid ${temErros ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.25)'};border-radius:14px;padding:32px 28px;text-align:center;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 8px 32px rgba(0,0,0,.4),0 0 40px ${temErros ? 'rgba(245,158,11,0.04)' : 'rgba(16,185,129,0.04)'};position:relative;overflow:hidden">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${temErros ? 'var(--yellow)' : 'var(--green)'};border-radius:14px 0 0 14px"></div>
+      <div style="width:48px;height:48px;border-radius:12px;background:${temErros ? 'rgba(245,158,11,0.12)' : 'rgba(16,185,129,0.12)'};border:1px solid ${temErros ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.25)'};display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px">
+        ${temErros
+          ? `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+          : `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>`}
+      </div>
+      <h3 style="font-size:17px;font-weight:700;margin-bottom:8px;color:var(--text)">${temErros ? 'Concluído com erros' : 'Digitação concluída!'}</h3>
+      ${tempoTotal ? `<div style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 14px;font-size:12px;color:var(--text2);margin-bottom:12px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Tempo total: <strong style="color:var(--text)">${tempoTotal}</strong></div>` : ''}
+      <p style="color:var(--text2);font-size:13px;margin-bottom:20px;max-width:480px;margin-left:auto;margin-right:auto">
         Por questão de segurança, acesse manualmente os sites das factories para
-        <strong>definir a conta corrente</strong> e <strong>encaminhar a operação</strong>.
+        <strong style="color:var(--text)">definir a conta corrente</strong> e <strong style="color:var(--text)">encaminhar a operação</strong>.
       </p>
       ${_renderResumo(s.resumo || [])}
       ${_renderResumoDocumentos(s.resumo_documentos, operacaoAtual)}
-      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:20px">
-        <a href="https://intrafac777.firmasa.com/Factadebentures/login" target="_blank" class="btn btn-primary">
-          Abrir Firma Capital
-        </a>
-        <a href="https://portal.fluxasset.com.br/Factaconsult/login" target="_blank" class="btn btn-ghost">
-          Abrir FluxAsset
-        </a>
-        <a href="http://gcrecursos.dyndns.org:9000/FactaConsult/login" target="_blank" class="btn btn-ghost">
-          Abrir GC Recursos
-        </a>
-      </div>
+      ${_renderBotoesAcesso(s.resumo || [])}
     </div>` : '';
 
-  // Sem box manual — documentos são baixados automaticamente se pasta_destino foi informada
-
   container.innerHTML = `
+    ${cancelBox}
+    ${confirmBox}
     <div class="card">
       <div class="status-header">
         <div class="status-title">Operação ${operacaoAtual}</div>
-        <div class="status-pill ${pillClass}">${labels[s.status] || s.status}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="status-pill ${pillClass}">${labels[s.status] || s.status}</div>
+          ${isRunning ? `<button class="btn" onclick="cancelarAutomacao()" style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);color:#EF4444;font-size:12px;padding:5px 14px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .2s" onmouseover="this.style.background='rgba(239,68,68,0.22)'" onmouseout="this.style.background='rgba(239,68,68,0.12)'">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Cancelar
+          </button>` : ''}
+        </div>
       </div>
-      <div style="display:flex;gap:20px;margin-bottom:14px;font-size:13px;color:var(--text2)">
+      <div style="display:flex;gap:20px;margin-bottom:12px;font-size:13px;color:var(--text2)">
         <span>Progresso: <strong style="color:var(--text)">${s.concluidas}/${s.total}</strong></span>
         ${s.erros?.length ? `<span style="color:var(--red)">Erros: ${s.erros.length}</span>` : ''}
       </div>
-      <div class="progress-bar" style="margin-bottom:16px">
+      <div class="progress-bar" style="margin-bottom:14px">
         <div class="progress-fill" style="width:${pct}%"></div>
       </div>
-      <div class="log-area" id="log-area">${logs}</div>
-    </div>
-    ${confirmBox}`;
+      ${factoryCards || `<div class="log-area" id="log-area">${renderLogLines(s.logs||[], isRunning)}</div>`}
+      ${globalLogsHtml}
+    </div>`;
 
-  const logArea = document.getElementById('log-area');
-  if (logArea) logArea.scrollTop = logArea.scrollHeight;
+  // Auto-scroll logs expandidos
+  Object.keys(factories).forEach(sistema => {
+    if (expandedFactories.has(sistema)) {
+      const el = document.getElementById('fc-logs-' + sistema);
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  });
+  const ga = document.getElementById('log-area');
+  if (ga) ga.scrollTop = ga.scrollHeight;
 }
 
 function _renderResumo(resumo) {
@@ -932,8 +1730,8 @@ function _renderResumoDocumentos(rd, opId) {
   const linhas = Object.entries(rd).map(([sistema, info]) => {
     const nome = info.nome || sistema;
 
-    // Boleto
-    const b = info.boleto;
+    // Fatura PDF
+    const b = info.fatura_pdf;
     let boletoCell = '—';
     if (b) {
       if (b.ok) {
@@ -992,7 +1790,7 @@ function _renderResumoDocumentos(rd, opId) {
         <thead>
           <tr style="background:var(--surface2);border-bottom:1px solid var(--border)">
             <th style="padding:9px 16px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Factory</th>
-            <th style="padding:9px 16px;text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Boleto PDF</th>
+            <th style="padding:9px 16px;text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">Fatura PDF</th>
             <th style="padding:9px 16px;text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">CTes PDF</th>
             <th style="padding:9px 16px;text-align:center;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600">ZIP</th>
           </tr>
@@ -1003,58 +1801,303 @@ function _renderResumoDocumentos(rd, opId) {
     </div>`;
 }
 
+// URLs padrão (fallback se não configurado manualmente)
+const _URL_PADRAO = {
+  firma_matriz: 'https://intrafac777.firmasa.com/Factadebentures/login',
+  firma_sp:     'https://intrafac777.firmasa.com/Factadebentures/login',
+  fluxasset_matriz: 'https://portal.fluxasset.com.br/Factaconsult/login',
+  fluxasset_sp:     'https://portal.fluxasset.com.br/Factaconsult/login',
+  gc_matriz: 'http://gcrecursos.dyndns.org:9000/FactaConsult/login',
+  gc_sp:     'http://gcrecursos.dyndns.org:9000/FactaConsult/login',
+};
+
+// Grupos de factories para exibir botões únicos na conclusão
+const _GRUPOS_FACTORY = [
+  { label: 'Firma Capital',  ids: ['firma_matriz','firma_sp'] },
+  { label: 'FluxAsset',      ids: ['fluxasset_matriz','fluxasset_sp'] },
+  { label: 'GC Recursos',    ids: ['gc_matriz','gc_sp'] },
+];
+
+let _credsCache = {};   // carregado junto com config
+
+function _renderBotoesAcesso(resumo) {
+  // Factories que participaram desta operação
+  const ativas = new Set((resumo || []).map(r => {
+    const nome = r.factory?.toLowerCase() || '';
+    if (nome.includes('firma'))     return nome.includes('sp') ? 'firma_sp'     : 'firma_matriz';
+    if (nome.includes('flux'))      return nome.includes('sp') ? 'fluxasset_sp' : 'fluxasset_matriz';
+    if (nome.includes('gc'))        return nome.includes('sp') ? 'gc_sp'        : 'gc_matriz';
+    return null;
+  }).filter(Boolean));
+
+  if (!ativas.size) return '';
+
+  const btns = _GRUPOS_FACTORY
+    .filter(g => g.ids.some(id => ativas.has(id)))
+    .map((g, i) => {
+      const id  = g.ids.find(x => ativas.has(x)) || g.ids[0];
+      const url = (_credsCache[id]?.url) || _URL_PADRAO[id] || '#';
+      const cls = i === 0 ? 'btn btn-primary' : 'btn btn-ghost';
+      return `<a href="${url}" target="_blank" class="${cls}">Abrir ${g.label}</a>`;
+    });
+
+  return `<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:20px">${btns.join('')}</div>`;
+}
+
 // Finalização é feita manualmente pelo usuário nos sites das factories
 
 
 // ── CONFIG ───────────────────────────────────────────────
 const sistemas = [
-  { id: 'gw',             nome: 'GW Webtrans',            icone: '🖥️' },
-  { id: 'firma_matriz',   nome: 'Firma Capital — Matriz',  icone: '🏢' },
-  { id: 'firma_sp',       nome: 'Firma Capital — SP',      icone: '🏙️' },
-  { id: 'fluxasset_matriz',nome:'FluxAsset — Matriz',      icone: '💼' },
-  { id: 'fluxasset_sp',   nome: 'FluxAsset — SP',          icone: '💼' },
-  { id: 'gc_matriz',      nome: 'GC Recursos — Matriz',    icone: '🏦' },
-  { id: 'gc_sp',          nome: 'GC Recursos — SP',        icone: '🏦' },
+  { id: 'gw',              nome: 'GW Webtrans',             icone: '🖥️' },
+  { id: 'firma_matriz',    nome: 'Firma Capital — Matriz',  icone: '🏢' },
+  { id: 'firma_sp',        nome: 'Firma Capital — SP',      icone: '🏙️' },
+  { id: 'fluxasset_matriz',nome: 'FluxAsset — Matriz',      icone: '💼' },
+  { id: 'fluxasset_sp',    nome: 'FluxAsset — SP',          icone: '💼' },
+  { id: 'gc_matriz',       nome: 'GC Recursos — Matriz',    icone: '🏦' },
+  { id: 'gc_sp',           nome: 'GC Recursos — SP',        icone: '🏦' },
 ];
 
-async function carregarConfig() {
-  const resp  = await fetch(`${API}/credenciais`);
-  const creds = await resp.json();
+let expandedCredencial = null;
+let _mostrandoFormFactory = false;
+let _factoriesExtras = [];
 
-  document.getElementById('config-grid').innerHTML = sistemas.map(s => {
-    const cfg = creds[s.id] || {};
+async function carregarConfig() {
+  const [respCreds, respExtras] = await Promise.all([
+    fetch(`${API}/credenciais`),
+    fetch(`${API}/factories-extras`),
+  ]);
+  const creds  = await respCreds.json();
+  const extras = await respExtras.json();
+  _factoriesExtras = extras.factories || [];
+  _credsCache = creds;
+  renderConfig(creds);
+}
+
+function renderConfig(creds) {
+  const container = document.getElementById('config-container');
+
+  const gw        = sistemas.find(s => s.id === 'gw');
+  const factories = sistemas.filter(s => s.id !== 'gw');
+
+  function buildSection(label, lista) {
+    const rows = lista.map((s, i) => _renderCredRow(s, creds[s.id] || {}, i < lista.length - 1)).join('');
     return `
-    <div class="card config-card">
-      <h3>
-        <div class="config-dot ${cfg.configurado ? 'ok' : ''}"></div>
-        ${s.icone} ${s.nome}
-      </h3>
-      <div class="field">
-        <label>Usuário</label>
-        <input type="text" id="usr-${s.id}" value="${cfg.usuario || ''}" placeholder="Digite o usuário">
+      <div style="margin-bottom:28px">
+        <div class="cred-section-label">${label}</div>
+        <div class="cred-card">${rows}</div>
+      </div>`;
+  }
+
+  // Renderiza factories cadastradas pendentes de automatização
+  const extrasHtml = _factoriesExtras.length ? _factoriesExtras.map((f, i) => {
+    const temCred = !!(f.usuario && f.senha);
+    const credBadge = temCred
+      ? `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--green)"><span style="width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0"></span>Login configurado</span>`
+      : `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:var(--border2);flex-shrink:0"></span>Sem login</span>`;
+    return `
+    <div id="extra-row-${f.id}">
+      <div class="cred-row-header">
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${f.icone}</span>
+          <div>
+            <div style="font-weight:600;font-size:14px;color:var(--text)">${f.nome}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">${f.url || 'Sem link cadastrado'}</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+          ${credBadge}
+          <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;padding:3px 10px;border-radius:20px">
+            🔄 Pendente de automatização
+          </span>
+          ${f.url ? `<a href="${f.url}" target="_blank" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">Abrir</a>` : ''}
+          <button class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--red)" onclick="removerFactoryExtra('${f.id}')">Remover</button>
+        </div>
       </div>
-      <div class="field">
-        <label>Senha</label>
-        <input type="password" id="pwd-${s.id}" placeholder="${cfg.configurado ? '••••••••' : 'Digite a senha'}">
-      </div>
-      <button class="btn btn-primary" style="width:100%;margin-top:4px;justify-content:center" onclick="salvarCredencial('${s.id}')">
-        Salvar credenciais
-      </button>
+      ${i < _factoriesExtras.length - 1 ? '<div class="cred-divider"></div>' : ''}
     </div>`;
-  }).join('');
+  }).join('') : `<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">Nenhuma factory extra cadastrada</div>`;
+
+  // Formulário de nova factory
+  const formNovaFactory = _mostrandoFormFactory ? `
+    <div style="padding:18px;background:var(--surface2);border-top:1px solid var(--border)">
+      <div style="display:grid;grid-template-columns:1fr 1fr 80px;gap:12px;margin-bottom:12px">
+        <div class="field" style="margin:0">
+          <label>Nome da Factory</label>
+          <input type="text" id="nova-factory-nome" placeholder="Ex: Nova Capital — SP">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Link do site de acesso</label>
+          <input type="url" id="nova-factory-url" placeholder="https://...">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Ícone</label>
+          <input type="text" id="nova-factory-icone" placeholder="🏭" value="🏭" style="text-align:center;font-size:18px">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="field" style="margin:0">
+          <label>Usuário / Login</label>
+          <input type="text" id="nova-factory-usuario" placeholder="Ex: usuario@empresa.com" autocomplete="off">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Senha</label>
+          <input type="password" id="nova-factory-senha" placeholder="Senha de acesso" autocomplete="new-password">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="font-size:13px;padding:8px 20px" onclick="salvarNovaFactory()">Salvar factory</button>
+        <button class="btn btn-ghost"   style="font-size:13px;padding:8px 16px" onclick="_mostrandoFormFactory=false;renderConfig(window._ultimoCreds||{})">Cancelar</button>
+      </div>
+    </div>` : '';
+
+  window._ultimoCreds = creds;
+
+  container.innerHTML = `
+    <h2 style="font-size:22px;font-weight:700;margin-bottom:28px;color:var(--text)">Configurações</h2>
+    ${buildSection('Sistema', [gw])}
+    ${buildSection('Factories automatizadas', factories)}
+    <div style="margin-bottom:28px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="cred-section-label" style="margin:0">Factories pendentes de automatização</div>
+        <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px;gap:6px;display:inline-flex;align-items:center" onclick="_mostrandoFormFactory=!_mostrandoFormFactory;renderConfig(window._ultimoCreds||{})">
+          ${_mostrandoFormFactory ? '✕ Cancelar' : '＋ Adicionar factory'}
+        </button>
+      </div>
+      <div class="cred-card" style="overflow:hidden">
+        ${extrasHtml}
+        ${formNovaFactory}
+      </div>
+    </div>`;
+}
+
+async function salvarNovaFactory() {
+  const nome    = document.getElementById('nova-factory-nome')?.value?.trim();
+  const url     = document.getElementById('nova-factory-url')?.value?.trim();
+  const icone   = document.getElementById('nova-factory-icone')?.value?.trim() || '🏭';
+  const usuario = document.getElementById('nova-factory-usuario')?.value?.trim() || '';
+  const senha   = document.getElementById('nova-factory-senha')?.value || '';
+  if (!nome) { alert('Informe o nome da factory'); return; }
+  const btn = document.querySelector('#nova-factory-nome')?.closest('div')?.parentElement?.parentElement?.querySelector('.btn-primary');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Salvando...'; }
+  await fetch(`${API}/factories-extras`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nome, url, icone, usuario, senha }),
+  });
+  _mostrandoFormFactory = false;
+  carregarConfig();
+}
+
+async function removerFactoryExtra(id) {
+  if (!confirm('Remover esta factory?')) return;
+  await fetch(`${API}/factories-extras/${id}`, { method: 'DELETE' });
+  carregarConfig();
+}
+
+function _renderCredRow(s, cfg, hasDivider) {
+  const isExpanded   = expandedCredencial === s.id;
+  const isConfigured = !!cfg.configurado;
+  const usuario      = cfg.usuario || '';
+
+  const statusDot = isConfigured
+    ? `<span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--green)"><span style="width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0"></span>Configurado</span>`
+    : `<span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:var(--border2);flex-shrink:0"></span>Não configurado</span>`;
+
+  const editSVG   = `<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const cancelSVG = `<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+
+  const editBtn = `
+    <button class="cred-edit-btn" onclick="toggleCredencial('${s.id}')">
+      ${isExpanded ? cancelSVG + ' Cancelar' : editSVG + ' Editar'}
+    </button>`;
+
+  const urlAtual = cfg.url || '';
+  const form = isExpanded ? `
+    <div class="cred-form">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <div class="field" style="margin:0">
+          <label>Usuário</label>
+          <input type="text" id="usr-${s.id}" value="${usuario}" placeholder="Digite o usuário">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Senha</label>
+          <div style="position:relative">
+            <input type="password" id="pwd-${s.id}" placeholder="${isConfigured ? '••••••••' : 'Digite a senha'}"
+              style="padding-right:38px">
+            <button type="button" onclick="toggleSenha('${s.id}')" title="Mostrar/ocultar senha"
+              style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;line-height:1;padding:0">
+              👁
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="field" style="margin:0 0 14px">
+        <label>Link do site de acesso</label>
+        <input type="url" id="url-${s.id}" value="${urlAtual}" placeholder="https://...">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="font-size:13px;padding:8px 20px" onclick="salvarCredencial('${s.id}')">Salvar</button>
+        <button class="btn btn-ghost"   style="font-size:13px;padding:8px 16px" onclick="toggleCredencial('${s.id}')">Cancelar</button>
+      </div>
+    </div>` : '';
+
+  const urlAtualRow = cfg.url || '';
+  const linkBtn = urlAtualRow
+    ? `<a href="${urlAtualRow}" target="_blank" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">Abrir site</a>`
+    : '';
+
+  return `
+    <div id="cred-row-${s.id}">
+      <div class="cred-row-header">
+        <div style="display:flex;align-items:center;gap:14px">
+          <span style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${s.icone}</span>
+          <div>
+            <div style="font-weight:600;font-size:14px;color:var(--text)">${s.nome}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px">
+              ${urlAtualRow
+                ? `<a href="${urlAtualRow}" target="_blank" style="color:var(--accent);text-decoration:none">${urlAtualRow}</a>`
+                : (usuario || 'Nenhum usuário cadastrado')}
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+          ${statusDot}
+          ${linkBtn}
+          ${editBtn}
+        </div>
+      </div>
+      ${form}
+      ${hasDivider ? '<div class="cred-divider"></div>' : ''}
+    </div>`;
+}
+
+function toggleCredencial(id) {
+  expandedCredencial = expandedCredencial === id ? null : id;
+  carregarConfig();
+}
+
+function toggleSenha(id) {
+  const inp = document.getElementById('pwd-' + id);
+  if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
 async function salvarCredencial(sistema) {
-  const usuario = document.getElementById(`usr-${sistema}`).value;
-  const senha   = document.getElementById(`pwd-${sistema}`).value;
+  const usuario = document.getElementById(`usr-${sistema}`)?.value?.trim();
+  const senha   = document.getElementById(`pwd-${sistema}`)?.value;
+  const url     = document.getElementById(`url-${sistema}`)?.value?.trim() || '';
   if (!usuario) { alert('Informe o usuário'); return; }
   if (!senha)   { alert('Informe a senha');   return; }
+
+  const btn = document.querySelector(`#cred-row-${sistema} .btn-primary`);
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Salvando...'; }
 
   await fetch(`${API}/credenciais`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sistema, usuario, senha }),
+    body: JSON.stringify({ sistema, usuario, senha, url }),
   });
+  expandedCredencial = null;
   carregarConfig();
 }
 
@@ -1082,6 +2125,51 @@ function _fmtDt(iso) {
 }
 function _fmtVal(v) { return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
 
+async function selecionarPasta() {
+  try {
+    const resp = await fetch(`${API}/selecionar-pasta`);
+    const data = await resp.json();
+    if (data.pasta) {
+      pastaDestino = data.pasta;
+      document.getElementById('input-pasta').value = pastaDestino;
+    }
+  } catch(e) {
+    alert('Erro ao abrir seletor de pasta: ' + e.message);
+  }
+}
+
+function limparPasta() {
+  pastaDestino = '';
+  document.getElementById('input-pasta').value = '';
+}
+
+function toggleMaster(master) {
+  document.querySelectorAll('[id^="chk-"]').forEach(c => {
+    c.checked = master.checked;
+    const idx = parseInt(c.id.replace('chk-', ''));
+    checkState[idx] = master.checked;
+  });
+  atualizarContador();
+}
+
+function _syncMaster() {
+  const todos = document.querySelectorAll('[id^="chk-"]');
+  const master = document.getElementById('chk-master');
+  if (!master || !todos.length) return;
+  const marcados = [...todos].filter(c => c.checked).length;
+  master.checked = marcados === todos.length;
+  master.indeterminate = marcados > 0 && marcados < todos.length;
+}
+
+function toggleExp(expandId, row) {
+  const exp = document.getElementById(expandId);
+  if (!exp) return;
+  const aberto = exp.style.display !== 'none';
+  exp.style.display = aberto ? 'none' : 'table-row';
+  const arr = row.querySelector('[id^="arr-"]');
+  if (arr) arr.style.transform = aberto ? '' : 'rotate(90deg)';
+}
+
 function renderRelatorios(historico) {
   const container = document.getElementById('relatorios-container');
   if (!historico.length) {
@@ -1103,13 +2191,24 @@ function renderRelatorios(historico) {
     fat_por_min = (total_fat/dur_tot*60).toFixed(1);
   }
 
+  const _svgOps   = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>`;
+  const _svgDoc   = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`;
+  const _svgGoal  = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`;
+  const _svgMoney = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>`;
+  const _svgClock = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+  const _svgBolt  = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`;
+
+  const taxaCor = taxa >= 90 ? 'var(--green)' : 'var(--yellow)';
+  const taxaBg  = taxa >= 90 ? 'var(--green-s)' : 'var(--yellow-s)';
+
+  // [label, valor, svg, cor-valor, cor-bg-icone, cor-icone]
   const kpis = [
-    ['Total de Operações', total_ops,        '🔄', 'var(--accent)'],
-    ['Faturas Processadas', total_fat,       '📄', 'var(--green)'],
-    ['Taxa de Sucesso',     taxa+'%',         '🎯', taxa>=90?'var(--green)':'var(--yellow)'],
-    ['Valor Total',         _fmtVal(total_valor),'💰','var(--green)'],
-    ['Duração Média',       _fmtDur(dur_media),'⏱','var(--accent)'],
-    ['Faturas/min',         fat_por_min||'—', '⚡','var(--yellow)'],
+    ['Total de Operações',  total_ops,           _svgOps,   'var(--accent)',  'var(--accent-s)', 'var(--accent)'],
+    ['Faturas Processadas', total_fat,            _svgDoc,   'var(--green)',   'var(--green-s)',  'var(--green)'],
+    ['Taxa de Sucesso',     taxa+'%',             _svgGoal,  taxaCor,          taxaBg,            taxaCor],
+    ['Valor Total',         _fmtVal(total_valor), _svgMoney, 'var(--green)',   'var(--green-s)',  'var(--green)'],
+    ['Duração Média',       _fmtDur(dur_media),   _svgClock, 'var(--accent)',  'var(--accent-s)', 'var(--accent)'],
+    ['Faturas / min',       fat_por_min||'—',     _svgBolt,  'var(--yellow)',  'var(--yellow-s)', 'var(--yellow)'],
   ];
 
   const facNomes = {
@@ -1137,13 +2236,44 @@ function renderRelatorios(historico) {
       <td style="padding:9px 14px;text-align:right;font-family:monospace;color:var(--green)">${_fmtVal(d.valor)}</td>
     </tr>`).join('');
 
-  const linhasHist = [...historico].reverse().map(op => {
+  const linhasHist = [...historico].reverse().map((op, idx) => {
     const ok  = op.status_final === 'concluido';
     const fatStr = op.erros>0
       ? `${op.concluidas} <span style="color:var(--red);font-size:11px">(${op.erros} erro${op.erros>1?'s':''})</span>`
       : `${op.concluidas}`;
-    return `<tr>
-      <td style="padding:9px 14px;font-family:monospace;font-size:12px;color:var(--text2)">${op.op_id}</td>
+    const titulos = op.titulos || [];
+    const temTitulos = titulos.length > 0;
+    const expandId = `exp-${idx}`;
+
+    const linhasTitulos = titulos.map(t => `
+      <tr style="border-top:1px solid var(--border)">
+        <td style="padding:7px 12px;font-family:monospace;font-size:12px;color:var(--text2)">${t.numero}</td>
+        <td style="padding:7px 12px;font-size:12px">${t.cliente}</td>
+        <td style="padding:7px 12px;font-size:11px;color:var(--text2)">${t.filial||''}</td>
+        <td style="padding:7px 12px;font-family:monospace;font-size:12px;color:var(--green);text-align:right">${_fmtVal(t.valor)}</td>
+        <td style="padding:7px 12px;font-size:11px;color:var(--muted)">${t.factory||''}</td>
+      </tr>`).join('');
+
+    const expandRow = temTitulos ? `
+      <tr id="${expandId}" style="display:none;background:var(--surface2)">
+        <td colspan="7" style="padding:0 0 0 40px">
+          <table style="width:100%;border-collapse:collapse;margin:6px 0">
+            <thead><tr style="background:var(--surface)">
+              <th style="padding:6px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:left">Nº Fatura</th>
+              <th style="padding:6px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:left">Cliente</th>
+              <th style="padding:6px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:left">Filial</th>
+              <th style="padding:6px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:right">Valor</th>
+              <th style="padding:6px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:600;text-align:left">Factory</th>
+            </tr></thead>
+            <tbody>${linhasTitulos}</tbody>
+          </table>
+        </td>
+      </tr>` : '';
+
+    return `<tr style="cursor:${temTitulos?'pointer':'default'}" onclick="${temTitulos?`toggleExp('${expandId}',this)`:''}" title="${temTitulos?'Clique para ver os títulos':''}">
+      <td style="padding:9px 14px;font-family:monospace;font-size:12px;color:var(--text2)">
+        ${temTitulos?`<span id="arr-${idx}" style="display:inline-block;margin-right:6px;transition:transform .2s;font-size:10px">▶</span>`:''}${op.op_id}
+      </td>
       <td style="padding:9px 14px;font-size:12px;color:var(--text2)">${_fmtDt(op.data)}</td>
       <td style="padding:9px 14px;text-align:center">${fatStr}</td>
       <td style="padding:9px 14px;text-align:right;font-family:monospace;color:var(--green)">${_fmtVal(op.valor_total)}</td>
@@ -1153,18 +2283,20 @@ function renderRelatorios(historico) {
           ? `<span style="background:var(--green-s);color:var(--green);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Concluído</span>`
           : `<span style="background:var(--red-s);color:var(--red);padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600">Erro</span>`}
       </td>
-    </tr>`;
+    </tr>${expandRow}`;
   }).join('');
 
   const thStyle = 'padding:9px 14px;text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;font-weight:600;border-bottom:1px solid var(--border)';
 
   container.innerHTML = `
     <div class="kpi-grid">
-      ${kpis.map(([lbl,val,icon,cor]) => `
-        <div class="kpi-card">
-          <span class="kpi-icon">${icon}</span>
-          <div class="kpi-val" style="color:${cor}">${val}</div>
-          <div class="kpi-lbl">${lbl}</div>
+      ${kpis.map(([lbl,val,svg,corVal,corBg,corIcon]) => `
+        <div class="kpi-card" style="--kpi-accent:${corVal}">
+          <div class="kpi-card-header">
+            <div class="kpi-lbl">${lbl}</div>
+            <div class="kpi-icon-box" style="background:${corBg};color:${corIcon}">${svg}</div>
+          </div>
+          <div class="kpi-val" style="color:${corVal}">${val}</div>
         </div>`).join('')}
     </div>
 

@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.claude/
+node_modules/
+*.log
+/tmp/
+.vscode/
+.idea/
+*.db
+*.sqlite

@@ -4,7 +4,7 @@ import io
 import re
 import traceback
 from datetime import datetime
-from urllib.parse import quote
+from pathlib import Path
 from playwright.async_api import async_playwright, Page, BrowserContext
 from config_manager import get_credencial
 
@@ -57,67 +57,37 @@ _FILIAL_CTE = {
 async def _login_gw(page: Page):
     creds = get_credencial("gw")
     await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
-    await page.wait_for_timeout(1500)
+    # Aguarda campos de login renderizarem (mais confiável que timeout fixo)
+    await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
     await page.locator('input[name="login"]').fill(creds["usuario"])
     await page.locator('input[name="senha"]').fill(creds["senha"])
     await page.locator('button.button-login').click()
-    await page.wait_for_url(f"{BASE_GW}/home", timeout=15000)
-    await page.wait_for_load_state("networkidle", timeout=15000)
+    # Aguarda redirect para fora do login — sai tão logo a URL muda
+    try:
+        await page.wait_for_url(lambda url: "login" not in url.lower(), timeout=30000)
+    except Exception:
+        if "login" in page.url.lower():
+            raise Exception("Login GW falhou — verifique as credenciais em Configurações.")
+    # Garante que chegamos na home (o GW pode redirecionar por etapas)
+    if "/home" not in page.url:
+        await page.goto(f"{BASE_GW}/home", wait_until="load", timeout=30000)
+    # Aguarda a home inicializar a sessão Java no servidor (networkidle com fallback)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
     await page.wait_for_timeout(1500)
 
 # ─── S3 CAPTURE ──────────────────────────────────────────────────────────────
 
-async def _aguardar_s3_e_baixar(context: BrowserContext, trigger_fn) -> bytes | None:
-    """
-    Executa trigger_fn (click/navigate) e aguarda a URL S3 ser requisitada.
-    O GW gera relatórios de forma assíncrona via redireciona_relatorio.jsp → S3.
-    """
-    s3_holder: dict = {}
-
-    def capturar_s3(request):
-        u = request.url
-        if "gw-saas-relatorios.s3" in u and "gerados" in u:
-            s3_holder["url"] = u
-
-    context.on("request", capturar_s3)
-    try:
-        # Tenta capturar nova aba (popup) aberta pelo trigger
-        try:
-            async with context.expect_page(timeout=8000) as page_info:
-                await trigger_fn()
-            nova_aba = await page_info.value
-            nova_aba.on("request", capturar_s3)
-        except Exception:
-            # Sem nova aba — trigger pode ter navegado na mesma página
-            try:
-                await trigger_fn()
-            except Exception:
-                pass  # URL pode já estar capturada
-
-        # Aguarda até 60s pela URL S3
-        for _ in range(40):
-            await asyncio.sleep(1.5)
-            if "url" in s3_holder:
-                break
-
-        if "url" not in s3_holder:
-            return None
-
-        resp = await context.request.get(s3_holder["url"])
-        body = await resp.body()
-        return body if body and len(body) > 500 else None
-    finally:
-        context.remove_listener("request", capturar_s3)
-
 
 # ─── FATURAS PDF ─────────────────────────────────────────────────────────────
-# Fluxo observado:
-#   /consultafatura?acao=iniciar
+# Fluxo: /consultafatura?acao=iniciar
 #   → filtro Data de Emissão = hoje, filial
-#   → selecionar checkboxes das faturas
+#   → selecionar checkboxes das faturas da factory
 #   → "Modelo de impressão em PDF" = Modelo 10
-#   → clicar ícone PDF vermelho
-#   → S3: faturamod10_<uuid>.pdf
+#   → clicar ícone PDF (elemento com onclick*="popFatura")
+#   → popup abre → GET direto na URL → PDF bytes
 
 async def baixar_faturas_pdf(
     faturas_por_factory: dict[str, list[dict]],
@@ -127,7 +97,7 @@ async def baixar_faturas_pdf(
     resumo_docs = status.setdefault("resumo_documentos", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=False, channel="chrome")
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
@@ -139,35 +109,63 @@ async def baixar_faturas_pdf(
                     continue
 
                 nome_factory = _nome_factory(sistema)
-                numeros_raw = {f["numero"] for f in faturas}
+                numeros_raw = {f["numero"].split("/")[0].strip() for f in faturas}
                 numeros_norm = {_normalizar(n) for n in numeros_raw}
                 filial_id = _FILIAL_ID.get(sistema, "1")
-                rd = resumo_docs.setdefault(sistema, {"nome": nome_factory, "boleto": None, "ctes": []})
+                rd = resumo_docs.setdefault(sistema, {"nome": nome_factory, "fatura_pdf": None, "ctes": []})
 
-                log(f"📄 Boleto — {nome_factory} ({len(numeros_raw)} fatura(s))...")
+                log(f"📄 Fatura PDF — {nome_factory} ({len(numeros_raw)} fatura(s))...")
                 log(f"  🔎 Faturas: {sorted(numeros_raw)}")
 
                 try:
+                    # Submete o formulário para garantir que o GW atualize a sessão corretamente.
+                    # Navegação direta para acao=consultar é ignorada — GW usa estado da sessão.
+                    hoje = _hoje_gw()
+                    filial_id = _FILIAL_ID.get(sistema, "1")
+
                     await page.goto(
                         f"{BASE_GW}/consultafatura?acao=iniciar",
-                        wait_until="networkidle",
-                        timeout=20000,
+                        wait_until="domcontentloaded", timeout=30000
                     )
-                    await page.wait_for_timeout(1200)
+                    await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
 
-                    # Filtro: Data de Emissão = hoje
-                    hoje = _hoje_gw()
+                    titulo = await page.title()
+                    log(f"  Pagina: {titulo} | filialId={filial_id}")
+                    if "500" in titulo or "status 500" in titulo.lower():
+                        raise Exception("GW retornou 500 na tela de faturas.")
+
                     await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
                     await page.fill('input[name="dtemissao1"]', hoje)
                     await page.fill('input[name="dtemissao2"]', hoje)
+                    # Usa value numérico (não label) para evitar erro de texto exato
                     await page.select_option('select[name="filialId"]', value=filial_id)
+                    await page.select_option('select[name="finalizada"]', label="Todas")
+                    await page.select_option('select[name="limiteResultados"]', value="200")
+
+                    # Espera explicitamente a RESPOSTA HTTP do Pesquisar.
+                    # Bug antigo: `wait_for_url(acao=consultar)` retornava
+                    # imediatamente em iterações subsequentes, porque a URL
+                    # já continha `acao=consultar` da busca anterior — o código
+                    # então lia a página velha (da filial errada).
+                    try:
+                        async with page.expect_response(
+                            lambda r: "consultafatura" in r.url and "acao=consultar" in r.url,
+                            timeout=30000
+                        ):
+                            await page.click('input[value="Pesquisar"]')
+                        log(f"  URL ok: {page.url[page.url.find('acao='):][:150]}")
+                    except Exception as e_url:
+                        log(f"  AVISO expect_response timeout: {e_url}")
+                        log(f"  URL atual: {page.url}")
+                    # Aguarda os checkboxes ck* aparecerem = resultados renderizados
+                    try:
+                        await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
+                    except Exception:
+                        pass
+
                     await page.wait_for_timeout(300)
 
-                    await page.click('input[value="Pesquisar"]')
-                    await page.wait_for_load_state("networkidle", timeout=20000)
-                    await page.wait_for_timeout(1500)
-
-                    # Diagnóstico: faturas na página
+                    # Faturas retornadas pelo GW
                     na_pagina = []
                     for tr in await page.query_selector_all("tr"):
                         try:
@@ -179,154 +177,241 @@ async def baixar_faturas_pdf(
                             pass
                     log(f"  📋 GW retornou {len(na_pagina)} fatura(s): {na_pagina[:8]}")
 
-                    # Desmarcar todos
-                    for cb in await page.query_selector_all('input[type="checkbox"]'):
+                    # ── Seleciona checkboxes via Playwright nativo ────────────────
+                    # PASSO 1: leitura — coleta ids e números (sem tocar no DOM)
+                    # PASSO 2: ação   — usa page.locator() p/ referência fresca
+                    # (ElementHandle fica stale se o GW atualiza o DOM no check)
+
+                    all_cbs = await page.query_selector_all('input[id^="ck"]')
+                    log(f"  Checkboxes encontrados: {len(all_cbs)}")
+                    log(f"  Buscando: {sorted(numeros_norm)}")
+
+                    # Passo 1: mapeia cb_id → num (leitura, sem check)
+                    ids_marcar: list[tuple[str, str]] = []   # (cb_id, num)
+                    ids_desmarcar: list[str] = []
+
+                    for cb in all_cbs:
+                        cb_id = await cb.get_attribute("id") or ""
+                        if not re.match(r'^ck\d+$', cb_id):
+                            continue
+
+                        tr_text = await cb.evaluate("""el => {
+                            let e = el.parentElement;
+                            for (let i = 0; i < 8; i++) {
+                                if (!e) return '';
+                                if (e.tagName === 'TR') return e.innerText || '';
+                                e = e.parentElement;
+                            }
+                            return '';
+                        }""")
+
+                        m = re.search(r'(\d{5,6})/\d{4}', tr_text)
+                        if not m:
+                            ids_desmarcar.append(cb_id)
+                            continue
+
+                        num = m.group(1)
+                        log(f"  #{cb_id} → fatura {num} | norm={_normalizar(num)}")
+                        if _normalizar(num) in numeros_norm or num in numeros_raw:
+                            ids_marcar.append((cb_id, num))
+                        else:
+                            ids_desmarcar.append(cb_id)
+
+                    # Passo 2: desmarca os que não pertencem a esta factory
+                    for cb_id in ids_desmarcar:
                         try:
-                            if await cb.is_checked():
-                                await cb.uncheck()
+                            loc = page.locator(f'#{cb_id}')
+                            if await loc.is_checked():
+                                await loc.uncheck()
                         except Exception:
                             pass
-                    await page.wait_for_timeout(300)
 
-                    # Marcar faturas desta factory
+                    # Passo 2: marca os que pertencem a esta factory (referência fresca)
                     marcadas = 0
-                    for tr in await page.query_selector_all("tr"):
+                    for cb_id, num in ids_marcar:
+                        log(f"  → Marcando fatura {num} (#{cb_id})")
                         try:
-                            texto = await tr.inner_text()
-                            m = re.search(r"(\d{5,6})/\d{4}", texto)
-                            if m and (_normalizar(m.group(1)) in numeros_norm or m.group(1) in numeros_raw):
-                                cb = await tr.query_selector('input[type="checkbox"]')
-                                if cb:
-                                    await cb.check()
-                                    marcadas += 1
-                        except Exception:
-                            continue
+                            await page.locator(f'#{cb_id}').check()
+                            marcadas += 1
+                        except Exception as e_cb:
+                            log(f"  ⚠️ Erro ao marcar {num}: {e_cb}")
 
                     if marcadas == 0:
                         log(f"  ⚠️ Nenhuma fatura marcada. Esperado: {sorted(numeros_norm)} | Página: {na_pagina}")
-                        rd["boleto"] = {"ok": False, "motivo": "fatura não encontrada no GW (data de hoje)"}
+                        rd["fatura_pdf"] = {"ok": False, "motivo": "fatura não encontrada no GW (data de hoje)"}
                         continue
 
-                    log(f"  ✔ {marcadas} fatura(s) marcada(s)")
+                    log(f"  ✓ {marcadas} fatura(s) marcada(s)")
 
-                    # Inspecionar página para encontrar select de Modelo e ícone PDF
-                    page_info = await page.evaluate("""() => {
-                        const selects = [...document.querySelectorAll('select')].map(s => ({
-                            name: s.name, id: s.id,
-                            opts: [...s.options].map(o => ({v: o.value, t: o.text.trim()}))
-                        }));
-                        const imgs = [...document.querySelectorAll('img')].map(img => ({
-                            src: img.getAttribute('src') || '',
-                            onclick: img.getAttribute('onclick') || '',
-                            id: img.id || ''
-                        })).filter(i => i.onclick || i.src.includes('pdf') || i.src.includes('relat'));
-                        const links = [...document.querySelectorAll('a')].map(a => ({
-                            text: a.innerText.trim(),
-                            onclick: a.getAttribute('onclick') || '',
-                            href: a.getAttribute('href') || ''
-                        })).filter(a => a.onclick.includes('relat') || a.onclick.includes('gerar') || a.onclick.includes('PDF'));
-                        return {selects, imgs, links};
+                    # Seleciona Modelo 10 — busca qualquer select que tenha opção "Modelo 10"
+                    modelo_ok = await page.evaluate("""() => {
+                        // Tenta primeiro pelo ID histórico
+                        let s = document.getElementById('cbmodelo');
+                        // Se não achar, busca qualquer select com opção Modelo 10
+                        if (!s) {
+                            s = [...document.querySelectorAll('select')]
+                                .find(el => [...el.options].some(o => /Modelo\\s*10/i.test(o.text)));
+                        }
+                        if (!s) return 'select Modelo nao encontrado';
+                        const opt = [...s.options].find(o => /Modelo\\s*10/i.test(o.text));
+                        if (!opt) return 'Modelo 10 nao encontrado nas opcoes';
+                        s.value = opt.value;
+                        s.dispatchEvent(new Event('change', {bubbles: true}));
+                        return 'OK: ' + opt.text.trim();
                     }""")
+                    log(f"  Modelo 10: {modelo_ok}")
 
-                    log(f"  🔍 Selects: {[s['name'] for s in page_info['selects']]}")
-                    log(f"  🔍 Imgs PDF: {page_info['imgs'][:4]}")
-                    log(f"  🔍 Links: {page_info['links'][:3]}")
+                    # ── Captura PDF da fatura ─────────────────────────────────────────
+                    # context.route() instalado ANTES do clique elimina race condition:
+                    # o PDF é interceptado mesmo que o Chrome o carregue instantaneamente.
 
-                    # Selecionar Modelo 10 no select de modelo
-                    modelo_select = next(
-                        (s for s in page_info['selects']
-                         if any('odelo' in o['t'] for o in s['opts'])),
-                        None
-                    )
-                    if modelo_select:
-                        opt10 = next(
-                            (o for o in modelo_select['opts'] if '10' in o['t']),
-                            None
-                        )
-                        if opt10:
-                            sel = f"select[name='{modelo_select['name']}']" if modelo_select['name'] else f"#{modelo_select['id']}"
-                            await page.select_option(sel, value=opt10['v'])
-                            log(f"  ✔ Modelo 10 selecionado ({opt10['t']})")
-                        else:
-                            log(f"  ⚠️ Modelo 10 não encontrado, opções: {[o['t'] for o in modelo_select['opts']]}")
-                    else:
-                        log(f"  ⚠️ Select de Modelo não encontrado")
+                    # Botão imprimir PDF confirmado pelo inspetor: img#imprimirPDF.imagelink
+                    _click_sel_fat = None
+                    for _sel in [
+                        'img#imprimirPDF',
+                        'img.imagelink[id*="imprimir"]',
+                        '[onclick*="popFatura"]',
+                        'input[type="image"][src*="pdf"]',
+                        'input[type="image"][src*="PDF"]',
+                        'img[src*="pdf"]',
+                        'input[type="image"]',
+                    ]:
+                        try:
+                            if await page.locator(_sel).first.is_visible(timeout=600):
+                                _click_sel_fat = _sel
+                                break
+                        except Exception:
+                            continue
 
-                    await page.wait_for_timeout(300)
+                    pdf_bytes = None
+                    _pdf_fat_holder: dict = {"bytes": None}
 
-                    # Clicar no ícone PDF vermelho (gera relatório via S3)
-                    # Identificado por onclick contendo termos de relatório/geração
-                    pdf_bytes = await _aguardar_s3_e_baixar(
-                        context,
-                        lambda: page.evaluate("""() => {
-                            // Procurar ícone PDF que gera relatório (NÃO o botão Imprimir Boletos)
-                            // Padrões observados: img com onclick chamando funções de relatório
-                            const candidates = [
-                                ...document.querySelectorAll('img[onclick]'),
-                                ...document.querySelectorAll('a[onclick]'),
-                                ...document.querySelectorAll('input[type=image]'),
-                            ];
-                            for (const el of candidates) {
-                                const oc = (el.getAttribute('onclick') || '').toLowerCase();
-                                const src = (el.getAttribute('src') || '').toLowerCase();
-                                // Excluir o botão de boleto explicitamente
-                                if (oc.includes('boleto')) continue;
-                                if (oc.includes('relatorio') || oc.includes('gerar') ||
-                                    oc.includes('imprimir') || src.includes('pdf') ||
-                                    src.includes('relat')) {
-                                    el.click();
-                                    return 'clicked: ' + el.getAttribute('onclick') + ' | src: ' + el.getAttribute('src');
-                                }
-                            }
-                            // Último recurso: img com src de PDF
-                            for (const img of document.querySelectorAll('img')) {
-                                if ((img.src || '').toLowerCase().includes('pdf')) {
-                                    img.click();
-                                    return 'clicked by src: ' + img.src;
-                                }
-                            }
-                            return 'NENHUM ELEMENTO ENCONTRADO';
-                        }""")
-                    )
+                    async def _ctx_rota_fat(route, request):
+                        try:
+                            resp = await route.fetch()
+                            body = await resp.body()
+                            if body and b"%PDF" in body[:10]:
+                                _pdf_fat_holder["bytes"] = body
+                                log(f"  🎯 Fatura PDF interceptado: {len(body):,} bytes")
+                            await route.fulfill(response=resp)
+                        except Exception:
+                            try:
+                                await route.continue_()
+                            except Exception:
+                                pass
+
+                    # Instala no CONTEXTO antes do clique — cobre popup desde o primeiro request
+                    await context.route("**/*", _ctx_rota_fat)
+                    try:
+                        async with context.expect_page(timeout=15000) as _popup_fat_info:
+                            if _click_sel_fat:
+                                await page.locator(_click_sel_fat).first.click()
+                                log(f"  Clicou: {_click_sel_fat}")
+                            else:
+                                await page.evaluate(
+                                    "() => { if (typeof popFatura==='function') popFatura('1'); }"
+                                )
+                                log("  Clique: popFatura JS (fallback)")
+
+                        popup_fat = await _popup_fat_info.value
+
+                        # Aguarda popup navegar para URL real (S3) — sai tão logo muda de about:blank
+                        try:
+                            await popup_fat.wait_for_url(
+                                lambda u: u not in ("about:blank", ""),
+                                timeout=30000,
+                            )
+                        except Exception:
+                            pass
+
+                        popup_url_fat = popup_fat.url
+                        log(f"  Popup URL: {popup_url_fat[:80]}")
+
+                        # Aguarda route interceptar o PDF (máx 20s a partir daqui)
+                        for _t in range(14):
+                            await asyncio.sleep(1.5)
+                            if _pdf_fat_holder.get("bytes"):
+                                break
+
+                        pdf_bytes = _pdf_fat_holder.get("bytes")
+
+                        # Fallback: GET direto na URL S3 do popup (não precisa de cookies)
+                        if not pdf_bytes and popup_url_fat and "about:blank" not in popup_url_fat:
+                            try:
+                                import httpx as _httpx
+                                async with _httpx.AsyncClient(follow_redirects=True, timeout=30) as _hc:
+                                    _hr = await _hc.get(popup_url_fat)
+                                    _hb = _hr.content
+                                log(f"  GET S3 status={_hr.status_code}, size={len(_hb)}")
+                                if _hb and b"%PDF" in _hb[:10]:
+                                    pdf_bytes = _hb
+                                    log(f"  ✅ PDF via GET S3: {len(pdf_bytes):,} bytes")
+                            except Exception as e:
+                                log(f"  GET S3: {e}")
+                                # Tenta via context.request (usa cookies do browser)
+                                try:
+                                    resp_fat = await context.request.get(popup_url_fat)
+                                    body_fat = await resp_fat.body()
+                                    if body_fat and b"%PDF" in body_fat[:10]:
+                                        pdf_bytes = body_fat
+                                        log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
+                                except Exception as e2:
+                                    log(f"  context.request: {e2}")
+
+                        try:
+                            await popup_fat.close()
+                        except Exception:
+                            pass
+
+                    except Exception as e:
+                        log(f"  expect_page falhou: {e}")
+                    finally:
+                        await context.unroute("**/*", _ctx_rota_fat)
 
                     if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
-                        log(f"  ⚠️ PDF de fatura não gerado — {nome_factory}")
-                        rd["boleto"] = {"ok": False, "motivo": "PDF S3 não capturado (verifique logs de diagnóstico)"}
+                        log(f"  ⚠️ PDF de fatura não capturado — {nome_factory}")
+                        rd["fatura_pdf"] = {"ok": False, "motivo": "PDF não capturado"}
                         continue
 
-                    nome_arquivo = f"Boleto - {nome_factory} - {_hoje_fmt()}.pdf"
+                    nome_arquivo = f"Fatura - {nome_factory} - {_hoje_fmt()}.pdf"
                     status.setdefault("arquivos", {})[nome_arquivo] = pdf_bytes
-                    log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
-                    rd["boleto"] = {"ok": True, "arquivo": nome_arquivo, "qtd": marcadas}
+                    pasta = status.get("pasta_destino", "")
+                    if pasta:
+                        Path(pasta).mkdir(parents=True, exist_ok=True)
+                        (Path(pasta) / nome_arquivo).write_bytes(pdf_bytes)
+                        log(f"  ✅ Salvo em disco: {pasta}\\{nome_arquivo}")
+                    else:
+                        log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
+                    rd["fatura_pdf"] = {"ok": True, "arquivo": nome_arquivo, "qtd": marcadas}
 
                 except Exception as e:
-                    log(f"  ❌ Erro boleto {nome_factory}: {e}")
-                    rd["boleto"] = {"ok": False, "motivo": str(e)[:120]}
+                    log(f"  ❌ Erro fatura PDF {nome_factory}: {e}")
+                    rd["fatura_pdf"] = {"ok": False, "motivo": str(e)[:120]}
 
         except Exception as e:
-            log(f"  ❌ Erro geral boletos: {e}")
+            log(f"  ❌ Erro geral faturas PDF: {e}")
             log(traceback.format_exc()[-600:])
         finally:
             await browser.close()
 
 
 # ─── CTes PDF ────────────────────────────────────────────────────────────────
-# Fluxo observado:
-#   /CTeControlador?acao=listar
-#   → filtro "Número Fatura" + número + ano + filial (MATRIZ/Filial SP)
-#   → Pesquisar → resultados com IDs dos CTes
-#   → navegar para redireciona_relatorio.jsp?url=./listar_cte.jsp?acao=exportar&modelo=17&idCte=ID1,ID2,...
-#   → S3: dacte_mod17_<uuid>.pdf (todos CTes da fatura agrupados num único PDF)
+# Fluxo correto (confirmado pelo usuário):
+#   Lançamentos → Conhecimentos → /consultaconhecimento?acao=iniciar
+#   → 1° dropdown = "Número Fatura", digita número, ano, filial, status "Confirmado", 1000/pág
+#   → Pesquisar → marcar todos (#ckTodos) → clicar #img_imprimir
+#   → popup com PDF abre → capturar e salvar
 
 async def baixar_ctes_pdf(
     faturas_por_factory: dict[str, list[dict]],
     status: dict,
 ):
+    import httpx
     log = lambda msg: status["logs"].append(msg)
     resumo_docs = status.setdefault("resumo_documentos", {})
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=False, channel="chrome")
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
@@ -338,8 +423,7 @@ async def baixar_ctes_pdf(
                     continue
 
                 nome_factory = _nome_factory(sistema)
-                filial_cte = _FILIAL_CTE.get(sistema, "MATRIZ")
-                pdfs_desta_factory: list[Path] = []
+                pdfs_desta_factory: list[tuple] = []
                 rd = resumo_docs.setdefault(sistema, {"nome": nome_factory, "boleto": None, "ctes": []})
                 ctes_info: list[dict] = []
 
@@ -347,167 +431,224 @@ async def baixar_ctes_pdf(
 
                 for fatura in faturas:
                     numero = fatura["numero"]
-                    # Número sem zeros à esquerda (ex: "005028" → "5028") e sem "/ano"
-                    numero_busca = _normalizar(numero.split("/")[0].strip() if "/" in numero else numero)
-                    ano_busca = _ano_atual()
+                    # GW exige 6 dígitos com zeros: "005148"
+                    numero_busca = numero.split("/")[0].strip().zfill(6)
+                    emissao = fatura.get("emissao", "")
+                    ano_busca = emissao.split("/")[-1] if emissao and "/" in emissao else _ano_atual()
+                    filial_label = "MATRIZ" if "matriz" in sistema else "Filial SP"
 
-                    log(f"  🔍 Fatura {numero} → busca: '{numero_busca}' / '{ano_busca}' / filial '{filial_cte}'")
+                    log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
 
                     try:
+                        # 1. Navega para CT-e — load é mais estável que networkidle no GW
                         await page.goto(
-                            f"{BASE_GW}/CTeControlador?acao=listar",
-                            wait_until="networkidle",
-                            timeout=20000,
+                            f"{BASE_GW}/CTeControlador?acao=listar&&tipoTransporte=false",
+                            wait_until="load",
+                            timeout=60000,
                         )
-                        await page.wait_for_timeout(1500)
+                        await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
 
-                        # Inspecionar campos do formulário
-                        form_info = await page.evaluate("""() => {
-                            const selects = [...document.querySelectorAll('select')].map(s => ({
-                                name: s.name, id: s.id, value: s.value,
-                                opts: [...s.options].map(o => ({v: o.value, t: o.text.trim()}))
-                            }));
-                            const inputs = [...document.querySelectorAll('input[type="text"], input:not([type])')].filter(
-                                i => !i.disabled && i.offsetParent !== null
-                            ).map(i => ({name: i.name, id: i.id, value: i.value, placeholder: i.placeholder}));
-                            return {selects, inputs};
+                        # 2. Filtro = "Número Fatura"
+                        await page.locator("#campo_consulta").select_option(label="Número Fatura")
+
+                        # 3. Aguarda campos dinâmicos (aparecem só após passo 2)
+                        await page.locator("#valor_consulta").wait_for(state="visible", timeout=10000)
+                        await page.locator("#valor_consulta2").wait_for(state="visible", timeout=10000)
+
+                        # 4. Operador = "Igual ao número" (ope=4)
+                        await page.evaluate("""() => {
+                            const sels = [...document.querySelectorAll('select')];
+                            const opSel = sels.find(s =>
+                                [...s.options].some(o => /palavra|frase/i.test(o.text))
+                            );
+                            if (!opSel) return;
+                            const opt4 = [...opSel.options].find(o => o.value === '4');
+                            if (opt4) {
+                                opSel.value = '4';
+                                opSel.dispatchEvent(new Event('change', {bubbles: true}));
+                            }
                         }""")
 
-                        log(f"    Selects: {[s['name'] for s in form_info['selects']]}")
-                        log(f"    Inputs: {[(i['name'], i['value']) for i in form_info['inputs'][:6]]}")
+                        # 5. Preenche número da fatura e ano
+                        await page.locator("#valor_consulta").fill(numero_busca)
+                        await page.locator("#valor_consulta2").fill(ano_busca)
 
-                        # Preencher formulário via JavaScript (adaptável a seletores desconhecidos)
-                        fill_result = await page.evaluate("""([numero, ano, filial]) => {
-                            const passos = [];
-                            const allSelects = [...document.querySelectorAll('select')];
-                            const allInputs = [...document.querySelectorAll('input[type="text"], input:not([type])')].filter(
-                                i => !i.disabled && i.offsetParent !== null
-                            );
+                        # 6. Demais filtros
+                        await page.locator("#statusCte").select_option(label="Confirmado")
+                        await page.locator("#tipoTransporte").select_option(label="Todos")
+                        # #limite: busca por texto parcial (label pode ser "1000 resultados")
+                        await page.evaluate("""() => {
+                            const s = document.querySelector('#limite');
+                            if (!s) return;
+                            const opt = [...s.options].find(o => o.text.includes('1000'));
+                            if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); }
+                        }""")
+                        await page.locator("#filial").select_option(label=filial_label)
+                        log(f"    ✓ Filtros configurados (filial={filial_label})")
 
-                            // 1. Setar campo de busca para "Número Fatura"
-                            for (const s of allSelects) {
-                                const numFatOpt = [...s.options].find(o =>
-                                    /n[úu]mero.*(fatura|fat)/i.test(o.text) ||
-                                    /(fatura|fat).*n[úu]mero/i.test(o.text)
+                        # 7. Captura texto atual das ocorrências para detectar mudança
+                        occ_antes = await page.evaluate(
+                            "() => { if (!document.body) return ''; const m = document.body.innerText.match(/Total de Ocorr.ncias:\\s*\\d+/); return m ? m[0] : ''; }"
+                        )
+
+                        # 8. Pesquisa — chama consulta() diretamente, bypassa session_test.jsp
+                        #    (tryRequestToServer verifica session_test.jsp que retorna vazio em
+                        #     contexto automatizado e cancela silenciosamente a busca)
+                        await page.evaluate("""() => {
+                            if (typeof consulta === 'function') {
+                                consulta(
+                                    document.getElementById('campo_consulta').value,
+                                    document.getElementById('operador_consulta') ?
+                                        document.getElementById('operador_consulta').value : '4',
+                                    document.getElementById('valor_consulta').value,
+                                    document.getElementById('limite').value,
+                                    'pesquisar',
+                                    document.getElementById('ordenacao') ?
+                                        document.getElementById('ordenacao').value : 'numero',
+                                    document.getElementById('tipo_ordenacao') ?
+                                        document.getElementById('tipo_ordenacao').value : 'ASC',
+                                    document.getElementById('valor_consulta2').value
                                 );
-                                if (numFatOpt) {
-                                    s.value = numFatOpt.value;
-                                    s.dispatchEvent(new Event('change', {bubbles: true}));
-                                    passos.push('campo_busca=' + s.name + ':' + numFatOpt.value);
-                                    break;
-                                }
+                            } else {
+                                document.getElementById('pesquisar').click();
                             }
+                        }""")
 
-                            // 2. Preencher número e ano
-                            // Encontrar inputs pelo name/id pattern ou por posição
-                            let inpNumero = allInputs.find(i =>
-                                /numero|valor|busca|numero_fat/i.test(i.name + i.id)
-                            ) || allInputs[0];
+                        # 9. Aguarda o texto de ocorrências realmente mudar na DOM
+                        await page.wait_for_function(
+                            """(antes) => {
+                                if (!document.body) return false;
+                                const m = document.body.innerText.match(/Total de Ocorr.ncias:\\s*\\d+/);
+                                return m !== null && m[0] !== antes;
+                            }""",
+                            arg=occ_antes,
+                            timeout=30000,
+                        )
 
-                            let inpAno = allInputs.find(i =>
-                                /ano|year|exercicio/i.test(i.name + i.id)
-                            ) || allInputs.find(i => i.value === new Date().getFullYear().toString())
-                              || allInputs[1];
-
-                            if (inpNumero) {
-                                inpNumero.value = numero;
-                                inpNumero.dispatchEvent(new Event('input', {bubbles: true}));
-                                inpNumero.dispatchEvent(new Event('change', {bubbles: true}));
-                                passos.push('numero=' + inpNumero.name + ':' + numero);
-                            }
-                            if (inpAno && inpAno !== inpNumero) {
-                                inpAno.value = ano;
-                                inpAno.dispatchEvent(new Event('input', {bubbles: true}));
-                                inpAno.dispatchEvent(new Event('change', {bubbles: true}));
-                                passos.push('ano=' + inpAno.name + ':' + ano);
-                            }
-
-                            // 3. Setar filial
-                            for (const s of allSelects) {
-                                const opts = [...s.options];
-                                if (!opts.some(o => /matriz|filial.sp/i.test(o.text))) continue;
-                                const filialOpt = opts.find(o =>
-                                    o.text.trim() === filial ||
-                                    o.text.trim().toUpperCase() === filial.toUpperCase()
-                                );
-                                if (filialOpt) {
-                                    s.value = filialOpt.value;
-                                    s.dispatchEvent(new Event('change', {bubbles: true}));
-                                    passos.push('filial=' + s.name + ':' + filialOpt.value);
-                                    break;
-                                }
-                            }
-
-                            return passos;
-                        }""", [numero_busca, ano_busca, filial_cte])
-
-                        log(f"    Preenchimento: {fill_result}")
-
-                        # Pesquisar
-                        await page.click('input[value="Pesquisar"]')
-                        await page.wait_for_load_state("networkidle", timeout=15000)
-                        await page.wait_for_timeout(2000)
-
-                        # Verificar ocorrências
+                        # 10. Verifica total de CT-es encontrados
                         page_text = await page.inner_text("body")
-                        m_occ = re.search(r"Ocorr[êe]ncias:\s*(\d+)", page_text)
+                        m_occ = re.search(r"(?:Total de Ocorr[êe]ncias|Ocorr[êe]ncias):\s*(\d+)", page_text)
                         total_ctes = int(m_occ.group(1)) if m_occ else -1
                         log(f"    Ocorrências: {total_ctes}")
 
-                        # Extrair IDs dos CTes dos checkboxes
-                        cte_ids = await page.evaluate("""() => {
-                            const ids = new Set();
-                            // Checkboxes com valores numéricos (IDs do banco de dados)
-                            for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
-                                const v = cb.value || '';
-                                if (/^\d{4,}$/.test(v)) ids.add(v);
-                            }
-                            // Fallback: inputs hidden com "id" ou "cte" no nome
-                            if (ids.size === 0) {
-                                for (const inp of document.querySelectorAll('input[type="hidden"]')) {
-                                    const n = (inp.name || '').toLowerCase();
-                                    if ((n.includes('id') || n.includes('cte')) && /^\d{4,}$/.test(inp.value)) {
-                                        ids.add(inp.value);
-                                    }
-                                }
-                            }
-                            return [...ids];
-                        }""")
-
-                        log(f"    IDs capturados ({len(cte_ids)}): {cte_ids[:5]}")
-
-                        if not cte_ids:
-                            motivo = "nenhum CTe encontrado" if total_ctes == 0 else "IDs não capturados (verifique logs)"
-                            log(f"  ⚠️ {motivo} — fatura {numero}")
-                            ctes_info.append({"numero": numero, "ok": False, "qtd": 0, "motivo": motivo})
+                        if total_ctes == 0:
+                            log(f"  ⚠️ Nenhum CT-e para fatura {numero}")
+                            ctes_info.append({"numero": numero, "ok": False, "qtd": 0, "motivo": "sem resultados"})
                             continue
 
-                        # Navegar diretamente para a URL de exportação
-                        # (mesmo padrão observado: redireciona_relatorio.jsp → S3)
-                        ids_str = ",".join(cte_ids)
-                        inner = f"./listar_cte.jsp?acao=exportar&modelo=17&idCte={ids_str}"
-                        export_url = f"{BASE_GW}/redireciona_relatorio.jsp?url={quote(inner)}"
-                        log(f"    Exportando {len(cte_ids)} CTe(s) via S3...")
-
-                        pdf_bytes = await _aguardar_s3_e_baixar(
-                            context,
-                            lambda u=export_url: page.goto(u, wait_until="domcontentloaded", timeout=15000),
+                        # 11. Seleciona todos com #ckTodos
+                        await page.locator("#ckTodos").wait_for(state="visible", timeout=10000)
+                        await page.locator("#ckTodos").check()
+                        await page.wait_for_function(
+                            "() => document.querySelectorAll('input[type=checkbox]:checked').length > 0",
+                            timeout=10000,
                         )
+                        log(f"    ✓ Todos os CT-es selecionados")
+
+                        # 12. Clica #img_imprimir e captura o PDF via context.route()
+                        # context.route() instalado ANTES do clique — sem race condition.
+                        # O GW abre redireciona_relatorio.jsp (HTML de espera) e JS carrega
+                        # o PDF real; route.fetch() intercepta o PDF antes do Chrome consumi-lo.
+
+                        pdf_bytes = None
+                        _pdf_cte_holder: dict = {"bytes": None}
+
+                        async def _ctx_rota_cte(route, request):
+                            try:
+                                resp = await route.fetch()
+                                body = await resp.body()
+                                if body and b"%PDF" in body[:10]:
+                                    _pdf_cte_holder["bytes"] = body
+                                    log(f"    🎯 CTe PDF interceptado: {len(body):,} bytes — {request.url[:70]}")
+                                await route.fulfill(response=resp)
+                            except Exception:
+                                try:
+                                    await route.continue_()
+                                except Exception:
+                                    pass
+
+                        # Instala no CONTEXTO antes do clique
+                        await context.route("**/*", _ctx_rota_cte)
+                        try:
+                            async with context.expect_page(timeout=15000) as _popup_cte_info:
+                                await page.locator("#img_imprimir").click()
+                                log(f"    Clicou #img_imprimir")
+
+                            popup_cte = await _popup_cte_info.value
+
+                            # Aguarda o JS do GW gerar e carregar o PDF (máx 90s)
+                            for _t in range(60):
+                                await asyncio.sleep(1.5)
+                                if _pdf_cte_holder.get("bytes"):
+                                    break
+                                if _t == 5:
+                                    log(f"    Aguardando PDF CT-e... (URL: {popup_cte.url[:60]})")
+
+                            pdf_bytes = _pdf_cte_holder.get("bytes")
+
+                            # Fallback: popup navegou para URL direta do PDF
+                            if not pdf_bytes:
+                                popup_url_cte = popup_cte.url
+                                log(f"    Popup URL final: {popup_url_cte}")
+                                if popup_url_cte and "about:blank" not in popup_url_cte \
+                                        and "redireciona_relatorio" not in popup_url_cte:
+                                    try:
+                                        resp_fb = await context.request.get(popup_url_cte)
+                                        body_fb = await resp_fb.body()
+                                        if body_fb and b"%PDF" in body_fb[:10]:
+                                            pdf_bytes = body_fb
+                                            log(f"    ✅ PDF via URL final: {len(pdf_bytes):,} bytes")
+                                    except Exception as e:
+                                        log(f"    Fallback GET: {e}")
+
+                            # Último fallback: busca src de embed/object/iframe com PDF no DOM
+                            if not pdf_bytes:
+                                try:
+                                    pdf_src = await popup_cte.evaluate("""
+                                        () => {
+                                            for (const el of document.querySelectorAll('embed,object,iframe')) {
+                                                const src = el.src || el.data || '';
+                                                if (src.toLowerCase().includes('.pdf') ||
+                                                    el.type === 'application/pdf') return src;
+                                            }
+                                            return '';
+                                        }
+                                    """)
+                                    if pdf_src:
+                                        log(f"    DOM PDF src: {pdf_src[:80]}")
+                                        _rd = await context.request.get(pdf_src)
+                                        _rb = await _rd.body()
+                                        if _rb and b"%PDF" in _rb[:10]:
+                                            pdf_bytes = _rb
+                                            log(f"    ✅ PDF via DOM: {len(pdf_bytes):,} bytes")
+                                except Exception as e:
+                                    log(f"    DOM fallback: {e}")
+
+                            try:
+                                await popup_cte.close()
+                            except Exception:
+                                pass
+
+                        except Exception as e:
+                            log(f"    Popup nao abriu: {e}")
+                        finally:
+                            await context.unroute("**/*", _ctx_rota_cte)
 
                         if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
-                            log(f"  ⚠️ PDF CTe não capturado — fatura {numero}")
-                            ctes_info.append({"numero": numero, "ok": False, "qtd": 0, "motivo": "PDF S3 não capturado"})
+                            log(f"  ⚠️ PDF CT-e não capturado — fatura {numero}")
+                            ctes_info.append({"numero": numero, "ok": False, "qtd": total_ctes, "motivo": "PDF não capturado"})
                             continue
 
-                        nome_arquivo = f"CTe - {nome_factory} - Fatura {numero}.pdf"
-                        status.setdefault("arquivos", {})[nome_arquivo] = pdf_bytes
+                        nome_arquivo = f"CTe - Fatura {numero}.pdf"
+                        # Não adiciona individualmente a arquivos — será incluído no ZIP da factory
                         pdfs_desta_factory.append((nome_arquivo, pdf_bytes))
 
-                        log(f"  ✅ {len(cte_ids)} CTe(s) — fatura {numero} ({len(pdf_bytes):,} bytes)")
-                        ctes_info.append({"numero": numero, "ok": True, "qtd": len(cte_ids)})
+                        log(f"  ✅ CT-e(s) fatura {numero} — {len(pdf_bytes):,} bytes")
+                        ctes_info.append({"numero": numero, "ok": True, "qtd": total_ctes})
 
                     except Exception as e:
                         log(f"  ❌ Fatura {numero}: {e}")
+                        log(traceback.format_exc()[-400:])
                         ctes_info.append({"numero": numero, "ok": False, "qtd": 0, "motivo": str(e)[:120]})
                         continue
 
@@ -519,8 +660,16 @@ async def baixar_ctes_pdf(
                     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
                         for nome_pdf, dados_pdf in pdfs_desta_factory:
                             zf.writestr(nome_pdf, dados_pdf)
-                    status.setdefault("arquivos", {})[nome_zip] = buf.getvalue()
-                    log(f"  📦 ZIP: {nome_zip} ({len(pdfs_desta_factory)} fatura(s))")
+                    zip_bytes = buf.getvalue()
+                    status.setdefault("arquivos", {})[nome_zip] = zip_bytes
+                    log(f"  📦 ZIP: {nome_zip} ({len(pdfs_desta_factory)} CT-e(s))")
+
+                    pasta = status.get("pasta_destino", "")
+                    if pasta:
+                        Path(pasta).mkdir(parents=True, exist_ok=True)
+                        (Path(pasta) / nome_zip).write_bytes(zip_bytes)
+                        log(f"  📁 ZIP salvo em disco: {pasta}\\{nome_zip}")
+
                     rd["zip"] = {"ok": True, "arquivo": nome_zip, "qtd": len(pdfs_desta_factory)}
                 else:
                     rd["zip"] = {"ok": False}
@@ -547,7 +696,7 @@ async def executar_salvamento_documentos(
     log("📥 Gerando documentos para download...")
     log("=" * 50)
 
-    log("📄 ETAPA 1: Baixando boletos das faturas...")
+    log("📄 ETAPA 1: Baixando PDF das faturas (Modelo 10)...")
     try:
         await baixar_faturas_pdf(faturas_por_factory, status)
     except Exception as e:
@@ -562,7 +711,7 @@ async def executar_salvamento_documentos(
         log(traceback.format_exc()[-800:])
 
     rd = status.get("resumo_documentos", {})
-    total_boletos_ok = sum(1 for v in rd.values() if v.get("boleto") and v["boleto"].get("ok"))
+    total_faturas_ok = sum(1 for v in rd.values() if v.get("fatura_pdf") and v["fatura_pdf"].get("ok"))
     total_ctes_ok = sum(
         sum(1 for c in v.get("ctes", []) if c.get("ok")) for v in rd.values()
     )
@@ -572,7 +721,7 @@ async def executar_salvamento_documentos(
     log("=" * 50)
     if total_arquivos:
         log(f"✅ {total_arquivos} arquivo(s) prontos para download")
-        log(f"   📄 {total_boletos_ok} boleto(s) PDF")
+        log(f"   📄 {total_faturas_ok} fatura(s) PDF")
         log(f"   📋 {total_ctes_ok} CTe(s) PDF agrupados por fatura")
         log(f"   📦 {total_zips} ZIP(s)")
     else:

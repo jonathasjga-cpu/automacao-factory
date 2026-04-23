@@ -19,9 +19,14 @@ def _get_or_create_key():
 def _cipher():
     return Fernet(_get_or_create_key())
 
-def salvar_credenciais(sistema: str, usuario: str, senha: str):
+def salvar_credenciais(sistema: str, usuario: str, senha: str, url: str = None):
     creds = carregar_credenciais()
-    creds[sistema] = {"usuario": usuario, "senha": senha}
+    entry = {"usuario": usuario, "senha": senha}
+    if url is not None:
+        entry["url"] = url
+    elif "url" in creds.get(sistema, {}):
+        entry["url"] = creds[sistema]["url"]   # preserva URL existente
+    creds[sistema] = entry
     dados = json.dumps(creds).encode()
     encriptado = _cipher().encrypt(dados)
     CONFIG_FILE.write_bytes(encriptado)

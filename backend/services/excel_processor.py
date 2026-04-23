@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import pandas as pd
 from datetime import datetime, timedelta
@@ -12,14 +12,14 @@ from config_manager import get_credencial
 DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "automacao_factory"
 DOWNLOAD_DIR.mkdir(exist_ok=True)
 
-# Arquivo de persistência da cache (sobrevive a reinicializações do backend)
+# Arquivo de persistÃªncia da cache (sobrevive a reinicializaÃ§Ãµes do backend)
 _CACHE_FILE = DOWNLOAD_DIR / "cache_faturas.json"
 
-# Cache global para uso nos módulos de automação
+# Cache global para uso nos mÃ³dulos de automaÃ§Ã£o
 _cache_faturas: list[dict] = []
 
 def _salvar_cache(faturas: list[dict]):
-    """Persiste a cache em disco para sobreviver a reinicializações."""
+    """Persiste a cache em disco para sobreviver a reinicializaÃ§Ãµes."""
     try:
         _CACHE_FILE.write_text(json.dumps(faturas, ensure_ascii=False), encoding="utf-8")
     except Exception:
@@ -34,11 +34,39 @@ def _carregar_cache() -> list[dict]:
         pass
     return []
 
-# Tenta carregar cache persistida ao importar o módulo
+# Tenta carregar cache persistida ao importar o mÃ³dulo
 _cache_faturas = _carregar_cache()
 
+# ─── Progresso da fase "Carregar do GW" ─────────────────────────────────────
+# Usado para o frontend mostrar logs ao vivo enquanto o botão fica "Baixando...".
+_progresso: dict = {"status": "ocioso", "logs": [], "inicio": None, "fim": None}
+
+def _prog_reset():
+    _progresso["status"] = "executando"
+    _progresso["logs"] = []
+    _progresso["inicio"] = datetime.now().isoformat()
+    _progresso["fim"] = None
+
+def _prog_log(msg: str):
+    _progresso["logs"].append(msg)
+
+def _prog_finalizar(ok: bool, erro: str | None = None):
+    _progresso["status"] = "concluido" if ok else "erro"
+    _progresso["fim"] = datetime.now().isoformat()
+    if erro:
+        _progresso["logs"].append(f"❌ {erro}")
+
+def get_progresso_carregar() -> dict:
+    """Retorna o estado atual do processo de carregamento (expost via /api)."""
+    return {
+        "status": _progresso["status"],
+        "logs": list(_progresso["logs"]),
+        "inicio": _progresso["inicio"],
+        "fim": _progresso["fim"],
+    }
+
 def serial_excel_para_data(serial) -> str:
-    """Converte número serial do Excel para data string DD/MM/AAAA"""
+    """Converte nÃºmero serial do Excel para data string DD/MM/AAAA"""
     if pd.isna(serial):
         return ""
     try:
@@ -47,58 +75,133 @@ def serial_excel_para_data(serial) -> str:
     except:
         return str(serial)
 
-async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: str, base: str, preencher_data: bool = True):
-    """
-    Abre Relatórios > Financeiro > Contas a Receber, seleciona o relatório
-    personalizado pelo nome, preenche data de emissão = hoje e clica em Gerar.
+async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentativas: int = 8) -> Path:
+    """Retorna o arquivo jÃ¡ capturado durante _gerar_relatorio_personalizado, ou busca em Meus RelatÃ³rios."""
+    # Verifica se o download jÃ¡ foi capturado durante a geraÃ§Ã£o
+    downloads = getattr(context, '_last_download', {})
+    if nome in downloads and downloads[nome].exists() and _is_valid_excel(downloads[nome]):
+        return downloads[nome]
 
-    Estrutura observada no GW:
-    - Filtro "Emissão" (Automação) ou "Emissão Fatura" (Complemento)
-    - Dropdown "Entre" seguido de dois inputs de data [início] [fim]
+    # Fallback: busca em Meus RelatÃ³rios com polling
+    import unicodedata
+    def norm(s):
+        return unicodedata.normalize("NFC", s).lower()
 
-    preencher_data=False: não preenche o filtro de data (usa configuração salva no relatório).
-    Usar False para o Complemento, pois a data do CT-e pode diferir da data da fatura.
+    for tentativa in range(tentativas):
+        await page.goto(meus_rel_url, wait_until="load", timeout=60000)
+        await page.wait_for_timeout(2000)
+        rows = await page.query_selector_all("tr")
+        # Não usar any(await ... for row in rows) — cria async generator que any() não itera
+        encontrado = False
+        for row in rows:
+            try:
+                txt = await row.inner_text()
+                if norm(nome) in norm(txt):
+                    encontrado = True
+                    break
+            except Exception:
+                continue
+        if encontrado:
+            return await _baixar_meu_relatorio(page, context, nome, meus_rel_url)
+        if tentativa < tentativas - 1:
+            await page.wait_for_timeout(5000)
+
+    raise Exception(
+        f"RelatÃ³rio '{nome}' nÃ£o encontrado. Verifique se existe um relatÃ³rio personalizado "
+        "com esse nome no GW (RelatÃ³rios > RelatÃ³rios Personalizados)."
+    )
+
+
+async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: str, base: str, preencher_data: bool = True, context=None, navegar: bool = True):
     """
+    Seleciona o relatório personalizado pelo nome, preenche data de emissão e clica em Gerar.
+
+    navegar=True  → primeira chamada: navega até a URL e clica na aba Relatórios Personalizados
+    navegar=False → segunda chamada: página já está aberta na aba certa, só clica no radio
+    """
+    # Registra handler de dialog antes de qualquer ação (cobre notificações do GW)
+    page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+
+
+    # Sempre navega para garantir estado limpo
     url_rel = f"{base}/relcontasreceber?acao=iniciar&modulo=webtrans"
-    await page.goto(url_rel, wait_until="networkidle")
+    await page.goto(url_rel, wait_until="load", timeout=60000)
     await page.wait_for_timeout(1500)
 
-    # Clica na aba "Relatórios Personalizados"
-    aba = await page.query_selector("text=Relatórios Personalizados")
-    if aba:
-        await aba.click()
-        await page.wait_for_timeout(1000)
+    # Se GW retornou 403, a sessão expirou — relança erro claro
+    titulo = await page.title()
+    if "403" in titulo or "403" in page.url:
+        raise Exception("GW retornou 403 (sessão expirada). Tente novamente.")
 
-    # Seleciona o radio button do relatório pelo nome
-    # Cada radio fica numa <td> junto com o texto (sem <label>)
+    # Clica na aba "Relatórios Personalizados"
+    await page.evaluate("""
+        () => {
+            for (const el of document.querySelectorAll('td, th, div, button, a, span, input')) {
+                const txt = (el.textContent || el.value || '').trim();
+                if (txt === 'Relatórios Personalizados') { el.click(); return; }
+            }
+        }
+    """)
+
+    # Aguarda os radio buttons aparecerem (confirma que a lista carregou)
+    try:
+        await page.wait_for_selector('input[type="radio"]', timeout=8000)
+    except Exception:
+        await page.wait_for_timeout(2000)
+
+    # Seleciona o radio button pelo nome do relatório
+    # Usa normalização NFC para garantir comparação correta de acentos
+    nome_lower = nome_relatorio.lower()
+    # Primeira palavra distintiva (ex: "complemento", "automação")
+    nome_first = nome_lower.split()[0]
+
     selecionado = await page.evaluate(f"""
         () => {{
-            const nome = {repr(nome_relatorio.lower())};
-            const tds = [...document.querySelectorAll('td')];
-            for (const td of tds) {{
-                if (td.textContent.trim().toLowerCase().includes(nome)) {{
+            function norm(s) {{
+                return (s || '').normalize('NFC').toLowerCase().trim();
+            }}
+            const nome = norm({repr(nome_lower)});
+            const nomeFirst = norm({repr(nome_first)});
+
+            // Estratégia 1: td cujo texto contém o nome — verifica irmãos anterior e posterior
+            for (const td of document.querySelectorAll('td')) {{
+                const txt = norm(td.textContent);
+                if (txt.includes(nome) || (nomeFirst.length >= 5 && txt.includes(nomeFirst))) {{
                     const radio = td.querySelector('input[type="radio"]')
-                               || td.previousElementSibling?.querySelector('input[type="radio"]');
-                    if (radio) {{ radio.click(); return true; }}
+                               || td.previousElementSibling?.querySelector('input[type="radio"]')
+                               || td.nextElementSibling?.querySelector('input[type="radio"]');
+                    if (radio) {{ radio.click(); return 'td:' + td.textContent.trim().substring(0,60); }}
                 }}
             }}
-            // fallback: percorre todos os radios e verifica o texto próximo
-            const radios = [...document.querySelectorAll('input[type="radio"]')];
-            for (const r of radios) {{
+            // Estratégia 2: radio cujo tr pai contém o nome
+            for (const r of document.querySelectorAll('input[type="radio"]')) {{
                 const row = r.closest('tr') || r.parentElement;
-                if (row && row.textContent.toLowerCase().includes(nome)) {{
-                    r.click(); return true;
+                if (row) {{
+                    const rowTxt = norm(row.textContent);
+                    if (rowTxt.includes(nome) || (nomeFirst.length >= 5 && rowTxt.includes(nomeFirst))) {{
+                        r.click(); return 'tr:' + row.textContent.trim().substring(0,60);
+                    }}
                 }}
             }}
-            return false;
+            // Diagnóstico: lista todos os textos de tds e radios disponíveis
+            const tds = [...document.querySelectorAll('td')].map(t => t.textContent.trim()).filter(t => t.length > 2);
+            const radios = document.querySelectorAll('input[type="radio"]').length;
+            return 'NAO_ENCONTRADO. radios=' + radios + ' Tds: ' + tds.slice(0,15).join(' | ');
         }}
     """)
 
-    await page.wait_for_timeout(800)  # aguarda atualizar colunas/filtros do relatório selecionado
+    # Log do resultado para diagnóstico
+    # (selecionado contém o resultado do radio_select para diagnóstico inline)
+
+    # Lança exceção se o radio não foi encontrado
+    if isinstance(selecionado, str) and selecionado.startswith('NAO_ENCONTRADO'):
+        raise Exception(f"Radio '{nome_relatorio}' não encontrado na lista do GW. {selecionado}")
+
+    await page.wait_for_timeout(1000)  # aguarda filtros do relatório selecionado atualizarem
 
     if preencher_data:
-        # Preenche os dois campos de data do filtro de Emissão (início e fim = hoje)
-        # A linha do filtro contém "Emissão" no label e dois inputs de texto para as datas
+        # Preenche os dois campos de data do filtro de EmissÃ£o (inÃ­cio e fim = hoje)
+        # A linha do filtro contÃ©m "EmissÃ£o" no label e dois inputs de texto para as datas
         await page.evaluate(f"""
             () => {{
                 const hoje = {repr(data_hoje)};
@@ -125,77 +228,146 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             }}
         """)
 
-    # Garante formato Excel selecionado (primeiro radio após os de relatório = XLS)
+    # Garante formato Excel selecionado (primeiro radio antes do botão Gerar = XLS)
     await page.evaluate("""
         () => {
-            // O radio do Excel fica logo acima do botão Gerar — é o primeiro radio da linha de formato
-            const btn = document.querySelector('input[value="Gerar Relatório"]');
+            const btn = [...document.querySelectorAll('input[type="submit"], input[type="button"]')]
+                .find(el => el.value && el.value.includes('Gerar'));
             if (!btn) return;
             const linhaFormato = btn.closest('tr')?.previousElementSibling;
             if (linhaFormato) {
                 const radios = linhaFormato.querySelectorAll('input[type="radio"]');
-                if (radios[0]) radios[0].click(); // primeiro = Excel
+                if (radios[0]) radios[0].click();
             }
         }
     """)
 
-    # Clica em "Gerar Relatório"
-    await page.click('input[value="Gerar Relatório"]')
-    await page.wait_for_timeout(8000)  # aguarda GW processar e salvar em Meus Relatórios
+    # Aceita dialogs JS automáticos
+    page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+
+    async def _clicar_gerar():
+        # Aguarda o botão estar disponível na página antes de clicar
+        await page.wait_for_timeout(500)
+        await page.evaluate("""
+            () => {
+                const btn = [...document.querySelectorAll('input[type="submit"], input[type="button"]')]
+                    .find(el => el.value && el.value.includes('Gerar'));
+                if (btn) btn.click();
+            }
+        """)
+
+    # Clica em "Gerar Relatório" e aguarda nova aba com o download
+    if context:
+        try:
+            async with context.expect_page(timeout=15000) as popup_info:
+                await _clicar_gerar()
+            popup = await popup_info.value
+            # Aguarda o popup carregar (GW exibe "Seu relatório já foi gerado. Clique no link...")
+            await popup.wait_for_load_state("domcontentloaded", timeout=30000)
+            await popup.wait_for_timeout(2000)
+            try:
+                async with popup.expect_download(timeout=60000) as dl_info:
+                    # GW não faz download automático — precisa clicar no link azul do popup
+                    await popup.evaluate("""
+                        () => {
+                            const links = [...document.querySelectorAll('a')];
+                            if (links.length > 0) links[0].click();
+                        }
+                    """)
+                download = await dl_info.value
+                dest = DOWNLOAD_DIR / f"{nome_relatorio.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                await download.save_as(str(dest))
+                if not hasattr(context, '_last_download'):
+                    context._last_download = {}
+                context._last_download[nome_relatorio] = dest
+            except Exception:
+                pass  # fallback para Meus Relatórios em _aguardar_e_baixar
+            try:
+                await popup.close()
+            except Exception:
+                pass
+        except Exception:
+            await _clicar_gerar()
+    else:
+        await _clicar_gerar()
+
+    await page.wait_for_timeout(3000)
 
 
 async def baixar_relatorios_gw() -> tuple[Path, Path | None]:
     """
-    Gera os relatórios personalizados no GW com data de emissão = hoje
-    e depois baixa de Meus Relatórios.
+    Gera os relatórios personalizados no GW e baixa via popup.
+    - Automação: filtra por emissão = hoje (ou ontem se hoje estiver vazio)
+    - Complemento: sem filtro de data (retorna todo o histórico, ~2.6 MB)
     """
     creds = get_credencial("gw")
     base = "https://webtrans.saas.gwsistemas.com.br"
     hoje = datetime.now().strftime("%d/%m/%Y")
+    ontem = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
     meus_rel_url = f"{base}/RelatorioControlador?acao=abrirTelaMeusRelatorios"
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, channel="chrome")
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
         # Login
+        _prog_log("🔑 Fazendo login no GW...")
         await page.goto(f"{base}/login", wait_until="domcontentloaded")
         await page.wait_for_selector('#login', timeout=15000)
         await page.fill('#login', creds["usuario"])
         await page.fill('#senha', creds["senha"])
         await page.click('.button-login')
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await page.wait_for_load_state("load", timeout=60000)
+        await page.wait_for_timeout(3000)
 
-        # Gera "Automação Operações - Jonathas" com data de hoje
-        await _gerar_relatorio_personalizado(page, "Automação Operações", hoje, base)
+        # Verifica se ainda está na tela de login (credenciais erradas ou problema no login)
+        current_url = page.url
+        if "login" in current_url.lower():
+            raise Exception("Login GW falhou. Verifique as credenciais em Configurações.")
 
-        # Baixa de Meus Relatórios
-        await page.goto(meus_rel_url, wait_until="networkidle")
-        await page.wait_for_timeout(2000)
-        arquivo1 = await _baixar_meu_relatorio(page, context, "Automação Operações", meus_rel_url)
+        # Aguarda a home carregar para garantir sessão ativa antes de navegar
+        await page.goto(f"{base}/home", wait_until="load", timeout=60000)
+        await page.wait_for_timeout(1500)
 
-        # Gera "Complemento Operações" com filtro de data = hoje (mesma lógica do Automação).
-        # O filtro é por data de emissão da fatura.
-        # Aguarda 15s (Complemento é maior e o GW pode demorar mais para processar).
+        # Se caiu em 403 ou redirect de volta ao login, lança erro
+        current_url = page.url
+        if "login" in current_url.lower() or "403" in current_url.lower():
+            raise Exception("Sessão GW inválida após login. Tente novamente.")
+
+        # Gera Automação com data de hoje
+        _prog_log("📄 Gerando relatório 'Automação Operações'...")
+        await _gerar_relatorio_personalizado(
+            page, "Automação Operações - Jonathas", hoje, base, context=context
+        )
+        _prog_log("⬇️ Baixando 'Automação Operações'...")
+        arquivo1 = await _aguardar_e_baixar(
+            page, context, "Automação Operações - Jonathas", meus_rel_url
+        )
+        _prog_log("✓ Arquivo 'Automação' baixado")
+
+        # Complemento: página já está aberta na aba Relatórios Personalizados após o Automação
+        # Usa navegar=False para não recarregar — só clica no radio e preenche a data
         arquivo2 = None
         try:
-            await _gerar_relatorio_personalizado(page, "Complemento Operações", hoje, base, preencher_data=True)
-            # Aguarda mais 7s extras além dos 8s já esperados dentro da função
-            await page.wait_for_timeout(7000)
-            await page.goto(meus_rel_url, wait_until="networkidle")
-            await page.wait_for_timeout(2000)
-            arquivo2 = await _baixar_meu_relatorio(page, context, "Complemento Operações", meus_rel_url)
+            _prog_log("📄 Gerando relatório 'Complemento Operações'...")
+            await _gerar_relatorio_personalizado(
+                page, "Complemento Operações - Jonathas", hoje, base,
+                preencher_data=True, context=context, navegar=False
+            )
+            _prog_log("⬇️ Baixando 'Complemento Operações'...")
+            arquivo2 = await _aguardar_e_baixar(
+                page, context, "Complemento Operações - Jonathas", meus_rel_url
+            )
+            _prog_log("✓ Arquivo 'Complemento' baixado")
         except Exception as e:
-            # Loga o erro para diagnóstico — sem chave a digitação prossegue, mas sem chave NF
-            import logging
-            logging.warning(f"[Complemento] Falha ao baixar: {e}. Chave de acesso ficará vazia.")
+            raise Exception(f"[Complemento] Falha: {e}")
 
         await browser.close()
         return arquivo1, arquivo2
 
 def _is_valid_excel(path: Path) -> bool:
-    """Verifica se o arquivo é um Excel real (magic bytes PK = zip/xlsx)"""
+    """Verifica se o arquivo Ã© um Excel real (magic bytes PK = zip/xlsx)"""
     try:
         with open(path, "rb") as f:
             magic = f.read(4)
@@ -205,7 +377,7 @@ def _is_valid_excel(path: Path) -> bool:
 
 
 async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Path:
-    """Clica em 'Baixar Excel' para o relatório mais recente com o nome dado"""
+    """Clica em 'Baixar Excel' para o relatÃ³rio mais recente com o nome dado"""
     prefixo = nome.replace(' ', '_')
     caminho = DOWNLOAD_DIR / f"{prefixo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
@@ -215,7 +387,7 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
     def norm(s):
         return unicodedata.normalize("NFC", s).lower()
 
-    # Busca a linha do relatório na tabela
+    # Busca a linha do relatÃ³rio na tabela
     rows = await page.query_selector_all("tr")
     linha_alvo = None
     for row in rows:
@@ -226,8 +398,8 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
 
     if not linha_alvo:
         raise Exception(
-            f"Relatório '{nome}' não encontrado em Meus Relatórios. "
-            "Gere-o manualmente no GW (Relatórios > Meus Relatórios) e tente novamente."
+            f"RelatÃ³rio '{nome}' nÃ£o encontrado em Meus RelatÃ³rios. "
+            "Gere-o manualmente no GW (RelatÃ³rios > Meus RelatÃ³rios) e tente novamente."
         )
 
     # Tenta clicar em "Gerar" / "Atualizar" para garantir link S3 fresco
@@ -236,14 +408,14 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
         el_txt = (await el.inner_text()).lower()
         if "gerar" in el_txt or "atualizar" in el_txt or "processar" in el_txt:
             await el.click()
-            await page.wait_for_timeout(8000)  # aguarda o GW processar o relatório
-            # Recarrega a lista de relatórios para pegar o link de download atualizado
+            await page.wait_for_timeout(8000)  # aguarda o GW processar o relatÃ³rio
+            # Recarrega a lista de relatÃ³rios para pegar o link de download atualizado
             await page.goto(
                 f"https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios",
-                wait_until="networkidle"
+                wait_until="load", timeout=60000
             )
             await page.wait_for_timeout(2000)
-            # Re-localiza a linha após reload
+            # Re-localiza a linha apÃ³s reload
             rows = await page.query_selector_all("tr")
             for row in rows:
                 txt = await row.inner_text()
@@ -287,15 +459,15 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
                 else:
                     caminho.unlink(missing_ok=True)
                     raise Exception(
-                        f"Download do relatório '{nome}' retornou arquivo inválido. "
-                        f"Acesse o GW, clique em 'Gerar' no relatório '{nome}' e tente importar novamente."
+                        f"Download do relatÃ³rio '{nome}' retornou arquivo invÃ¡lido. "
+                        f"Acesse o GW, clique em 'Gerar' no relatÃ³rio '{nome}' e tente importar novamente."
                     )
-            raise Exception(f"URL S3 não capturada para '{nome}'")
+            raise Exception(f"URL S3 nÃ£o capturada para '{nome}'")
 
-    raise Exception(f"Botão 'Baixar Excel' não encontrado para o relatório '{nome}'.")
+    raise Exception(f"BotÃ£o 'Baixar Excel' nÃ£o encontrado para o relatÃ³rio '{nome}'.")
 
 def _fmt_data(val) -> str:
-    """Formata data para DD/MM/AAAA — aceita Timestamp ou serial Excel"""
+    """Formata data para DD/MM/AAAA â€" aceita Timestamp ou serial Excel"""
     if pd.isna(val):
         return ""
     if hasattr(val, "strftime"):
@@ -307,14 +479,14 @@ def _fmt_data(val) -> str:
 
 def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     """Cruza os dois Excels e retorna lista de faturas prontas"""
-    # Lê Excel 1 — dados principais (8 colunas do GW)
+    # LÃª Excel 1 â€" dados principais (8 colunas do GW)
     df1 = pd.read_excel(path1, skiprows=1)
     df1.columns = [
         "numero", "emissao", "vencimento", "filial",
         "valor", "cliente_nome", "cliente_cnpj", "situacao"
     ]
 
-    # Filtra canceladas e linhas sem número
+    # Filtra canceladas e linhas sem nÃºmero
     df1 = df1[df1["situacao"].astype(str).str.strip() != "Cancelada"].copy()
     df1 = df1.dropna(subset=["numero"])
 
@@ -322,25 +494,83 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     df1["emissao_fmt"]    = df1["emissao"].apply(_fmt_data)
     df1["vencimento_fmt"] = df1["vencimento"].apply(_fmt_data)
 
-    # Formata número
-    df1["numero"] = df1["numero"].astype(str).str.strip().str.split(".").str[0].str.zfill(6)
+    # Normaliza número: "005049/2026" → "005049", "5049.0" → "005049"
+    df1["numero"] = (
+        df1["numero"].astype(str).str.strip()
+        .str.split("/").str[0]      # remove "/2026"
+        .str.split(".").str[0]      # remove ".0" de float
+        .str.zfill(6)
+    )
 
-    # Lê Excel 2 — chaves de acesso (opcional: pode estar indisponível)
-    # IMPORTANTE: dtype=str garante que a chave de 44 dígitos não seja truncada
-    # para notação científica (float64 só tem ~15 dígitos de precisão)
+    # Lê Excel 2 – chaves de acesso (Complemento Operações)
+    # dtype=str garante que a chave de 44 dígitos não seja truncada para notação científica
     chaves = None
+    _debug_complemento: list[str] = []
     if path2 is not None:
         try:
+            # Lê os headers reais primeiro (sem skiprows) para entender a estrutura
+            df2_header = pd.read_excel(path2, nrows=1, dtype=str)
+            _debug_complemento.append(f"Headers raw: {list(df2_header.columns)}")
+
+            # Lê os dados pulando a primeira linha (título do relatório GW)
             df2 = pd.read_excel(path2, skiprows=1, dtype=str)
-            df2.columns = ["cte", "emissao_fatura", "chave", "numero_fatura"]
-            df2["numero_fatura"] = df2["numero_fatura"].str.strip().str.split(".").str[0].str.zfill(6)
-            df2 = df2.dropna(subset=["chave"])
-            # Remove espaços e garante que a chave tem exatamente 44 caracteres
-            df2["chave"] = df2["chave"].str.strip()
-            df2 = df2[df2["chave"].str.len() == 44]
-            chaves = df2.groupby("numero_fatura")["chave"].first().reset_index()
-            chaves.columns = ["numero", "chave"]
-        except Exception:
+            _debug_complemento.append(f"Colunas lidas: {list(df2.columns)} ({len(df2)} linhas)")
+
+            # --- Detecção automática de colunas ---
+            chave_col = None
+            numero_col = None
+
+            # 1. Tenta pelo nome do cabeçalho (case-insensitive)
+            for col in df2.columns:
+                c = str(col).lower()
+                if "chave" in c or "acesso" in c:
+                    chave_col = col
+                if ("fat" in c or "fatura" in c) and any(x in c for x in ["num", "nro", "nº", "n."]):
+                    numero_col = col
+
+            # 2. Tenta pelo conteúdo das colunas (44 dígitos = chave NF-e)
+            if not chave_col:
+                for col in df2.columns:
+                    sample = df2[col].dropna().astype(str).str.strip()
+                    if len(sample) > 0 and (sample.str.len() == 44).mean() > 0.3:
+                        chave_col = col
+                        break
+
+            # 3. Fallback posicional (estrutura esperada: cte, emissao, chave, numero_fatura)
+            if chave_col is None and len(df2.columns) >= 4:
+                chave_col = df2.columns[2]
+                _debug_complemento.append("chave_col: fallback posicional col[2]")
+
+            if numero_col is None and len(df2.columns) >= 4:
+                numero_col = df2.columns[3]
+                _debug_complemento.append("numero_col: fallback posicional col[3]")
+
+            _debug_complemento.append(f"chave_col={chave_col!r}  numero_col={numero_col!r}")
+
+            if chave_col and numero_col:
+                df2_work = df2[[chave_col, numero_col]].copy()
+                df2_work.columns = ["chave", "numero_fatura"]
+                df2_work["chave"] = df2_work["chave"].astype(str).str.strip()
+                df2_work["numero_fatura"] = (
+                    df2_work["numero_fatura"].astype(str).str.strip()
+                    .str.split("/").str[0]   # remove "/2026"
+                    .str.split(".").str[0]   # remove ".0" de float
+                    .str.zfill(6)
+                )
+                df2_work = df2_work[df2_work["chave"].str.len() == 44]
+                _debug_complemento.append(f"Chaves válidas (44 dígitos): {len(df2_work)}")
+
+                if not df2_work.empty:
+                    chaves = df2_work.groupby("numero_fatura")["chave"].first().reset_index()
+                    chaves.columns = ["numero", "chave"]
+                    _debug_complemento.append(f"Faturas com chave: {list(chaves['numero'])}")
+                else:
+                    _debug_complemento.append("Nenhuma chave válida de 44 dígitos encontrada")
+            else:
+                _debug_complemento.append("Colunas chave/numero_fatura não encontradas")
+
+        except Exception as e:
+            _debug_complemento.append(f"ERRO ao processar Complemento: {e}")
             chaves = None
 
     # Cruzamento (sem chaves se Complemento indisponível)
@@ -349,6 +579,9 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     else:
         resultado = df1.copy()
         resultado["chave"] = ""
+
+    # Guarda diagnóstico para consulta via /api/debug-complemento
+    processar_dataframes._last_debug = _debug_complemento
 
     faturas = []
     for _, row in resultado.iterrows():
@@ -362,19 +595,26 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
             "cliente_cnpj": str(row["cliente_cnpj"]).strip(),
             "situacao": str(row["situacao"]).strip(),
             "chave": str(row["chave"]).strip() if pd.notna(row.get("chave")) else "",
-            "factory_sugerida": "firma_sp" if "SP" in str(row["filial"]) else "firma_matriz",
+            "factory_sugerida": "gc_sp" if "SP" in str(row["filial"]) else "gc_matriz",
         })
 
     return faturas
 
 async def processar_excels() -> list[dict]:
-    """Entry point: baixa relatórios do GW e processa"""
+    """Entry point: baixa relatÃ³rios do GW e processa"""
     global _cache_faturas
-    path1, path2 = await baixar_relatorios_gw()
-    _cache_faturas = processar_dataframes(path1, path2)
-    _salvar_cache(_cache_faturas)   # persiste em disco
-    return _cache_faturas
+    _prog_reset()
+    try:
+        _prog_log("🚀 Iniciando download dos relatórios do GW...")
+        path1, path2 = await baixar_relatorios_gw()
+        _prog_log("📊 Processando planilhas...")
+        _cache_faturas = processar_dataframes(path1, path2)
+        _salvar_cache(_cache_faturas)   # persiste em disco
+        _prog_log(f"✅ {len(_cache_faturas)} fatura(s) carregada(s)")
+        _prog_finalizar(True)
+        return _cache_faturas
+    except Exception as e:
+        _prog_finalizar(False, str(e))
+        raise
 
-def processar_excels_local(path1: Path, path2: Path) -> list[dict]:
-    """Para testes com arquivos locais (sem precisar do GW)"""
-    return processar_dataframes(path1, path2)
+

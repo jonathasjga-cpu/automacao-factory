@@ -2,22 +2,25 @@ FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
 WORKDIR /app
 
-# Install Python dependencies
-COPY backend/requirements.txt .
+# System deps for psycopg2
+RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python deps
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# App
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 
-# Create data directory
+# Persistent data
 RUN mkdir -p /data
-
 ENV DATA_DIR=/data
-ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app/backend
-
 EXPOSE 8000
 
-CMD ["python", "main.py"]
+# Railway injeta $PORT — main.py já respeita
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
