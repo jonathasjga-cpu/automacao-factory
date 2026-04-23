@@ -760,17 +760,6 @@
       <div class="count-badge" id="count-badge">0 faturas</div>
     </div>
 
-    <!-- Pasta de destino — apenas local -->
-    <div id="box-pasta" style="display:none;margin:0 0 12px 0;padding:10px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span style="font-size:13px;color:var(--text2);white-space:nowrap">📁 Pasta de destino:</span>
-      <input id="input-pasta" type="text" placeholder="Nenhuma pasta selecionada — arquivos disponíveis para download" readonly
-        style="flex:1;min-width:260px;height:32px;padding:0 10px;border:1px solid var(--border2);border-radius:6px;background:var(--bg);color:var(--text1);font-size:13px;cursor:default">
-      <button class="btn btn-ghost" onclick="selecionarPasta()" style="white-space:nowrap;font-size:13px;padding:6px 14px">
-        📂 Selecionar pasta
-      </button>
-      <button class="btn btn-ghost" onclick="limparPasta()" style="font-size:13px;padding:6px 10px;color:var(--muted)" title="Limpar seleção">✕</button>
-    </div>
-
     <div id="faturas-container">
       <div class="empty-state">
         <span class="icon">📄</span>
@@ -1176,15 +1165,6 @@ async function aprovarUsuario(id) {
 // ─────────────────────────────────────────────────────────
 let faturas = [];
 let checkState = {};   // índice real → bool (estado do checkbox entre filtros)
-let pastaDestino = '';
-
-// Mostra box de pasta apenas no localhost
-if (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') {
-  document.addEventListener('DOMContentLoaded', () => {
-    const box = document.getElementById('box-pasta');
-    if (box) box.style.display = 'flex';
-  });
-}
 let operacaoAtual = null;
 let poolingInterval = null;
 let operacaoStartTime = null;   // Marcado no clique em "Carregar do GW"
@@ -1495,7 +1475,7 @@ async function executarAutomacao() {
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ faturas: selecionadas, pasta_destino: pastaDestino || null, inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null }),
+    body: JSON.stringify({ faturas: selecionadas, pasta_destino: null, inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null }),
   });
 
   const data = await resp.json();
@@ -2147,24 +2127,6 @@ function _fmtDt(iso) {
   return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }
 function _fmtVal(v) { return 'R$ ' + Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2}); }
-
-async function selecionarPasta() {
-  try {
-    const resp = await fetch(`${API}/selecionar-pasta`);
-    const data = await resp.json();
-    if (data.pasta) {
-      pastaDestino = data.pasta;
-      document.getElementById('input-pasta').value = pastaDestino;
-    }
-  } catch(e) {
-    alert('Erro ao abrir seletor de pasta: ' + e.message);
-  }
-}
-
-function limparPasta() {
-  pastaDestino = '';
-  document.getElementById('input-pasta').value = '';
-}
 
 function toggleMaster(master) {
   document.querySelectorAll('[id^="chk-"]').forEach(c => {
