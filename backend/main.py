@@ -179,7 +179,7 @@ async def debug_complemento():
 
 @app.post("/api/executar", dependencies=[Depends(get_current_user)])
 async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks):
-    op_id = f"op_{len(status_operacoes)+1}"
+    op_id = str(len(status_operacoes) + 1)
 
     from services.excel_processor import _cache_faturas
     faturas_cache = {f["numero"]: f for f in _cache_faturas}
