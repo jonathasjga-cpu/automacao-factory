@@ -24,7 +24,7 @@ from factory_manager import carregar_factories_extras, salvar_factory_extra, rem
 from db import init_db, User
 from auth import get_current_user, require_admin
 from routers_auth import router as auth_router
-from arquivos_recentes import salvar_pacote, listar_pacotes, ler_pacote
+from arquivos_recentes import salvar_pacote, listar_pacotes, ler_pacote, limpar_todos
 from fastapi import Depends
 
 MSG_FINALIZAR_MANUAL = (
@@ -278,6 +278,12 @@ def download_documentos(op_id: str):
 def listar_arquivos_recentes():
     """Lista pacotes de arquivos gerados nos últimos 2 dias."""
     return {"pacotes": listar_pacotes()}
+
+@app.delete("/api/arquivos-recentes", dependencies=[Depends(require_admin)])
+def limpar_arquivos_recentes():
+    """Remove todos os pacotes salvos (apenas admin)."""
+    n = limpar_todos()
+    return {"ok": True, "removidos": n}
 
 @app.post("/api/finalizar/{op_id}", dependencies=[Depends(get_current_user)])
 async def finalizar_operacao(op_id: str):

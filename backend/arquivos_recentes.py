@@ -71,6 +71,16 @@ def ler_pacote(op_id: str) -> dict[str, bytes] | None:
     return arquivos
 
 
+def limpar_todos() -> int:
+    """Remove TODOS os pacotes salvos. Retorna quantos foram removidos."""
+    count = 0
+    for sub in ROOT.iterdir():
+        if sub.is_dir():
+            shutil.rmtree(sub, ignore_errors=True)
+            count += 1
+    return count
+
+
 def _limpar_antigos():
     """Remove pacotes criados há mais de RETENCAO_DIAS dias."""
     limite = datetime.now() - timedelta(days=RETENCAO_DIAS)
