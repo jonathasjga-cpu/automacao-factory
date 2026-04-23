@@ -1165,7 +1165,26 @@ async function aprovarUsuario(id) {
 // ─────────────────────────────────────────────────────────
 let faturas = [];
 let checkState = {};   // índice real → bool (estado do checkbox entre filtros)
+let _sortKey = null;   // coluna ordenada
+let _sortDir = 'asc';  // 'asc' | 'desc'
 let operacaoAtual = null;
+
+function sortBy(key) {
+  if (_sortKey === key) {
+    _sortDir = _sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _sortKey = key;
+    _sortDir = 'asc';
+  }
+  renderFaturas();
+}
+
+function _sortIcon(key) {
+  if (_sortKey !== key) return '<span style="opacity:.3;margin-left:4px">⇅</span>';
+  return _sortDir === 'asc'
+    ? '<span style="color:var(--accent);margin-left:4px">▲</span>'
+    : '<span style="color:var(--accent);margin-left:4px">▼</span>';
+}
 let poolingInterval = null;
 let operacaoStartTime = null;   // Marcado no clique em "Carregar do GW"
 let expandedFactories = new Set();   // factories com logs visíveis
@@ -1325,6 +1344,31 @@ function renderFaturas() {
     return true;
   });
 
+  // Ordenação por coluna clicada
+  if (_sortKey) {
+    const get = (f) => {
+      switch (_sortKey) {
+        case 'numero':      return String(f.numero || '');
+        case 'cliente':     return String(f.cliente_nome || '').toLowerCase();
+        case 'filial':      return String(f.filial || '');
+        case 'vencimento':  {
+          // DD/MM/YYYY → YYYYMMDD
+          const p = String(f.vencimento || '').split('/');
+          return p.length === 3 ? (p[2]+p[1]+p[0]) : '';
+        }
+        case 'valor':       return Number(f.valor || 0);
+        case 'situacao':    return String(f.situacao || '');
+        default: return '';
+      }
+    };
+    faturasFiltradas.sort((a, b) => {
+      const va = get(a), vb = get(b);
+      if (va < vb) return _sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return _sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
   badge.textContent = `${faturas.length} fatura(s)${filtroFilial ? ` — ${faturasFiltradas.length} filtrada(s)` : ''}`;
 
   if (!faturasFiltradas.length) {
@@ -1390,12 +1434,12 @@ function renderFaturas() {
                 onchange="toggleMaster(this)"
                 style="width:15px;height:15px;cursor:pointer;accent-color:var(--accent)">
             </th>
-            <th>Nº Fatura</th>
-            <th>Cliente</th>
-            <th>Filial</th>
-            <th>Vencimento</th>
-            <th>Valor</th>
-            <th>Situação</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('numero')">Nº Fatura${_sortIcon('numero')}</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('cliente')">Cliente${_sortIcon('cliente')}</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('filial')">Filial${_sortIcon('filial')}</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('vencimento')">Vencimento${_sortIcon('vencimento')}</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('valor')">Valor${_sortIcon('valor')}</th>
+            <th style="cursor:pointer;user-select:none" onclick="sortBy('situacao')">Situação${_sortIcon('situacao')}</th>
             <th>Factory</th>
           </tr>
         </thead>
