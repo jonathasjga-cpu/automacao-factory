@@ -1137,6 +1137,29 @@ async function deletarUsuario(id, nome) {
   else alert('Erro ao excluir');
 }
 
+async function baixarDocumentos(opId) {
+  try {
+    const r = await fetch(`${API}/download/${opId}`);
+    if (!r.ok) {
+      const d = await r.json().catch(()=>({}));
+      throw new Error(d.detail || `Erro ${r.status}`);
+    }
+    const blob = await r.blob();
+    // Pega nome do Content-Disposition se o server enviou
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="?([^"]+)"?/);
+    const filename = m ? m[1] : `documentos-${opId}.zip`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    alert('Erro ao baixar: ' + e.message);
+  }
+}
+
 async function aprovarUsuario(id) {
   const r = await fetch(`${API}/users/${id}`, {
     method: 'PUT',
@@ -1775,9 +1798,9 @@ function _renderResumoDocumentos(rd, opId) {
 
   const btnDownload = opId
     ? `<div style="margin-top:12px;text-align:center">
-        <a href="${API}/download/${opId}" download class="btn btn-primary" style="display:inline-flex">
+        <button onclick="baixarDocumentos('${opId}')" class="btn btn-primary" style="display:inline-flex">
           📥 Baixar todos os documentos (.zip)
-        </a>
+        </button>
        </div>`
     : '';
 
