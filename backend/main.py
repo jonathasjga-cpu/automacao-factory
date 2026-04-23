@@ -102,8 +102,9 @@ def get_credenciais():
     safe = {}
     for k, v in creds.items():
         safe[k] = {
-            "usuario":    v.get("usuario", ""),
-            "url":        v.get("url", ""),
+            "usuario":     v.get("usuario", ""),
+            "senha":       v.get("senha", ""),
+            "url":         v.get("url", ""),
             "configurado": bool(v.get("senha")),
         }
     return safe

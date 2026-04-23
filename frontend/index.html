@@ -2046,6 +2046,7 @@ function _renderCredRow(s, cfg, hasDivider) {
   const isExpanded   = expandedCredencial === s.id;
   const isConfigured = !!cfg.configurado;
   const usuario      = cfg.usuario || '';
+  const senha        = cfg.senha || '';
 
   const statusDot = isConfigured
     ? `<span style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--green)"><span style="width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0"></span>Configurado</span>`
@@ -2070,7 +2071,7 @@ function _renderCredRow(s, cfg, hasDivider) {
         <div class="field" style="margin:0">
           <label>Senha</label>
           <div style="position:relative">
-            <input type="password" id="pwd-${s.id}" placeholder="${isConfigured ? '••••••••' : 'Digite a senha'}"
+            <input type="password" id="pwd-${s.id}" value="${senha.replace(/"/g,'&quot;')}" placeholder="${isConfigured ? '••••••••' : 'Digite a senha'}"
               style="padding-right:38px">
             <button type="button" onclick="toggleSenha('${s.id}')" title="Mostrar/ocultar senha"
               style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;line-height:1;padding:0">
