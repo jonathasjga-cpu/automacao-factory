@@ -304,16 +304,20 @@ async def baixar_faturas_pdf(
                     # Instala route no contexto antes do clique — cobre popup desde o primeiro request
                     await context.route("**/*", _ctx_rota_fat)
                     try:
-                        # Sobrescreve window.open pra capturar a URL sem depender de popup
-                        # (popup não funciona confiavelmente em headless)
+                        # Hook NÃO-BLOQUEANTE: captura a URL E chama window.open original.
+                        # Assim o popup abre normalmente (quando possível) e temos fallback.
                         await page.evaluate("""() => {
+                            if (window._openHookInstalled) {
+                                window._capturedPopupUrls = [];
+                                return;
+                            }
                             window._capturedPopupUrls = [];
-                            const _orig = window.open;
+                            const _orig = window.open.bind(window);
                             window.open = function(u, ...rest) {
                                 if (u) window._capturedPopupUrls.push(u);
-                                // retorna um objeto fake para não quebrar chamadas subsequentes
-                                return { closed: false, close: ()=>{}, focus: ()=>{}, location: { href: u } };
+                                return _orig(u, ...rest);
                             };
+                            window._openHookInstalled = true;
                         }""")
 
                         # Estratégia 1: expect_page pro caso do popup funcionar (fluxo original)
@@ -355,32 +359,48 @@ async def baixar_faturas_pdf(
                                     break
                         pdf_bytes = _pdf_fat_holder.get("bytes")
 
-                        # Fallback: GET direto na URL capturada
+                        # Fallback: navega a URL em uma ABA nova do contexto.
+                        # Em headless o popup não abre, mas uma page criada manualmente
+                        # faz a mesma navegação, disparando route handler e redirect p/ S3.
                         if not pdf_bytes and popup_url_fat and "about:blank" not in popup_url_fat:
-                            # Primeiro via context.request (herda cookies do GW)
+                            abs_url = popup_url_fat
+                            if abs_url.startswith("/") or abs_url.startswith("./"):
+                                abs_url = abs_url.lstrip("./")
+                                if not abs_url.startswith("/"):
+                                    abs_url = "/" + abs_url
+                                abs_url = f"{BASE_GW}{abs_url}"
+                            elif not abs_url.startswith("http"):
+                                abs_url = f"{BASE_GW}/{abs_url}"
+
+                            # Estratégia 2: abre uma aba nova e navega — equivalente ao popup
                             try:
-                                abs_url = popup_url_fat
-                                if abs_url.startswith("/"):
-                                    abs_url = f"{BASE_GW}{abs_url}"
-                                elif not abs_url.startswith("http"):
-                                    abs_url = f"{BASE_GW}/{abs_url}"
-                                resp_fat = await context.request.get(abs_url)
-                                body_fat = await resp_fat.body()
-                                log(f"  context.request status={resp_fat.status}, size={len(body_fat)}")
-                                if body_fat and b"%PDF" in body_fat[:10]:
-                                    pdf_bytes = body_fat
-                                    log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
-                                elif resp_fat.status in (301, 302) or resp_fat.status == 200:
-                                    # Pode ter redirecionado para S3 — segue manual
-                                    import httpx as _httpx
-                                    async with _httpx.AsyncClient(follow_redirects=True, timeout=30) as _hc:
-                                        _hr = await _hc.get(abs_url)
-                                        _hb = _hr.content
-                                    if _hb and b"%PDF" in _hb[:10]:
-                                        pdf_bytes = _hb
-                                        log(f"  ✅ PDF via httpx follow: {len(pdf_bytes):,} bytes")
+                                aba_pdf = await context.new_page()
+                                try:
+                                    await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
+                                except Exception:
+                                    pass
+                                for _t in range(20):
+                                    await asyncio.sleep(1.0)
+                                    if _pdf_fat_holder.get("bytes"):
+                                        break
+                                pdf_bytes = _pdf_fat_holder.get("bytes")
+                                if pdf_bytes:
+                                    log(f"  ✅ PDF via nova aba: {len(pdf_bytes):,} bytes")
+                                await aba_pdf.close()
                             except Exception as e:
-                                log(f"  Erro ao fetch popup URL: {e}")
+                                log(f"  Erro aba nova: {e}")
+
+                            # Estratégia 3: fetch direto (último recurso)
+                            if not pdf_bytes:
+                                try:
+                                    resp_fat = await context.request.get(abs_url)
+                                    body_fat = await resp_fat.body()
+                                    log(f"  context.request status={resp_fat.status}, size={len(body_fat)}")
+                                    if body_fat and b"%PDF" in body_fat[:10]:
+                                        pdf_bytes = body_fat
+                                        log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
+                                except Exception as e:
+                                    log(f"  context.request: {e}")
 
                         if popup_fat:
                             try:
