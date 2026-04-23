@@ -24,6 +24,7 @@ from factory_manager import carregar_factories_extras, salvar_factory_extra, rem
 from db import init_db, User
 from auth import get_current_user, require_admin
 from routers_auth import router as auth_router
+from arquivos_recentes import salvar_pacote, listar_pacotes, ler_pacote
 from fastapi import Depends
 
 MSG_FINALIZAR_MANUAL = (
@@ -245,11 +246,14 @@ async def salvar_documentos(req: DocumentosRequest, background_tasks: Background
 
 @app.get("/api/download/{op_id}", dependencies=[Depends(get_current_user)])
 def download_documentos(op_id: str):
+    # 1) Tenta em memória (operação recém-concluída)
     op = status_operacoes.get(op_id)
-    if not op:
-        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    arquivos = op.get("arquivos", {}) if op else None
 
-    arquivos = op.get("arquivos", {})
+    # 2) Fallback: lê do disco (arquivos de operações antigas, ainda dentro da retenção)
+    if not arquivos:
+        arquivos = ler_pacote(op_id)
+
     if not arquivos:
         raise HTTPException(status_code=404, detail="Nenhum documento disponível ainda")
 
@@ -266,6 +270,12 @@ def download_documentos(op_id: str):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="documentos-{hoje}.zip"'},
     )
+
+
+@app.get("/api/arquivos-recentes", dependencies=[Depends(get_current_user)])
+def listar_arquivos_recentes():
+    """Lista pacotes de arquivos gerados nos últimos 2 dias."""
+    return {"pacotes": listar_pacotes()}
 
 @app.post("/api/finalizar/{op_id}", dependencies=[Depends(get_current_user)])
 async def finalizar_operacao(op_id: str):
@@ -408,6 +418,17 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
     status["status"] = "concluido" if not tem_erros else "concluido_com_erros"
     status["fim"] = datetime.now().isoformat()
     salvar_operacao(op_id, status)
+
+    # Persiste arquivos gerados por 2 dias para re-download
+    try:
+        arquivos = status.get("arquivos") or {}
+        if arquivos:
+            hoje = datetime.now().strftime("%d/%m/%Y %H:%M")
+            factories_nomes = [FACTORY_NAMES.get(s, s) for s in status.get("factories", {}).keys()]
+            titulo = f"{hoje} — {', '.join(factories_nomes) or 'Operação'}"
+            salvar_pacote(op_id, arquivos, titulo=titulo)
+    except Exception as e:
+        status["logs"].append(f"⚠️ Falha ao persistir arquivos recentes: {e}")
 
 
 # ── Serve frontend ────────────────────────────────────────────────────────────

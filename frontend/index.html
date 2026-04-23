@@ -732,6 +732,10 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
     Usuários
   </div>
+  <div class="sidebar-item" onclick="showPage('arquivos')">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Arquivos
+  </div>
 </nav>
 
 <main>
@@ -790,6 +794,20 @@
   <!-- ── CONFIG ───────────────────────────────────────── -->
   <div class="page" id="page-config">
     <div id="config-container" style="max-width:720px"></div>
+  </div>
+
+  <!-- ── ARQUIVOS RECENTES ─────────────────────────────── -->
+  <div class="page" id="page-arquivos">
+    <div style="max-width:900px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <h2 style="margin:0;font-size:18px">Arquivos recentes</h2>
+          <p style="margin:4px 0 0;color:var(--text2);font-size:12px">Arquivos gerados nas últimas 48h ficam disponíveis para download.</p>
+        </div>
+        <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px" onclick="carregarArquivos()">Atualizar</button>
+      </div>
+      <div id="arquivos-container"></div>
+    </div>
   </div>
 
   <!-- ── USUÁRIOS (só admin) ───────────────────────────── -->
@@ -1239,13 +1257,55 @@ function showPage(name, fromHash) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.sidebar-item').forEach(t => t.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  const tabs = {faturas:0, status:1, relatorios:2, config:3, usuarios:4};
+  const tabs = {faturas:0, status:1, relatorios:2, config:3, usuarios:4, arquivos:5};
   if (tabs[name] !== undefined)
     document.querySelectorAll('.sidebar-item')[tabs[name]].classList.add('active');
   if (name === 'config')    carregarConfig();
   if (name === 'relatorios') carregarRelatorios();
   if (name === 'usuarios')  carregarUsuarios();
+  if (name === 'arquivos')  carregarArquivos();
   location.hash = name;
+}
+
+async function carregarArquivos() {
+  const cont = document.getElementById('arquivos-container');
+  cont.innerHTML = '<div style="color:var(--text2)">Carregando...</div>';
+  try {
+    const r = await fetch(`${API}/arquivos-recentes`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const pacotes = d.pacotes || [];
+    if (!pacotes.length) {
+      cont.innerHTML = '<div class="empty-state"><span class="icon">📦</span><h3>Sem arquivos recentes</h3><p>Arquivos gerados aparecerão aqui por até 48h.</p></div>';
+      return;
+    }
+    cont.innerHTML = pacotes.map(p => {
+      const dt = new Date(p.criado_em);
+      const dtFmt = dt.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+      const totalTam = (p.arquivos || []).reduce((s,a) => s + (a.tamanho || 0), 0);
+      const qtd = (p.arquivos || []).length;
+      const arqList = (p.arquivos || []).map(a =>
+        `<li style="color:var(--text2);font-size:12px;padding:2px 0">• ${a.nome} <span style="color:var(--muted)">(${(a.tamanho/1024).toFixed(1)} KB)</span></li>`
+      ).join('');
+      return `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:12px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:600;font-size:14px;margin-bottom:4px">${p.titulo || p.op_id}</div>
+              <div style="color:var(--text2);font-size:12px;margin-bottom:8px">
+                ${dtFmt} · ${qtd} arquivo(s) · ${(totalTam/1024).toFixed(1)} KB
+              </div>
+              <ul style="list-style:none;padding:0;margin:0;max-height:120px;overflow-y:auto">${arqList}</ul>
+            </div>
+            <button class="btn btn-primary" style="font-size:12px;padding:8px 16px;white-space:nowrap" onclick="baixarDocumentos('${p.op_id}')">
+              📥 Baixar .zip
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    cont.innerHTML = `<div style="color:var(--red)">Erro ao listar arquivos: ${e.message}</div>`;
+  }
 }
 
 // ── FATURAS ──────────────────────────────────────────────
@@ -1677,7 +1737,17 @@ function renderStatus(s) {
     </div>` : '';
 
   // Caixa de conclusão — aparece no TOPO e faz scroll automático (uma vez só)
-  const tempoTotal = operacaoStartTime ? _formatarTempo(Date.now() - operacaoStartTime) : null;
+  // Prioriza inicio/fim do backend (sobrevive reload e é exato).
+  // Fallback: operacaoStartTime em memória (enquanto rodando).
+  let tempoTotalMs = null;
+  if (s.inicio) {
+    const t0 = new Date(s.inicio).getTime();
+    const t1 = s.fim ? new Date(s.fim).getTime() : Date.now();
+    tempoTotalMs = t1 - t0;
+  } else if (operacaoStartTime) {
+    tempoTotalMs = Date.now() - operacaoStartTime;
+  }
+  const tempoTotal = tempoTotalMs != null ? _formatarTempo(tempoTotalMs) : null;
   const isConcluido = ['concluido','concluido_com_erros'].includes(s.status);
   const isCancelado = s.status === 'cancelado';
   if ((isConcluido || isCancelado) && !_conclusaoScrollado) {
