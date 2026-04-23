@@ -153,6 +153,15 @@ async def get_faturas_progresso():
     from services.excel_processor import get_progresso_carregar
     return get_progresso_carregar()
 
+@app.get("/api/faturas-cache", dependencies=[Depends(get_current_user)])
+def get_faturas_cache():
+    """
+    Retorna faturas atualmente em cache — leve, sem disparar nova execução.
+    Fallback quando /api/faturas estoura timeout do proxy Railway.
+    """
+    from services.excel_processor import _cache_faturas, processar_dataframes
+    return {"faturas": _cache_faturas, "debug_complemento": getattr(processar_dataframes, "_last_debug", [])}
+
 @app.get("/api/debug-complemento", dependencies=[Depends(get_current_user)])
 async def debug_complemento():
     from services.excel_processor import processar_dataframes, _cache_faturas

@@ -1289,6 +1289,26 @@ function _pararPollingCarregar() {
   if (_carregarPollId) { clearInterval(_carregarPollId); _carregarPollId = null; }
 }
 
+// Tenta fallback para /api/faturas-cache se a resposta principal falhar.
+async function _tentarRecuperarViaCache() {
+  // Aguarda progresso terminar (até ~2 min)
+  for (let i = 0; i < 60; i++) {
+    try {
+      const pr = await fetch(`${API}/faturas-progresso`);
+      if (pr.ok) {
+        const p = await pr.json();
+        if (p.status === 'concluido') {
+          const cr = await fetch(`${API}/faturas-cache`);
+          if (cr.ok) return (await cr.json()).faturas || [];
+        }
+        if (p.status === 'erro') return null;
+      }
+    } catch (_) {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return null;
+}
+
 async function carregarFaturas() {
   operacaoStartTime = Date.now();
   const btn = document.getElementById('btn-carregar');
@@ -1300,11 +1320,22 @@ async function carregarFaturas() {
   _carregarPollId = setInterval(_pollProgressoCarregar, 1000);
 
   try {
-    const resp = await fetch(`${API}/faturas`);
-    // Para o polling IMEDIATAMENTE antes de renderizar — evita race com o último tick
+    let data = null;
+    try {
+      const resp = await fetch(`${API}/faturas`);
+      if (resp.ok) {
+        data = await resp.json();
+      } else {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+    } catch (netErr) {
+      // Timeout do proxy ou erro de rede. Tenta recuperar via cache.
+      console.warn('/api/faturas falhou, aguardando progresso + cache:', netErr.message);
+      const cacheFats = await _tentarRecuperarViaCache();
+      if (!cacheFats) throw netErr;
+      data = { faturas: cacheFats };
+    }
     _pararPollingCarregar();
-    if (!resp.ok) throw new Error((await resp.json()).detail || 'Erro no servidor');
-    const data = await resp.json();
     faturas = data.faturas || [];
     checkState = {};
     renderFaturas();
