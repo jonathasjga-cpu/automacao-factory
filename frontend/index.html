@@ -1144,7 +1144,16 @@ async function deletarUsuario(id, nome) {
   else alert('Erro ao excluir');
 }
 
-async function baixarDocumentos(opId) {
+async function baixarDocumentos(opId, btnEl) {
+  // Tenta achar o botão clicado: event.target ou argumento explícito
+  const btn = btnEl || (typeof event !== 'undefined' ? event.currentTarget : null);
+  const textoOriginal = btn ? btn.innerHTML : null;
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.cursor = 'wait';
+    btn.innerHTML = '<span class="btn-spinner" style="margin-right:6px"></span> Baixando...';
+  }
   try {
     const r = await fetch(`${API}/download/${opId}`);
     if (!r.ok) {
@@ -1152,7 +1161,6 @@ async function baixarDocumentos(opId) {
       throw new Error(d.detail || `Erro ${r.status}`);
     }
     const blob = await r.blob();
-    // Pega nome do Content-Disposition se o server enviou
     const cd = r.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename="?([^"]+)"?/);
     const filename = m ? m[1] : `documentos-${opId}.zip`;
@@ -1162,7 +1170,22 @@ async function baixarDocumentos(opId) {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (btn) {
+      btn.innerHTML = '✓ Baixado';
+      setTimeout(() => {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+        btn.innerHTML = textoOriginal;
+      }, 1500);
+    }
   } catch (e) {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.opacity = '';
+      btn.style.cursor = '';
+      btn.innerHTML = textoOriginal;
+    }
     alert('Erro ao baixar: ' + e.message);
   }
 }
@@ -1304,7 +1327,7 @@ async function carregarArquivos() {
               </div>
               <ul style="list-style:none;padding:0;margin:0;max-height:120px;overflow-y:auto">${arqList}</ul>
             </div>
-            <button class="btn btn-primary" style="font-size:12px;padding:8px 16px;white-space:nowrap" onclick="baixarDocumentos('${p.op_id}')">
+            <button class="btn btn-primary" style="font-size:12px;padding:8px 16px;white-space:nowrap" onclick="baixarDocumentos('${p.op_id}', this)">
               📥 Baixar .zip
             </button>
           </div>
@@ -1930,7 +1953,7 @@ function _renderResumoDocumentos(rd, opId) {
 
   const btnDownload = opId
     ? `<div style="margin-top:12px;text-align:center">
-        <button onclick="baixarDocumentos('${opId}')" class="btn btn-primary" style="display:inline-flex">
+        <button onclick="baixarDocumentos('${opId}', this)" class="btn btn-primary" style="display:inline-flex">
           📥 Baixar todos os documentos (.zip)
         </button>
        </div>`
