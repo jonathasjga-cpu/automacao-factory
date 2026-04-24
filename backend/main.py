@@ -97,21 +97,32 @@ def selecionar_pasta():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/credenciais", dependencies=[Depends(get_current_user)])
-def get_credenciais():
+@app.get("/api/credenciais")
+def get_credenciais(current_user = Depends(get_current_user)):
+    """
+    Retorna credenciais compartilhadas (factories). GW é pessoal (ver /api/meu-gw).
+    Usuários comuns não veem senha em texto claro (só usuário + se configurado).
+    Admin vê tudo.
+    """
     creds = carregar_credenciais()
+    is_admin = current_user.role == "admin"
     safe = {}
     for k, v in creds.items():
+        if k == "gw":
+            continue  # GW agora é por usuário, não exibe aqui
         safe[k] = {
             "usuario":     v.get("usuario", ""),
-            "senha":       v.get("senha", ""),
+            "senha":       v.get("senha", "") if is_admin else "",
             "url":         v.get("url", ""),
             "configurado": bool(v.get("senha")),
         }
     return safe
 
-@app.post("/api/credenciais", dependencies=[Depends(get_current_user)])
+@app.post("/api/credenciais", dependencies=[Depends(require_admin)])
 def post_credenciais(req: CredenciaisRequest):
+    """Apenas admin edita credenciais compartilhadas. GW pessoal vai em /api/meu-gw."""
+    if req.sistema == "gw":
+        raise HTTPException(400, detail="GW agora é pessoal. Use /api/meu-gw.")
     salvar_credenciais(req.sistema, req.usuario, req.senha, req.url)
     return {"ok": True}
 
@@ -138,11 +149,11 @@ def delete_factory_extra(factory_id: str):
     remover_factory_extra(factory_id)
     return {"ok": True}
 
-@app.get("/api/faturas", dependencies=[Depends(get_current_user)])
-async def get_faturas():
+@app.get("/api/faturas")
+async def get_faturas(current_user = Depends(get_current_user)):
     try:
         from services.excel_processor import processar_dataframes
-        faturas = await processar_excels()
+        faturas = await processar_excels(user_id=current_user.id)
         debug = getattr(processar_dataframes, "_last_debug", [])
         return {"faturas": faturas, "debug_complemento": debug}
     except Exception as e:
@@ -207,6 +218,7 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
         "arquivos": {},
         "pasta_destino": req.pasta_destino or "",
         "usuario": current_user.login,
+        "usuario_id": current_user.id,
     }
     background_tasks.add_task(executar_automacao, op_id, req.faturas)
     return {"operacao_id": op_id}

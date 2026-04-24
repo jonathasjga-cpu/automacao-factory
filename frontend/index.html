@@ -2018,22 +2018,42 @@ let _mostrandoFormFactory = false;
 let _factoriesExtras = [];
 
 async function carregarConfig() {
-  const [respCreds, respExtras] = await Promise.all([
+  const [respCreds, respExtras, respGw] = await Promise.all([
     fetch(`${API}/credenciais`),
     fetch(`${API}/factories-extras`),
+    fetch(`${API}/meu-gw`),
   ]);
   const creds  = await respCreds.json();
   const extras = await respExtras.json();
+  window._meuGw = respGw.ok ? await respGw.json() : {};
   _factoriesExtras = extras.factories || [];
   _credsCache = creds;
   renderConfig(creds);
 }
 
+async function salvarMeuGw() {
+  const usuario = document.getElementById('meu-gw-user')?.value?.trim() || '';
+  const senha   = document.getElementById('meu-gw-pass')?.value || '';
+  if (!usuario || !senha) { alert('Preencha usuário e senha'); return; }
+  const r = await fetch(`${API}/meu-gw`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ usuario, senha }),
+  });
+  if (r.ok) {
+    window._meuGw = await r.json();
+    carregarConfig();
+  } else {
+    const d = await r.json().catch(()=>({}));
+    alert('Erro: ' + (d.detail || 'não foi possível salvar'));
+  }
+}
+
 function renderConfig(creds) {
   const container = document.getElementById('config-container');
 
-  const gw        = sistemas.find(s => s.id === 'gw');
   const factories = sistemas.filter(s => s.id !== 'gw');
+  const isAdmin = _authUser?.role === 'admin';
 
   function buildSection(label, lista) {
     const rows = lista.map((s, i) => _renderCredRow(s, creds[s.id] || {}, i < lista.length - 1)).join('');
@@ -2043,6 +2063,40 @@ function renderConfig(creds) {
         <div class="cred-card">${rows}</div>
       </div>`;
   }
+
+  // Seção "Meu acesso GW" — todos os usuários veem
+  const meuGw = window._meuGw || {};
+  const gwCardHtml = `
+    <div style="margin-bottom:28px">
+      <div class="cred-section-label">Meu acesso GW (pessoal)</div>
+      <div class="cred-card" style="padding:18px 20px">
+        <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+          <span style="font-size:20px">🌐</span>
+          <div>
+            <div style="font-weight:600;font-size:14px">GW Webtrans</div>
+            <div style="font-size:11px;color:var(--text2)">Cada usuário tem seu próprio login no GW</div>
+          </div>
+          <span style="margin-left:auto;font-size:11px;color:${meuGw.configurado?'var(--green)':'var(--muted)'}">
+            ${meuGw.configurado ? '● Configurado' : '○ Não configurado'}
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">
+          <div class="field" style="margin:0">
+            <label>Usuário</label>
+            <input type="text" id="meu-gw-user" value="${(meuGw.usuario||'').replace(/"/g,'&quot;')}" placeholder="Seu login GW">
+          </div>
+          <div class="field" style="margin:0">
+            <label>Senha</label>
+            <div style="position:relative">
+              <input type="password" id="meu-gw-pass" value="${(meuGw.senha||'').replace(/"/g,'&quot;')}" placeholder="Senha" style="padding-right:38px">
+              <button type="button" onclick="const e=document.getElementById('meu-gw-pass');e.type=e.type==='password'?'text':'password'" title="Mostrar/ocultar"
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px">👁</button>
+            </div>
+          </div>
+        </div>
+        <button class="btn btn-primary" style="font-size:13px;padding:8px 20px" onclick="salvarMeuGw()">Salvar</button>
+      </div>
+    </div>`;
 
   // Renderiza factories cadastradas pendentes de automatização
   const extrasHtml = _factoriesExtras.length ? _factoriesExtras.map((f, i) => {
@@ -2110,8 +2164,9 @@ function renderConfig(creds) {
 
   container.innerHTML = `
     <h2 style="font-size:22px;font-weight:700;margin-bottom:28px;color:var(--text)">Configurações</h2>
-    ${buildSection('Sistema', [gw])}
-    ${buildSection('Factories automatizadas', factories)}
+    ${gwCardHtml}
+    ${isAdmin ? buildSection('Factories automatizadas (compartilhadas — admin)', factories) : ''}
+    ${!isAdmin ? '<div style="color:var(--text2);font-size:13px;padding:12px;text-align:center">As credenciais das factories são gerenciadas pelo admin.</div>' : `
     <div style="margin-bottom:28px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div class="cred-section-label" style="margin:0">Factories pendentes de automatização</div>
@@ -2123,7 +2178,8 @@ function renderConfig(creds) {
         ${extrasHtml}
         ${formNovaFactory}
       </div>
-    </div>`;
+    </div>`}
+  `;
 }
 
 async function salvarNovaFactory() {

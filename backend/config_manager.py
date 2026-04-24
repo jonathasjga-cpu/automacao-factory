@@ -41,7 +41,28 @@ def carregar_credenciais() -> dict:
     except Exception:
         return {}
 
-def get_credencial(sistema: str) -> dict:
+def get_credencial(sistema: str, user_id: int | None = None) -> dict:
+    """
+    Retorna credencial do sistema.
+    - Para sistema="gw", se user_id for fornecido, busca credencial pessoal no banco.
+      Se o usuário não tem credencial GW, levanta ValueError.
+    - Para outros sistemas (factories), usa sempre o arquivo compartilhado.
+    """
+    if sistema == "gw" and user_id is not None:
+        # Import local para evitar ciclo (db -> auth -> config_manager)
+        from db import SessionLocal, GwCredencial
+        db = SessionLocal()
+        try:
+            gc = db.query(GwCredencial).filter(GwCredencial.user_id == user_id).first()
+            if not gc:
+                raise ValueError(
+                    "Você ainda não cadastrou seu acesso pessoal do GW. "
+                    "Vá em Configurações → Meu acesso GW."
+                )
+            return {"usuario": gc.usuario, "senha": gc.senha}
+        finally:
+            db.close()
+
     creds = carregar_credenciais()
     if sistema not in creds:
         raise ValueError(f"Credenciais para '{sistema}' não configuradas. Configure na tela de Configurações.")

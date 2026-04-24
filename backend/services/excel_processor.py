@@ -295,13 +295,13 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     await page.wait_for_timeout(3000)
 
 
-async def baixar_relatorios_gw() -> tuple[Path, Path | None]:
+async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path | None]:
     """
     Gera os relatórios personalizados no GW e baixa via popup.
     - Automação: filtra por emissão = hoje (ou ontem se hoje estiver vazio)
     - Complemento: sem filtro de data (retorna todo o histórico, ~2.6 MB)
     """
-    creds = get_credencial("gw")
+    creds = get_credencial("gw", user_id=user_id)
     base = "https://webtrans.saas.gwsistemas.com.br"
     hoje = datetime.now().strftime("%d/%m/%Y")
     ontem = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
@@ -601,13 +601,13 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
 
     return faturas
 
-async def processar_excels() -> list[dict]:
+async def processar_excels(user_id: int | None = None) -> list[dict]:
     """Entry point: baixa relatÃ³rios do GW e processa"""
     global _cache_faturas
     _prog_reset()
     try:
         _prog_log("🚀 Iniciando download dos relatórios do GW...")
-        path1, path2 = await baixar_relatorios_gw()
+        path1, path2 = await baixar_relatorios_gw(user_id=user_id)
         _prog_log("📊 Processando planilhas...")
         _cache_faturas = processar_dataframes(path1, path2)
         _salvar_cache(_cache_faturas)   # persiste em disco

@@ -50,7 +50,7 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
     faturas recebidas e baixa o arquivo .rem.
     """
     log = lambda msg: status["logs"].append(msg)
-    creds_gw = get_credencial("gw")
+    creds_gw = get_credencial("gw", user_id=status.get("usuario_id"))
     conta    = CONTA_POR_SISTEMA.get(sistema, "")
     hoje     = _hoje()
 

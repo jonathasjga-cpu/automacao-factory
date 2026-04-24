@@ -8,8 +8,9 @@ Variáveis de ambiente suportadas:
 import os
 from pathlib import Path
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Boolean, DateTime, func
+    create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, func
 )
+from sqlalchemy.orm import relationship
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 # Diretório local para SQLite
@@ -42,10 +43,21 @@ class User(Base):
     criado_em = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class GwCredencial(Base):
+    """Credencial GW (Webtrans) pessoal de cada usuário."""
+    __tablename__ = "gw_credenciais"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    usuario = Column(String(255), nullable=False)
+    senha = Column(String(255), nullable=False)
+    atualizado_em = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 def init_db():
     """Cria tabelas se não existirem e roda o seed do admin."""
     Base.metadata.create_all(bind=engine)
     _seed_admin()
+    _migrar_gw_compartilhado_para_admin()
 
 
 def _seed_admin():
@@ -65,6 +77,35 @@ def _seed_admin():
             print("[db] Usuário admin criado: login=admin senha=admin123")
     finally:
         db.close()
+
+
+def _migrar_gw_compartilhado_para_admin():
+    """
+    Migração one-shot: se existe credencial GW compartilhada (arquivo) e o admin
+    ainda não tem GwCredencial, copia a compartilhada pro admin.
+    Idempotente: só faz se admin não tem credencial ainda.
+    """
+    try:
+        from config_manager import carregar_credenciais
+        creds = carregar_credenciais()
+        gw = creds.get("gw") or {}
+        if not (gw.get("usuario") and gw.get("senha")):
+            return  # sem credencial compartilhada pra migrar
+        db = SessionLocal()
+        try:
+            admin = db.query(User).filter(User.role == "admin").order_by(User.id).first()
+            if not admin:
+                return
+            existe = db.query(GwCredencial).filter(GwCredencial.user_id == admin.id).first()
+            if existe:
+                return  # admin já tem, não sobrescreve
+            db.add(GwCredencial(user_id=admin.id, usuario=gw["usuario"], senha=gw["senha"]))
+            db.commit()
+            print(f"[db] Migração: credencial GW do admin copiada do arquivo compartilhado")
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"[db] Falha na migração GW (ignorando): {e}")
 
 
 def get_db() -> Session:

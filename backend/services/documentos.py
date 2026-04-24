@@ -55,8 +55,8 @@ _FILIAL_CTE = {
 
 # ─── LOGIN ────────────────────────────────────────────────────────────────────
 
-async def _login_gw(page: Page):
-    creds = get_credencial("gw")
+async def _login_gw(page: Page, user_id: int | None = None):
+    creds = get_credencial("gw", user_id=user_id)
     await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
     # Aguarda campos de login renderizarem (mais confiável que timeout fixo)
     await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
@@ -103,7 +103,7 @@ async def baixar_faturas_pdf(
         page = await context.new_page()
 
         try:
-            await _login_gw(page)
+            await _login_gw(page, user_id=status.get("usuario_id"))
 
             for sistema, faturas in faturas_por_factory.items():
                 if not faturas:
@@ -461,7 +461,7 @@ async def baixar_ctes_pdf(
         page = await context.new_page()
 
         try:
-            await _login_gw(page)
+            await _login_gw(page, user_id=status.get("usuario_id"))
 
             for sistema, faturas in faturas_por_factory.items():
                 if not faturas:

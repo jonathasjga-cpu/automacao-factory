@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from db import User, get_db
+from db import User, GwCredencial, get_db
 from auth import (
     hash_password, verify_password, criar_token,
     get_current_user, require_admin,
@@ -93,6 +93,41 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
 @router.get("/api/auth/me", response_model=UserOut)
 def me(current: User = Depends(get_current_user)):
     return current
+
+
+# ─── GW pessoal (por usuário) ─────────────────────────────────────────────────
+class MeuGwResponse(BaseModel):
+    usuario: str = ""
+    senha: str = ""
+    configurado: bool = False
+
+
+class MeuGwUpdate(BaseModel):
+    usuario: str = Field(..., min_length=1)
+    senha: str = Field(..., min_length=1)
+
+
+@router.get("/api/meu-gw", response_model=MeuGwResponse)
+def get_meu_gw(current: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    gc = db.query(GwCredencial).filter(GwCredencial.user_id == current.id).first()
+    if not gc:
+        return MeuGwResponse()
+    return MeuGwResponse(usuario=gc.usuario, senha=gc.senha, configurado=True)
+
+
+@router.put("/api/meu-gw", response_model=MeuGwResponse)
+def set_meu_gw(req: MeuGwUpdate,
+               current: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    gc = db.query(GwCredencial).filter(GwCredencial.user_id == current.id).first()
+    if gc:
+        gc.usuario = req.usuario
+        gc.senha = req.senha
+    else:
+        gc = GwCredencial(user_id=current.id, usuario=req.usuario, senha=req.senha)
+        db.add(gc)
+    db.commit(); db.refresh(gc)
+    return MeuGwResponse(usuario=gc.usuario, senha=gc.senha, configurado=True)
 
 
 # ─── Gestão de usuários (só admin) ────────────────────────────────────────────
