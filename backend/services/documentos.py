@@ -163,12 +163,13 @@ async def _aguardar_busca_cte(
     numero: str,
     log,
     max_seconds: int = 300,
-    poll_seconds: float = 1.5,
+    poll_seconds: float = 0.4,
     log_every_seconds: float = 15.0,
 ) -> bool:
     """
     Aguarda a busca CT-e terminar de forma responsiva:
-      - Polling no DOM a cada ~1.5s buscando "Total de Ocorrências: N"
+      - Polling no DOM a cada ~0.4s buscando "Total de Ocorrências: N"
+        (sai imediatamente quando o GW responde — não espera ciclo fixo)
       - A cada ~15s, loga progresso pra confirmar que ainda está ativo
       - Se aparecer marcador de erro conhecido, levanta Exception
       - Se a sessão cair (URL volta pra /login), levanta Exception
@@ -691,9 +692,10 @@ async def baixar_faturas_pdf(
                                 log(f"  URL via window.open: {popup_url_fat[:80]}")
 
                         # Aguarda route interceptar o PDF (se popup abriu e fez request)
+                        # Poll fino — sai imediatamente quando o PDF chega
                         if popup_fat:
-                            for _t in range(14):
-                                await asyncio.sleep(1.5)
+                            for _t in range(75):  # 75 × 0.4s = 30s
+                                await asyncio.sleep(0.4)
                                 if _pdf_fat_holder.get("bytes"):
                                     break
                         pdf_bytes = _pdf_fat_holder.get("bytes")
@@ -718,8 +720,8 @@ async def baixar_faturas_pdf(
                                     await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
                                 except Exception:
                                     pass
-                                for _t in range(20):
-                                    await asyncio.sleep(1.0)
+                                for _t in range(75):  # 75 × 0.4s = 30s
+                                    await asyncio.sleep(0.4)
                                     if _pdf_fat_holder.get("bytes"):
                                         break
                                 pdf_bytes = _pdf_fat_holder.get("bytes")
@@ -1001,14 +1003,15 @@ async def baixar_ctes_pdf(
                             popup_cte = await _popup_cte_info.value
 
                             # Aguarda o JS do GW gerar e carregar o PDF.
-                            # Faturas com centenas de CT-es podem levar minutos pra gerar.
-                            # Hard cap = 5 min (200 × 1.5s); loga progresso a cada 30s.
-                            for _t in range(200):
-                                await asyncio.sleep(1.5)
+                            # Poll fino (0.4s) — sai imediatamente quando o PDF chega.
+                            # Hard cap = 5 min (750 × 0.4s); loga progresso a cada 30s.
+                            for _t in range(750):
+                                await asyncio.sleep(0.4)
                                 if _pdf_cte_holder.get("bytes"):
                                     break
-                                if _t > 0 and _t % 20 == 0:
-                                    log(f"    ⏳ Aguardando PDF CT-e... ({int(_t * 1.5)}s, máx 5min)")
+                                # log a cada 75 iterações (= 30s)
+                                if _t > 0 and _t % 75 == 0:
+                                    log(f"    ⏳ Aguardando PDF CT-e... ({int(_t * 0.4)}s, máx 5min)")
 
                             pdf_bytes = _pdf_cte_holder.get("bytes")
 
