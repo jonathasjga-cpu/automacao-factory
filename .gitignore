@@ -6,6 +6,7 @@ __pycache__/
 .env
 
 # Debug screenshots
+backend/debug/
 backend/debug*.png
 backend/debug*.py
 backend/debug*.json

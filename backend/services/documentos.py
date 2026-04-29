@@ -1,4 +1,5 @@
 import asyncio
+import time
 import zipfile
 import io
 import re
@@ -55,6 +56,50 @@ _FILIAL_CTE = {
 
 # ─── LOGIN ────────────────────────────────────────────────────────────────────
 
+# URLs / textos típicos de telas que bloqueiam um usuário GW recém-criado
+_FIRST_LOGIN_URL_MARKERS = (
+    "trocar-senha", "troca-senha", "trocarSenha", "alterarSenha",
+    "primeiro-acesso", "primeiroAcesso",
+    "aceitar-termo", "aceitarTermo", "termo-uso",
+    "redefinir", "expirou",
+)
+_FIRST_LOGIN_TEXT_MARKERS = (
+    "troca de senha",
+    "primeiro acesso",
+    "aceitar os termos",
+    "aceite o termo",
+    "termo de uso",
+    "senha expirada",
+    "redefinir senha",
+    "altere sua senha",
+)
+
+async def _diagnosticar_pos_login(page: Page) -> None:
+    """
+    Detecta telas de bloqueio que aparecem após o primeiro login de um
+    usuário GW recém-criado (troca de senha obrigatória, aceite de termo).
+    """
+    url_low = page.url.lower()
+    for m in _FIRST_LOGIN_URL_MARKERS:
+        if m.lower() in url_low:
+            raise Exception(
+                f"Usuário GW está em fluxo de primeiro acesso (URL: {page.url}). "
+                "Faça login manual no GW pelo menos uma vez para concluir "
+                "troca de senha/aceite de termo, depois rode a automação novamente."
+            )
+    try:
+        body_text = (await page.inner_text("body", timeout=2000)).lower()
+    except Exception:
+        return
+    for marker in _FIRST_LOGIN_TEXT_MARKERS:
+        if marker in body_text:
+            raise Exception(
+                f"Tela de bloqueio detectada após login GW: '{marker}'. "
+                "Faça login manual no GW para concluir cadastro/troca de senha/"
+                "aceite de termo, depois rode a automação novamente."
+            )
+
+
 async def _login_gw(page: Page, user_id: int | None = None):
     creds = get_credencial("gw", user_id=user_id)
     await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
@@ -69,6 +114,10 @@ async def _login_gw(page: Page, user_id: int | None = None):
     except Exception:
         if "login" in page.url.lower():
             raise Exception("Login GW falhou — verifique as credenciais em Configurações.")
+
+    # Detecta telas de primeiro acesso que ficam fora de /login mas bloqueiam navegação
+    await _diagnosticar_pos_login(page)
+
     # Garante que chegamos na home (o GW pode redirecionar por etapas)
     if "/home" not in page.url:
         await page.goto(f"{BASE_GW}/home", wait_until="load", timeout=30000)
@@ -78,6 +127,148 @@ async def _login_gw(page: Page, user_id: int | None = None):
     except Exception:
         pass
     await page.wait_for_timeout(1500)
+
+    # Reverifica após o /home (alguns redirecionamentos só acontecem nessa etapa)
+    await _diagnosticar_pos_login(page)
+
+
+# ─── DIAGNÓSTICO DE BUSCA CTE ────────────────────────────────────────────────
+
+# Marcadores que indicam que o servidor barrou a busca por permissão/sessão
+_BUSCA_CTE_ERRO_MARKERS = (
+    "sem permiss", "acesso negado", "não autorizado", "nao autorizado",
+    "sessão expirada", "sessao expirada",
+    "usuário sem perfil", "usuario sem perfil",
+    "filial não dispon", "filial nao dispon",
+    "perfil insuficiente",
+)
+
+
+async def _salvar_screenshot_debug(page: Page, prefix: str) -> str | None:
+    """Salva screenshot em backend/debug/. Retorna o caminho ou None em falha."""
+    try:
+        debug_dir = Path(__file__).resolve().parent.parent / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        path = debug_dir / f"{prefix}-{stamp}.png"
+        await page.screenshot(path=str(path), full_page=True)
+        return str(path)
+    except Exception:
+        return None
+
+
+async def _aguardar_busca_cte(
+    page: Page,
+    occ_antes: str,
+    numero: str,
+    log,
+    max_seconds: int = 300,
+    poll_seconds: float = 1.5,
+    log_every_seconds: float = 15.0,
+) -> bool:
+    """
+    Aguarda a busca CT-e terminar de forma responsiva:
+      - Polling no DOM a cada ~1.5s buscando "Total de Ocorrências: N"
+      - A cada ~15s, loga progresso pra confirmar que ainda está ativo
+      - Se aparecer marcador de erro conhecido, levanta Exception
+      - Se a sessão cair (URL volta pra /login), levanta Exception
+      - Hard cap em max_seconds (default 300s = 5 min)
+    Retorna True se encontrou o resultado; False se estourou o cap.
+    """
+    inicio = time.monotonic()
+    last_log = 0.0
+    while True:
+        elapsed = time.monotonic() - inicio
+        if elapsed >= max_seconds:
+            return False
+
+        if "login" in page.url.lower() and "CTeControlador" not in page.url:
+            raise Exception("sessão GW caiu — página redirecionou pra /login durante a busca")
+
+        try:
+            estado = await page.evaluate(
+                """(antes) => {
+                    if (!document.body) return { ok: false, texto: '' };
+                    const t = document.body.innerText || '';
+                    const m = t.match(/Total de Ocorr.ncias:\\s*\\d+/);
+                    if (m && m[0] !== antes) return { ok: true, texto: m[0] };
+                    return { ok: false, texto: t.slice(0, 800) };
+                }""",
+                occ_antes,
+            )
+            if estado.get("ok"):
+                if elapsed > 5:
+                    log(f"    ✓ Resultado apareceu após {int(elapsed)}s ({estado.get('texto', '')})")
+                return True
+
+            t_low = (estado.get("texto") or "").lower()
+            for marker in _BUSCA_CTE_ERRO_MARKERS:
+                if marker in t_low:
+                    raise Exception(f"GW respondeu com erro: '{marker}'")
+        except Exception as e:
+            if "GW respondeu com erro" in str(e) or "sessão GW caiu" in str(e):
+                raise
+
+        if elapsed - last_log >= log_every_seconds:
+            log(f"    ⏳ Aguardando GW computar resultados... ({int(elapsed)}s, máx 5min)")
+            last_log = elapsed
+
+        await asyncio.sleep(poll_seconds)
+
+
+async def _diagnosticar_busca_cte(page: Page, numero: str, filial_label: str) -> str:
+    """Mensagem acionável quando a busca CTe falha."""
+    info: list[str] = [f"URL: {page.url}"]
+    try:
+        info.append(f"título: {await page.title()}")
+    except Exception:
+        pass
+    body_text = ""
+    try:
+        body_text = await page.inner_text("body", timeout=3000)
+    except Exception:
+        pass
+    body_low = body_text.lower()
+
+    for marker in _BUSCA_CTE_ERRO_MARKERS:
+        if marker in body_low:
+            info.append(f"detectado: '{marker}'")
+            info.append("Provavelmente o usuário GW não tem permissão para o módulo "
+                        "CT-e ou para a filial selecionada. Confirme com o admin do GW.")
+            shot = await _salvar_screenshot_debug(page, f"cte-{numero}-permissao")
+            if shot: info.append(f"screenshot: {shot}")
+            return " | ".join(info)
+
+    try:
+        opcoes_filial = await page.evaluate(
+            """() => {
+                const s = document.querySelector('#filial');
+                if (!s) return null;
+                return [...s.options].map(o => o.text);
+            }"""
+        )
+        if opcoes_filial is None:
+            info.append("select #filial não encontrado na tela")
+        elif filial_label not in opcoes_filial:
+            info.append(f"#filial não tem a opção '{filial_label}' "
+                        f"(disponíveis: {opcoes_filial}). Usuário GW pode não ter "
+                        "acesso a essa filial.")
+            shot = await _salvar_screenshot_debug(page, f"cte-{numero}-filial")
+            if shot: info.append(f"screenshot: {shot}")
+            return " | ".join(info)
+    except Exception:
+        pass
+
+    if "login" in page.url.lower():
+        info.append("redirecionado para /login — sessão GW caiu durante a busca")
+        return " | ".join(info)
+
+    snippet = body_text.strip().replace("\n", " ")[:300]
+    info.append(f"trecho da página: '{snippet}'")
+    shot = await _salvar_screenshot_debug(page, f"cte-{numero}-timeout")
+    if shot: info.append(f"screenshot: {shot}")
+    return " | ".join(info)
+
 
 # ─── S3 CAPTURE ──────────────────────────────────────────────────────────────
 
@@ -229,19 +420,34 @@ async def baixar_faturas_pdf(
 
                     # Passo 2: marca os que pertencem a esta factory (referência fresca)
                     marcadas = 0
+                    nums_marcados: list[str] = []
                     for cb_id, num in ids_marcar:
                         log(f"  → Marcando fatura {num} (#{cb_id})")
                         try:
                             await page.locator(f'#{cb_id}').check()
                             marcadas += 1
+                            nums_marcados.append(num)
                         except Exception as e_cb:
                             log(f"  ⚠️ Erro ao marcar {num}: {e_cb}")
 
+                    # Faturas que o usuário pediu mas o GW não retornou na busca de hoje
+                    nums_marcados_norm = {_normalizar(n) for n in nums_marcados}
+                    faltando = sorted([
+                        n for n in numeros_raw
+                        if _normalizar(n) not in nums_marcados_norm
+                    ])
+
                     if marcadas == 0:
                         log(f"  ⚠️ Nenhuma fatura marcada. Esperado: {sorted(numeros_norm)} | Página: {na_pagina}")
-                        rd["fatura_pdf"] = {"ok": False, "motivo": "fatura não encontrada no GW (data de hoje)"}
+                        rd["fatura_pdf"] = {
+                            "ok": False,
+                            "motivo": "fatura não encontrada no GW (data de hoje)",
+                            "faturas_faltando": sorted(numeros_raw),
+                        }
                         continue
 
+                    if faltando:
+                        log(f"  ⚠️ {len(faltando)} fatura(s) faltando no GW: {faltando}")
                     log(f"  ✓ {marcadas} fatura(s) marcada(s)")
 
                     # Seleciona Modelo 10 — busca qualquer select que tenha opção "Modelo 10"
@@ -415,7 +621,11 @@ async def baixar_faturas_pdf(
 
                     if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
                         log(f"  ⚠️ PDF de fatura não capturado — {nome_factory}")
-                        rd["fatura_pdf"] = {"ok": False, "motivo": "PDF não capturado"}
+                        rd["fatura_pdf"] = {
+                            "ok": False,
+                            "motivo": "PDF não capturado",
+                            "faturas_faltando": sorted(numeros_raw),
+                        }
                         continue
 
                     nome_arquivo = f"Fatura - {nome_factory} - {_hoje_fmt()}.pdf"
@@ -427,11 +637,21 @@ async def baixar_faturas_pdf(
                         log(f"  ✅ Salvo em disco: {pasta}\\{nome_arquivo}")
                     else:
                         log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
-                    rd["fatura_pdf"] = {"ok": True, "arquivo": nome_arquivo, "qtd": marcadas}
+                    rd["fatura_pdf"] = {
+                        "ok": True,
+                        "arquivo": nome_arquivo,
+                        "qtd": marcadas,
+                        "faturas_marcadas": sorted(nums_marcados),
+                        "faturas_faltando": faltando,
+                    }
 
                 except Exception as e:
                     log(f"  ❌ Erro fatura PDF {nome_factory}: {e}")
-                    rd["fatura_pdf"] = {"ok": False, "motivo": str(e)[:120]}
+                    rd["fatura_pdf"] = {
+                        "ok": False,
+                        "motivo": str(e)[:120],
+                        "faturas_faltando": sorted(numeros_raw),
+                    }
 
         except Exception as e:
             log(f"  ❌ Erro geral faturas PDF: {e}")
@@ -491,7 +711,21 @@ async def baixar_ctes_pdf(
                             wait_until="load",
                             timeout=60000,
                         )
-                        await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
+                        try:
+                            await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
+                        except Exception:
+                            url_atual = page.url
+                            try:
+                                txt = (await page.inner_text("body", timeout=2000)).strip()[:300]
+                            except Exception:
+                                txt = "(sem texto)"
+                            shot = await _salvar_screenshot_debug(page, f"cte-{numero}-tela-nao-carregou")
+                            raise Exception(
+                                f"Tela do CTeControlador não carregou (botão #pesquisar não apareceu). "
+                                f"Usuário GW pode não ter permissão ao módulo CT-e. "
+                                f"URL: {url_atual} | trecho: '{txt}'"
+                                + (f" | screenshot: {shot}" if shot else "")
+                            )
 
                         # 2. Filtro = "Número Fatura"
                         await page.locator("#campo_consulta").select_option(label="Número Fatura")
@@ -559,16 +793,25 @@ async def baixar_ctes_pdf(
                             }
                         }""")
 
-                        # 9. Aguarda o texto de ocorrências realmente mudar na DOM
-                        await page.wait_for_function(
-                            """(antes) => {
-                                if (!document.body) return false;
-                                const m = document.body.innerText.match(/Total de Ocorr.ncias:\\s*\\d+/);
-                                return m !== null && m[0] !== antes;
-                            }""",
-                            arg=occ_antes,
-                            timeout=30000,
-                        )
+                        # 9. Espera responsiva: poll do DOM com log de progresso, hard cap 5min.
+                        #    Faturas com muitos CT-es podem demorar 1-3 minutos no GW.
+                        try:
+                            achou = await _aguardar_busca_cte(
+                                page, occ_antes, numero, log,
+                                max_seconds=300,        # 5 min — hard cap
+                                poll_seconds=1.5,       # checa a cada 1.5s
+                                log_every_seconds=15.0, # mostra progresso a cada 15s
+                            )
+                        except Exception as e:
+                            diag = await _diagnosticar_busca_cte(page, numero, filial_label)
+                            raise Exception(
+                                f"Busca CT-e da fatura {numero} interrompida: {e}. {diag}"
+                            )
+                        if not achou:
+                            diag = await _diagnosticar_busca_cte(page, numero, filial_label)
+                            raise Exception(
+                                f"Busca CT-e da fatura {numero} não retornou em 5 min. {diag}"
+                            )
 
                         # 10. Verifica total de CT-es encontrados
                         page_text = await page.inner_text("body")

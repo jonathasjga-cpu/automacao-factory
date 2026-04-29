@@ -1943,12 +1943,54 @@ function _renderResumoDocumentos(rd, opId) {
         : `<span style="color:var(--red)">❌</span>`;
     }
 
-    return `<tr style="border-top:1px solid var(--border)">
+    // Pendências para download manual:
+    //   - Faturas (boleto) que o GW não retornou na busca
+    //   - CT-es que falharam por fatura
+    const pendencias = [];
+    const faturasFaltando = (b && Array.isArray(b.faturas_faltando)) ? b.faturas_faltando : [];
+    if (faturasFaltando.length) {
+      pendencias.push({
+        rotulo: 'Boleto/Fatura PDF',
+        itens: faturasFaltando.map(n => ({ texto: `Fatura ${n}`, motivo: 'não retornou na busca do GW' })),
+      });
+    }
+    const ctesFalha = ctes.filter(c => !c.ok);
+    if (ctesFalha.length) {
+      pendencias.push({
+        rotulo: 'CTes',
+        itens: ctesFalha.map(c => ({ texto: `Fatura ${c.numero}`, motivo: c.motivo || 'falhou' })),
+      });
+    }
+
+    let linhaPrincipal = `<tr style="border-top:1px solid var(--border)">
       <td style="padding:9px 16px;text-align:left;font-size:13px;color:var(--text)">${nome}</td>
       <td style="padding:9px 16px;text-align:center;font-size:13px">${boletoCell}</td>
       <td style="padding:9px 16px;text-align:center;font-size:13px">${ctesCell}</td>
       <td style="padding:9px 16px;text-align:center;font-size:13px">${zipCell}</td>
     </tr>`;
+
+    let linhaPendencias = '';
+    if (pendencias.length) {
+      const blocos = pendencias.map(p => {
+        const itens = p.itens.map(it =>
+          `<li style="margin:2px 0;font-size:12px">
+            <span style="color:var(--text);font-family:monospace">${it.texto}</span>
+            <span style="color:var(--muted)"> — ${it.motivo}</span>
+          </li>`
+        ).join('');
+        return `<div style="margin:4px 0">
+          <span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.4px">⚠ ${p.rotulo} pendentes (baixar manualmente)</span>
+          <ul style="margin:4px 0 6px 18px;padding:0;list-style:disc">${itens}</ul>
+        </div>`;
+      }).join('');
+      linhaPendencias = `<tr style="background:rgba(239,68,68,0.04)">
+        <td colspan="4" style="padding:8px 16px 10px 30px;border-top:1px dashed var(--border)">
+          ${blocos}
+        </td>
+      </tr>`;
+    }
+
+    return linhaPrincipal + linhaPendencias;
   }).join('');
 
   const btnDownload = opId
