@@ -162,18 +162,19 @@ async def _aguardar_busca_cte(
     occ_antes: str,
     numero: str,
     log,
-    max_seconds: int = 300,
+    max_seconds: int = 120,
     poll_seconds: float = 0.4,
     log_every_seconds: float = 15.0,
 ) -> bool:
     """
     Aguarda a busca CT-e terminar de forma responsiva:
-      - Polling no DOM a cada ~0.4s buscando "Total de Ocorrências: N"
-        (sai imediatamente quando o GW responde — não espera ciclo fixo)
-      - A cada ~15s, loga progresso pra confirmar que ainda está ativo
+      - Polling no DOM a cada ~0.4s
+      - Detecta múltiplos sinais de fim: "Total de Ocorrências: N" (com mudança),
+        "Nenhum/sem resultados", URL com paginaResultados, ou resposta HTTP
+      - Sai imediatamente quando algum sinal aparece (não espera ciclo fixo)
       - Se aparecer marcador de erro conhecido, levanta Exception
       - Se a sessão cair (URL volta pra /login), levanta Exception
-      - Hard cap em max_seconds (default 300s = 5 min)
+      - Hard cap em max_seconds (default 120s = 2 min)
     Retorna True se encontrou o resultado; False se estourou o cap.
     """
     inicio = time.monotonic()
@@ -191,8 +192,31 @@ async def _aguardar_busca_cte(
                 """(antes) => {
                     if (!document.body) return { ok: false, texto: '' };
                     const t = document.body.innerText || '';
-                    const m = t.match(/Total de Ocorr.ncias:\\s*\\d+/);
-                    if (m && m[0] !== antes) return { ok: true, texto: m[0] };
+
+                    // Sinal 1: "Total de Ocorrências: N" com valor diferente do anterior
+                    const m1 = t.match(/Total de Ocorr.ncias:\\s*(\\d+)/);
+                    if (m1 && m1[0] !== antes) return { ok: true, texto: m1[0], total: parseInt(m1[1]) };
+
+                    // Sinal 2: variantes de "Ocorrências: N"
+                    const m2 = t.match(/Ocorr.ncias:\\s*(\\d+)/);
+                    if (m2 && m2[0] !== antes) return { ok: true, texto: m2[0], total: parseInt(m2[1]) };
+
+                    // Sinal 3: URL contém paginaResultados (busca submeteu)
+                    if (location && location.search && location.search.includes('paginaResultados')) {
+                        return { ok: true, texto: 'URL paginaResultados', total: -1 };
+                    }
+
+                    // Sinal 4: mensagem de "0 resultados" / "Nenhum encontrado"
+                    if (/Nenhum (?:resultado|registro|CT-?e)|N[ãa]o h[áa] (?:registros|resultados)|sem resultados|0 registros/i.test(t)) {
+                        return { ok: true, texto: '0 resultados', total: 0 };
+                    }
+
+                    // Sinal 5: tabela de resultados visível com linhas
+                    const tbodyVis = document.querySelectorAll('table tbody tr');
+                    if (tbodyVis.length > 1) {
+                        return { ok: true, texto: `tabela com ${tbodyVis.length} linhas`, total: -1 };
+                    }
+
                     return { ok: false, texto: t.slice(0, 800) };
                 }""",
                 occ_antes,
@@ -933,8 +957,8 @@ async def baixar_ctes_pdf(
                         try:
                             achou = await _aguardar_busca_cte(
                                 page, occ_antes, numero, log,
-                                max_seconds=300,        # 5 min — hard cap
-                                poll_seconds=1.5,       # checa a cada 1.5s
+                                max_seconds=120,        # 2 min — sai antes em 0 resultados
+                                poll_seconds=0.4,       # poll fino — saída imediata
                                 log_every_seconds=15.0, # mostra progresso a cada 15s
                             )
                         except Exception as e:
