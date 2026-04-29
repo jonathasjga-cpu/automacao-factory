@@ -1002,18 +1002,28 @@ async def baixar_ctes_pdf(
 
                             popup_cte = await _popup_cte_info.value
 
-                            # Aguarda o JS do GW gerar e carregar o PDF.
-                            # Poll fino (0.4s) — sai imediatamente quando o PDF chega.
-                            # Hard cap = 5 min (750 × 0.4s); loga progresso a cada 30s.
-                            for _t in range(750):
-                                await asyncio.sleep(0.4)
-                                if _pdf_cte_holder.get("bytes"):
-                                    break
-                                # log a cada 75 iterações (= 30s)
-                                if _t > 0 and _t % 75 == 0:
-                                    log(f"    ⏳ Aguardando PDF CT-e... ({int(_t * 0.4)}s, máx 5min)")
-
-                            pdf_bytes = _pdf_cte_holder.get("bytes")
+                            # Estratégia adaptativa:
+                            # - Faturas pequenas (<= 50 CT-es): popup geralmente devolve o PDF direto.
+                            #   Espera curta (60s); se não vier, cai nos fallbacks.
+                            # - Faturas grandes (> 50 CT-es): GW manda pra fila assíncrona.
+                            #   Pula popup e vai direto pro Meus Relatórios.
+                            CTES_LIMITE_FILA = 50
+                            if total_ctes > CTES_LIMITE_FILA:
+                                log(f"    📦 {total_ctes} CT-es: pulando popup, indo direto pro Meus Relatórios")
+                                # Pequena pausa pra garantir que o servidor recebeu o pedido
+                                await asyncio.sleep(3)
+                                pdf_bytes = None
+                            else:
+                                # Aguarda o JS do GW gerar e carregar o PDF.
+                                # Poll fino (0.4s) — sai imediatamente quando o PDF chega.
+                                # Cap = 60s (150 × 0.4s); log a cada 20s.
+                                for _t in range(150):
+                                    await asyncio.sleep(0.4)
+                                    if _pdf_cte_holder.get("bytes"):
+                                        break
+                                    if _t > 0 and _t % 50 == 0:
+                                        log(f"    ⏳ Aguardando PDF CT-e... ({int(_t * 0.4)}s, máx 60s)")
+                                pdf_bytes = _pdf_cte_holder.get("bytes")
 
                             # Fallback: popup navegou para URL direta do PDF
                             if not pdf_bytes:
@@ -1095,7 +1105,7 @@ async def baixar_ctes_pdf(
                             try:
                                 pdf_bytes = await _baixar_cte_de_meus_relatorios(
                                     page, context, marcador_relatorio, log,
-                                    max_seconds=300,
+                                    max_seconds=180,  # 3min — relatórios já chegam em 1-2min
                                 )
                             except Exception as e:
                                 log(f"    Erro fallback Meus Relatórios: {e}")
