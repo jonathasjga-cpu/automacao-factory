@@ -922,7 +922,21 @@ async def baixar_ctes_pdf(
                             if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); }
                         }""")
                         await page.locator("#filial").select_option(label=filial_label)
-                        log(f"    ✓ Filtros configurados (filial={filial_label})")
+
+                        # 6b. LIMPA filtros de data — busca é por número de FATURA, não por
+                        # data de emissão do CT-e (CT-es da fatura podem ter sido emitidos
+                        # em outros dias). O GW pré-preenche com hoje, então tem que zerar.
+                        await page.evaluate("""() => {
+                            const ids = ['dtemissao1','dtemissao2','dataEmissao1','dataEmissao2'];
+                            for (const id of ids) {
+                                const el = document.getElementById(id);
+                                if (el) {
+                                    el.value = '';
+                                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                                }
+                            }
+                        }""")
+                        log(f"    ✓ Filtros configurados (filial={filial_label}, sem filtro de data)")
 
                         # 7. Captura texto atual das ocorrências para detectar mudança
                         occ_antes = await page.evaluate(
