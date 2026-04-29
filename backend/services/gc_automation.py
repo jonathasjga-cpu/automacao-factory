@@ -192,8 +192,21 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
 async def fazer_login_gc(page: Page, sistema: str):
     """Login na plataforma GC Recursos."""
     creds = get_credencial(sistema)
-    await page.goto(f"{GC_URL}/login", wait_until="domcontentloaded", timeout=30000)
-    await page.locator('#Email').wait_for(state="visible", timeout=10000)
+    # GC fica em endpoint HTTP (port 9000) que pode ser lento/instável.
+    # Usa timeout maior + retry pra cobrir variações de rede.
+    last_exc = None
+    for tentativa in range(1, 4):
+        try:
+            await page.goto(f"{GC_URL}/login", wait_until="domcontentloaded", timeout=90000)
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            if tentativa < 3:
+                await page.wait_for_timeout(3000)
+    if last_exc:
+        raise Exception(f"GC login não respondeu após 3 tentativas: {last_exc}")
+    await page.locator('#Email').wait_for(state="visible", timeout=15000)
     await page.locator('#Email').fill(creds["usuario"])
     await page.locator('#Password').fill(creds["senha"])
     await page.locator('#btnEntrar').click()

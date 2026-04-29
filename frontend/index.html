@@ -751,6 +751,11 @@
         <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
         Executar Selecionadas
       </button>
+      <button class="btn btn-ghost" id="btn-baixar" onclick="baixarApenasArquivos()" disabled
+        title="Pula a digitação nas factories e baixa apenas boletos + CT-es das selecionadas">
+        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+        Apenas baixar arquivos
+      </button>
       <button class="btn btn-ghost" onclick="selecionarTodas()">Selecionar Todas</button>
       <select id="filtro-filial" onchange="renderFaturas()" style="height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;width:auto;flex-shrink:0;">
         <option value="">Todas as filiais</option>
@@ -1430,6 +1435,7 @@ async function carregarFaturas() {
     checkState = {};
     renderFaturas();
     document.getElementById('btn-executar').disabled = faturas.length === 0;
+    document.getElementById('btn-baixar').disabled = faturas.length === 0;
   } catch(e) {
     _pararPollingCarregar();
     alert('Erro ao carregar faturas:\n' + e.message);
@@ -1605,6 +1611,7 @@ function excluirSelecionadas() {
   faturas = faturas.filter((_, i) => !indices.includes(i));
   renderFaturas();
   document.getElementById('btn-executar').disabled = faturas.length === 0;
+    document.getElementById('btn-baixar').disabled = faturas.length === 0;
 }
 
 async function cancelarAutomacao() {
@@ -1616,12 +1623,10 @@ async function cancelarAutomacao() {
   } catch (e) { /* ignora erro de rede */ }
 }
 
-async function executarAutomacao() {
+function _coletarSelecionadas() {
   const filtroFilial = document.getElementById('filtro-filial')?.value || '';
-
   const selecionadas = [];
   faturas.forEach((f, i) => {
-    // Aplica filtro de filial: se houver filtro ativo, ignora faturas fora dele
     if (filtroFilial) {
       const isSP = f.filial?.includes('SP');
       if (filtroFilial === 'sp' && !isSP) return;
@@ -1631,7 +1636,39 @@ async function executarAutomacao() {
     const factory = document.getElementById(`factory-${i}`);
     if (chk?.checked) selecionadas.push({ numero: f.numero, factory: factory?.value || f.factory_sugerida || 'ignorar' });
   });
+  return selecionadas;
+}
 
+async function _disparaOperacao(apenasDocumentos) {
+  const selecionadas = _coletarSelecionadas();
+  if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
+    alert('Nenhuma fatura selecionada!');
+    return;
+  }
+  const resp = await fetch(`${API}/executar`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      faturas: selecionadas,
+      pasta_destino: null,
+      inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null,
+      apenas_documentos: !!apenasDocumentos,
+    }),
+  });
+  const data = await resp.json();
+  operacaoAtual = data.operacao_id;
+  _conclusaoScrollado = false;
+  showPage('status');
+  iniciarPolling();
+}
+
+async function baixarApenasArquivos() {
+  if (!confirm('Vai pular a digitação nas factories e baixar apenas boletos + CT-es das faturas selecionadas. Confirma?')) return;
+  await _disparaOperacao(true);
+}
+
+async function executarAutomacao() {
+  const selecionadas = _coletarSelecionadas();
   if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
     alert('Nenhuma fatura selecionada para envio!');
     return;

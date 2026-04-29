@@ -68,6 +68,7 @@ class ExecutarRequest(BaseModel):
     faturas: List[FaturaSelecao]
     pasta_destino: Optional[str] = None
     inicio: Optional[str] = None  # ISO timestamp desde "Carregar do GW"
+    apenas_documentos: Optional[bool] = False  # se True, pula factories e só baixa documentos
 
 class DocumentosRequest(BaseModel):
     operacao_id: str
@@ -219,6 +220,7 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
         "pasta_destino": req.pasta_destino or "",
         "usuario": current_user.login,
         "usuario_id": current_user.id,
+        "apenas_documentos": bool(req.apenas_documentos),
     }
     background_tasks.add_task(executar_automacao, op_id, req.faturas)
     return {"operacao_id": op_id}
@@ -371,8 +373,23 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
             fs["erros"].append(str(e))
             fs["logs"].append(f"❌ Erro fatal: {str(e)}")
 
-    # Executa todas as factories em paralelo — guarda tasks para poder cancelar
-    tasks = [asyncio.create_task(_run(sistema, fat_lista)) for sistema, fat_lista in por_factory.items()]
+    # Modo "apenas_documentos": pula a digitação nas factories e vai direto pro
+    # salvamento de documentos (boletos + CT-es).
+    if status.get("apenas_documentos"):
+        status["logs"].append("📥 Modo 'Apenas baixar arquivos' — pulando digitação nas factories")
+        # Marca todas as factories como concluídas com as faturas selecionadas
+        # (necessário pro resumo e pra preservar a relação fatura→factory).
+        for sistema, fat_lista in por_factory.items():
+            fs = status["factories"][sistema]
+            fs["status"] = "concluido"
+            fs["concluidas"] = len(fat_lista)
+            fs["logs"].append("⏭️ Digitação pulada (modo 'Apenas baixar arquivos')")
+            for sel in fat_lista:
+                fs["faturas_salvas"].add(sel.numero)
+        tasks = []
+    else:
+        # Executa todas as factories em paralelo — guarda tasks para poder cancelar
+        tasks = [asyncio.create_task(_run(sistema, fat_lista)) for sistema, fat_lista in por_factory.items()]
     status["_tasks"] = tasks
     try:
         await asyncio.gather(*tasks, return_exceptions=True)

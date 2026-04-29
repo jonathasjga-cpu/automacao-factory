@@ -864,28 +864,53 @@ async def baixar_ctes_pdf(
 
                             popup_cte = await _popup_cte_info.value
 
-                            # Aguarda o JS do GW gerar e carregar o PDF (máx 90s)
-                            for _t in range(60):
+                            # Aguarda o JS do GW gerar e carregar o PDF.
+                            # Faturas com centenas de CT-es podem levar minutos pra gerar.
+                            # Hard cap = 5 min (200 × 1.5s); loga progresso a cada 30s.
+                            for _t in range(200):
                                 await asyncio.sleep(1.5)
                                 if _pdf_cte_holder.get("bytes"):
                                     break
-                                if _t == 5:
-                                    log(f"    Aguardando PDF CT-e... (URL: {popup_cte.url[:60]})")
+                                if _t > 0 and _t % 20 == 0:
+                                    log(f"    ⏳ Aguardando PDF CT-e... ({int(_t * 1.5)}s, máx 5min)")
 
                             pdf_bytes = _pdf_cte_holder.get("bytes")
 
                             # Fallback: popup navegou para URL direta do PDF
                             if not pdf_bytes:
                                 popup_url_cte = popup_cte.url
-                                log(f"    Popup URL final: {popup_url_cte}")
-                                if popup_url_cte and "about:blank" not in popup_url_cte \
-                                        and "redireciona_relatorio" not in popup_url_cte:
+                                log(f"    Popup URL final: {popup_url_cte[:120]}{'...' if len(popup_url_cte)>120 else ''}")
+
+                                # redireciona_relatorio.jsp tem ?url=... com a URL real do listar_cte.jsp
+                                # Extrai e tenta a URL interna
+                                fetch_urls: list[str] = []
+                                if "redireciona_relatorio" in popup_url_cte:
                                     try:
-                                        resp_fb = await context.request.get(popup_url_cte)
+                                        from urllib.parse import urlparse, parse_qs, urljoin, unquote
+                                        qs = parse_qs(urlparse(popup_url_cte).query)
+                                        url_interna = qs.get("url", [""])[0]
+                                        if url_interna:
+                                            url_interna = unquote(url_interna)
+                                            if not url_interna.startswith("http"):
+                                                url_interna = urljoin(BASE_GW + "/", url_interna.lstrip("./"))
+                                            fetch_urls.append(url_interna)
+                                            log(f"    redireciona_relatorio → {url_interna[:120]}{'...' if len(url_interna)>120 else ''}")
+                                    except Exception as e:
+                                        log(f"    Erro ao parsear redireciona_relatorio: {e}")
+
+                                # Sempre tenta a URL final como segundo recurso
+                                if popup_url_cte and "about:blank" not in popup_url_cte:
+                                    fetch_urls.append(popup_url_cte)
+
+                                for fb_url in fetch_urls:
+                                    if pdf_bytes: break
+                                    try:
+                                        resp_fb = await context.request.get(fb_url)
                                         body_fb = await resp_fb.body()
                                         if body_fb and b"%PDF" in body_fb[:10]:
                                             pdf_bytes = body_fb
-                                            log(f"    ✅ PDF via URL final: {len(pdf_bytes):,} bytes")
+                                            log(f"    ✅ PDF via fallback ({fb_url[:60]}...): {len(pdf_bytes):,} bytes")
+                                            break
                                     except Exception as e:
                                         log(f"    Fallback GET: {e}")
 
