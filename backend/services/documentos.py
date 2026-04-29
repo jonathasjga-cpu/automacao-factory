@@ -270,6 +270,139 @@ async def _diagnosticar_busca_cte(page: Page, numero: str, filial_label: str) ->
     return " | ".join(info)
 
 
+async def _baixar_cte_de_meus_relatorios(
+    page: Page,
+    context: BrowserContext,
+    marcador_dt: datetime,
+    log,
+    max_seconds: int = 300,
+) -> bytes | None:
+    """
+    Fallback quando o popup do CT-e não captura o PDF: vai em
+    /RelatorioControlador?acao=abrirTelaMeusRelatorios e baixa o relatório
+    Modelo 17 (CT-e) processado depois de marcador_dt.
+    """
+    import httpx as _httpx
+
+    URL_REL = f"{BASE_GW}/RelatorioControlador?acao=abrirTelaMeusRelatorios"
+
+    inicio = time.monotonic()
+    while True:
+        if time.monotonic() - inicio >= max_seconds:
+            log(f"    Meus Relatórios: timeout de {max_seconds}s sem encontrar CT-e gerado")
+            return None
+
+        try:
+            await page.goto(URL_REL, wait_until="load", timeout=30000)
+        except Exception as e:
+            log(f"    Erro ao abrir Meus Relatórios: {e}")
+            await asyncio.sleep(10)
+            continue
+        await page.wait_for_timeout(1500)
+
+        # Procura linha mais recente: Rotina contém "CT-e" e Status="Gerado"
+        # com timestamp >= marcador_dt
+        marcador_iso = marcador_dt.strftime("%Y-%m-%dT%H:%M")
+        linha_idx = await page.evaluate(
+            """(marcadorIso) => {
+                const rows = [...document.querySelectorAll('tr')];
+                const isoMin = marcadorIso;  // 'YYYY-MM-DDTHH:MM'
+                const candidatos = [];
+                for (let i = 0; i < rows.length; i++) {
+                    const r = rows[i];
+                    const tds = [...r.querySelectorAll('td')];
+                    if (tds.length < 4) continue;
+                    const txt = tds.map(t => (t.textContent || '').trim());
+                    const all = txt.join(' | ');
+                    if (!/CT-?e|Modelo\\s*17/i.test(all)) continue;
+                    if (!/Gerado/i.test(all)) continue;
+                    // procura timestamp DD/MM/AAAA, HH:MM:SS no row
+                    const dts = [];
+                    for (const t of txt) {
+                        const m = t.match(/(\\d{2})\\/(\\d{2})\\/(\\d{4}),?\\s+(\\d{2}):(\\d{2}):?(\\d{2})?/);
+                        if (m) {
+                            const iso = `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
+                            dts.push(iso);
+                        }
+                    }
+                    if (!dts.length) continue;
+                    // usa o maior (processado em)
+                    const maxIso = dts.sort().pop();
+                    if (maxIso >= isoMin) {
+                        candidatos.push({i, maxIso, all});
+                    }
+                }
+                if (!candidatos.length) return -1;
+                // pega o mais recente
+                candidatos.sort((a, b) => b.maxIso.localeCompare(a.maxIso));
+                return candidatos[0].i;
+            }""",
+            marcador_iso,
+        )
+        if linha_idx < 0:
+            elapsed = int(time.monotonic() - inicio)
+            log(f"    Meus Relatórios: ainda não tem CT-e gerado pra essa busca ({elapsed}s, máx {max_seconds}s)")
+            await asyncio.sleep(15)
+            continue
+
+        log(f"    Meus Relatórios: relatório CT-e encontrado na linha {linha_idx}")
+
+        # Captura URL do S3 via route interception ao clicar "Baixar PDF"
+        s3_url_holder: dict = {}
+        ev = asyncio.Event()
+
+        async def _route_s3(route, request=None):
+            u = route.request.url
+            if ("s3.amazonaws.com" in u or "s3.us-east" in u or "gw-saas-relatorios" in u) and not ev.is_set():
+                s3_url_holder["url"] = u
+                ev.set()
+            try:
+                await route.continue_()
+            except Exception:
+                pass
+
+        await context.route("**/*", _route_s3)
+        try:
+            # Clica no link "Baixar PDF" da linha encontrada
+            clicked = await page.evaluate(
+                """(idx) => {
+                    const r = document.querySelectorAll('tr')[idx];
+                    if (!r) return false;
+                    const links = [...r.querySelectorAll('a, button')];
+                    const link = links.find(l => /baixar/i.test(l.textContent || ''));
+                    if (!link) return false;
+                    link.click();
+                    return true;
+                }""",
+                linha_idx,
+            )
+            if not clicked:
+                log("    Meus Relatórios: link 'Baixar PDF' não achado na linha")
+                return None
+            try:
+                await asyncio.wait_for(ev.wait(), timeout=30)
+            except asyncio.TimeoutError:
+                log("    Meus Relatórios: timeout aguardando S3 URL")
+                return None
+        finally:
+            await context.unroute("**/*", _route_s3)
+
+        url_pdf = s3_url_holder.get("url")
+        if not url_pdf:
+            return None
+
+        try:
+            async with _httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
+                resp = await client.get(url_pdf)
+                body = resp.content
+            if body and b"%PDF" in body[:10]:
+                log(f"    ✅ PDF via Meus Relatórios: {len(body):,} bytes")
+                return body
+        except Exception as e:
+            log(f"    Erro fetch S3: {e}")
+        return None
+
+
 # ─── S3 CAPTURE ──────────────────────────────────────────────────────────────
 
 
@@ -855,6 +988,9 @@ async def baixar_ctes_pdf(
                                 except Exception:
                                     pass
 
+                        # Marca o instante ANTES de clicar — usado pelo fallback Meus Relatórios
+                        marcador_relatorio = datetime.now()
+
                         # Instala no CONTEXTO antes do clique
                         await context.route("**/*", _ctx_rota_cte)
                         try:
@@ -946,6 +1082,20 @@ async def baixar_ctes_pdf(
                             log(f"    Popup nao abriu: {e}")
                         finally:
                             await context.unroute("**/*", _ctx_rota_cte)
+
+                        # Fallback final: Meus Relatórios. Quando a fatura tem muitos
+                        # CT-es, o GW às vezes processa de forma assíncrona — o popup
+                        # não retorna o PDF, mas ele aparece em /RelatorioControlador
+                        # como um relatório novo (Modelo 17, Status=Gerado).
+                        if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
+                            log(f"    Tentando fallback Meus Relatórios...")
+                            try:
+                                pdf_bytes = await _baixar_cte_de_meus_relatorios(
+                                    page, context, marcador_relatorio, log,
+                                    max_seconds=300,
+                                )
+                            except Exception as e:
+                                log(f"    Erro fallback Meus Relatórios: {e}")
 
                         if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
                             log(f"  ⚠️ PDF CT-e não capturado — fatura {numero}")
