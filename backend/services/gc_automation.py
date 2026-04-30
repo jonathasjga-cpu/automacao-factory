@@ -32,7 +32,8 @@ CONTA_POR_SISTEMA = {
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 
 def _hoje() -> str:
-    return datetime.now().strftime("%d/%m/%Y")
+    from _tz import now_br
+    return now_br().strftime("%d/%m/%Y")
 
 DOWNLOAD_DIR = Path(tempfile.gettempdir()) / "automacao_factory"
 DOWNLOAD_DIR.mkdir(exist_ok=True)

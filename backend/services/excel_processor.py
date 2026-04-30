@@ -301,10 +301,11 @@ async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path |
     - Automação: filtra por emissão = hoje (ou ontem se hoje estiver vazio)
     - Complemento: sem filtro de data (retorna todo o histórico, ~2.6 MB)
     """
+    from _tz import now_br
     creds = get_credencial("gw", user_id=user_id)
     base = "https://webtrans.saas.gwsistemas.com.br"
-    hoje = datetime.now().strftime("%d/%m/%Y")
-    ontem = (datetime.now() - timedelta(days=1)).strftime("%d/%m/%Y")
+    hoje = now_br().strftime("%d/%m/%Y")
+    ontem = (now_br() - timedelta(days=1)).strftime("%d/%m/%Y")
     meus_rel_url = f"{base}/RelatorioControlador?acao=abrirTelaMeusRelatorios"
 
     async with async_playwright() as p:

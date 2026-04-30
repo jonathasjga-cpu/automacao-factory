@@ -15,14 +15,17 @@ BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
 # ─── UTILS ───────────────────────────────────────────────────────────────────
 
 def _hoje_fmt() -> str:
-    return datetime.now().strftime("%d-%m-%Y")
+    from _tz import now_br
+    return now_br().strftime("%d-%m-%Y")
 
 def _hoje_gw() -> str:
-    """DD/MM/AAAA para campos de data do GW"""
-    return datetime.now().strftime("%d/%m/%Y")
+    """DD/MM/AAAA para campos de data do GW (horário Brasília)"""
+    from _tz import now_br
+    return now_br().strftime("%d/%m/%Y")
 
 def _ano_atual() -> str:
-    return str(datetime.now().year)
+    from _tz import now_br
+    return str(now_br().year)
 
 def _nome_factory(sistema: str) -> str:
     return {

@@ -280,7 +280,8 @@ def download_documentos(op_id: str):
                 zf.writestr(nome, dados)
     buf.seek(0)
 
-    hoje = datetime.now().strftime("%d-%m-%Y")
+    from _tz import now_br
+    hoje = now_br().strftime("%d-%m-%Y")
     return StreamingResponse(
         buf,
         media_type="application/zip",

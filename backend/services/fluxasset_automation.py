@@ -5,11 +5,12 @@ from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, Page
 from browser_config import launch_kwargs
 from config_manager import get_credencial
+from _tz import now_br
 
 
 def _data_operacao_str() -> str:
     """Retorna a data que a factory registra para a operação (próxima segunda em fins de semana)."""
-    hoje = datetime.now()
+    hoje = now_br()
     if hoje.weekday() == 5:   # sábado
         return (hoje + timedelta(days=2)).strftime("%d/%m/%Y")
     elif hoje.weekday() == 6:  # domingo
