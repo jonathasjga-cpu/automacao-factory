@@ -376,16 +376,28 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         }
     """)
 
-    # FactaConsult pode exibir "Confirma salvar?" — precisamos clicar em "Sim"
-    await page.wait_for_timeout(400)
-    try:
-        tem_confirma = await page.evaluate(
-            "() => !!(document.body && document.body.innerText.includes('Confirma salvar'))"
-        )
-        if tem_confirma:
-            await page.locator('button:has-text("Sim")').first.click()
-            log(f"  [INFO] Confirmacao 'Confirma salvar?' aceita para titulo {fatura['numero']}")
-    except Exception:
+    # FactaConsult pode exibir "Confirma salvar?" — pode demorar até alguns segundos
+    # pra aparecer. Faz poll a cada 200ms até 5s.
+    confirma_aceito = False
+    for _ in range(25):  # 25 × 200ms = 5s máx
+        await page.wait_for_timeout(200)
+        try:
+            tem_confirma = await page.evaluate(
+                "() => !!(document.body && document.body.innerText.includes('Confirma salvar'))"
+            )
+            if tem_confirma:
+                try:
+                    await page.locator('button:has-text("Sim")').first.click(timeout=3000)
+                    log(f"  [INFO] Confirmacao 'Confirma salvar?' aceita para titulo {fatura['numero']}")
+                    confirma_aceito = True
+                    break
+                except Exception as e:
+                    log(f"  [WARN] Falhou click 'Sim' no titulo {fatura['numero']}: {e}")
+        except Exception:
+            pass
+    if not confirma_aceito:
+        # Pode ser que o servidor salve sem confirmar (não apareceu o popup) — ok.
+        # Se aparecer depois e não tratado, gera divergência detectada no _verificar_valor_operacao.
         pass
 
     # Aguarda o servidor confirmar o salvamento

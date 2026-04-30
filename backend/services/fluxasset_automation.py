@@ -60,6 +60,17 @@ async def fazer_login_fluxasset(page: Page, sistema: str):
                 pass
 
     if not cf_passou:
+        # Detecta se está rodando em servidor sem display (Railway). Sem display,
+        # o usuário não consegue clicar no Cloudflare manualmente — então a operação
+        # FluxAsset não tem como funcionar.
+        from browser_config import IS_RAILWAY
+        if IS_RAILWAY:
+            raise Exception(
+                "FluxAsset bloqueada pelo Cloudflare Turnstile no servidor (sem display "
+                "para você clicar manualmente). "
+                "Para usar a FluxAsset, rode esta operação na máquina local "
+                "(localhost:8000). Outras factories como Firma e GC funcionam aqui."
+            )
         raise Exception(
             "FluxAsset: timeout aguardando formulario de login. "
             "Se apareceu verificacao Cloudflare, complete manualmente na janela do Chrome."
@@ -452,17 +463,25 @@ async def preencher_titulo_fluxasset(page: Page, fatura: dict, status: dict):
     """)
     log(f"  [INFO] Salvar click: {salvar_log}")
 
-    # FactaConsult pode exibir "Confirma salvar?" — precisamos clicar em "Sim"
-    await page.wait_for_timeout(500)
-    try:
-        tem_confirma = await page.evaluate(
-            "() => !!(document.body && document.body.innerText.includes('Confirma salvar'))"
-        )
-        if tem_confirma:
-            await page.locator('button:has-text("Sim")').first.click()
-            log(f"  [INFO] Confirmacao 'Confirma salvar?' aceita para titulo {fatura['numero']}")
-    except Exception:
-        pass
+    # FactaConsult pode exibir "Confirma salvar?" — pode demorar até alguns segundos
+    # pra aparecer. Faz poll a cada 200ms até 5s.
+    confirma_aceito = False
+    for _ in range(25):  # 25 × 200ms = 5s máx
+        await page.wait_for_timeout(200)
+        try:
+            tem_confirma = await page.evaluate(
+                "() => !!(document.body && document.body.innerText.includes('Confirma salvar'))"
+            )
+            if tem_confirma:
+                try:
+                    await page.locator('button:has-text("Sim")').first.click(timeout=3000)
+                    log(f"  [INFO] Confirmacao 'Confirma salvar?' aceita para titulo {fatura['numero']}")
+                    confirma_aceito = True
+                    break
+                except Exception as e:
+                    log(f"  [WARN] Falhou click 'Sim' no titulo {fatura['numero']}: {e}")
+        except Exception:
+            pass
 
     # Aguarda o servidor confirmar o salvamento
     try:
