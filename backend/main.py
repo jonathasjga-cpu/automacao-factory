@@ -193,6 +193,15 @@ def debug_tz():
         "now_br_data": nb_data,
     }
 
+@app.get("/api/debug-automacao", dependencies=[Depends(get_current_user)])
+def debug_automacao():
+    """Diagnóstico do Excel Automação — mostra contagens e amostra."""
+    from services.excel_processor import processar_dataframes
+    return {
+        "debug_automacao": getattr(processar_dataframes, "_last_debug_auto", ["sem dados"]),
+        "debug_complemento": getattr(processar_dataframes, "_last_debug", ["sem dados"]),
+    }
+
 @app.get("/api/debug-complemento", dependencies=[Depends(get_current_user)])
 async def debug_complemento():
     from services.excel_processor import processar_dataframes, _cache_faturas

@@ -481,16 +481,35 @@ def _fmt_data(val) -> str:
 
 def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     """Cruza os dois Excels e retorna lista de faturas prontas"""
-    # LÃª Excel 1 â€" dados principais (8 colunas do GW)
-    df1 = pd.read_excel(path1, skiprows=1)
+    _debug_auto: list[str] = []
+
+    # Le Excel 1 - dados principais (8 colunas do GW)
+    df1_raw = pd.read_excel(path1, skiprows=1)
+    _debug_auto.append(f"path1: {path1.name} | shape: {df1_raw.shape} | cols: {list(df1_raw.columns)[:8]}")
+
+    df1 = df1_raw.copy()
     df1.columns = [
         "numero", "emissao", "vencimento", "filial",
         "valor", "cliente_nome", "cliente_cnpj", "situacao"
-    ]
+    ][:len(df1.columns)] + list(df1.columns[8:]) if len(df1.columns) > 8 else [
+        "numero", "emissao", "vencimento", "filial",
+        "valor", "cliente_nome", "cliente_cnpj", "situacao"
+    ][:len(df1.columns)]
 
-    # Filtra canceladas e linhas sem nÃºmero
-    df1 = df1[df1["situacao"].astype(str).str.strip() != "Cancelada"].copy()
-    df1 = df1.dropna(subset=["numero"])
+    _debug_auto.append(f"linhas brutas (apos skiprows): {len(df1)}")
+    if len(df1) > 0:
+        _debug_auto.append(f"amostra primeira linha: {dict(df1.iloc[0])}")
+
+    # Filtra canceladas e linhas sem numero
+    if "situacao" in df1.columns:
+        antes = len(df1)
+        df1 = df1[df1["situacao"].astype(str).str.strip() != "Cancelada"].copy()
+        _debug_auto.append(f"apos filtro 'Cancelada': {antes} -> {len(df1)}")
+    if "numero" in df1.columns:
+        antes = len(df1)
+        df1 = df1.dropna(subset=["numero"])
+        _debug_auto.append(f"apos dropna numero: {antes} -> {len(df1)}")
+    processar_dataframes._last_debug_auto = _debug_auto
 
     # Converte datas
     df1["emissao_fmt"]    = df1["emissao"].apply(_fmt_data)
