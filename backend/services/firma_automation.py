@@ -327,6 +327,14 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
     await page.wait_for_timeout(600)
 
     valor_fmt = f"{fatura['valor']:.2f}".replace(".", ",")
+
+    # Aviso explícito se chave NF-e estiver vazia (Complemento não tinha pra essa fatura)
+    chave = (fatura.get("chave") or "").strip()
+    if not chave:
+        log(f"  ⚠️ Fatura {fatura['numero']}: SEM chave NF-e (Complemento não tinha) — campo #chave_nf ficará vazio")
+    elif len(chave) != 44:
+        log(f"  ⚠️ Fatura {fatura['numero']}: chave com tamanho inesperado ({len(chave)} dígitos, esperado 44)")
+
     campos = [
         ('#data_titu', fatura["vencimento"]),
         ('#valo_titu', valor_fmt),
@@ -334,7 +342,7 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         ('#nume_nota', fatura["numero"]),
         ('#data_emis', fatura["emissao"]),
         ('#valo_nota', valor_fmt),
-        ('#chave_nf',  fatura.get("chave", "")),
+        ('#chave_nf',  chave),
     ]
     for sel, val in campos:
         if not val:
@@ -414,7 +422,13 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
 
 
 async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: dict, sistema: str, status: dict):
-    """Compara o Vlr.Total da operação na Firma com a soma dos títulos enviados."""
+    """
+    Verifica que a operação foi realmente criada na Firma.
+    - Procura linha 'Aguardando' na grid de operações
+    - Compara Vlr.Total com a soma dos títulos enviados
+    - Se a operação não existir → marca ERRO (não foi feita de fato)
+    - Se valor divergir → marca ERRO
+    """
     log = lambda msg: status["logs"].append(msg)
     try:
         valor_esperado = sum(
@@ -444,7 +458,19 @@ async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: di
         """)
 
         if vlr_total_str is None:
-            log(f"  [WARN] Nao foi possivel ler Vlr.Total da operacao — validacao de valor ignorada")
+            # NÃO ACHOU OPERAÇÃO 'Aguardando' — significa que NADA foi salvo
+            # de fato na Firma, mesmo que o código tenha contado "concluidas".
+            # Marca como erro pra não silenciar o problema.
+            log(f"  ❌ Operação 'Aguardando' NÃO encontrada na Firma — provável falha silenciosa de salvamento")
+            status["erros"].append(
+                f"[{sistema}] Operação não foi criada na Firma. "
+                f"Esperava {len(faturas_salvas)} título(s) totalizando R$ {valor_esperado:,.2f}, "
+                f"mas nenhuma linha 'Aguardando' foi encontrada na grid. "
+                f"Verifique manualmente — os títulos podem não ter sido salvos."
+            )
+            # Reseta concluidas pra refletir realidade
+            status["concluidas"] = 0
+            status.setdefault("faturas_salvas", set()).clear()
             return
 
         vlr_total = float(

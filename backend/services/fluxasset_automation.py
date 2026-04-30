@@ -528,7 +528,17 @@ async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: di
         """)
 
         if vlr_total_str is None:
-            log(f"  [WARN] Nao foi possivel ler Vlr.Total da operacao — validacao de valor ignorada")
+            # NÃO ACHOU OPERAÇÃO 'Aguardando' — significa que NADA foi salvo
+            # de fato, mesmo que o código tenha contado "concluidas".
+            log(f"  ❌ Operação 'Aguardando' NÃO encontrada na FluxAsset — provável falha silenciosa de salvamento")
+            status["erros"].append(
+                f"[{sistema}] Operação não foi criada na FluxAsset. "
+                f"Esperava {len(faturas_salvas)} título(s) totalizando R$ {valor_esperado:,.2f}, "
+                f"mas nenhuma linha 'Aguardando' foi encontrada na grid. "
+                f"Verifique manualmente — os títulos podem não ter sido salvos."
+            )
+            status["concluidas"] = 0
+            status.setdefault("faturas_salvas", set()).clear()
             return
 
         vlr_total = float(

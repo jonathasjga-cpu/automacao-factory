@@ -469,11 +469,24 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
             log("✏️ Preenchendo Núm.Nota em cada título...")
             preenchidos = await preencher_num_nota_gc(page, status)
 
+            # IMPORTANTE: contabiliza apenas o que foi REALMENTE preenchido,
+            # não o total esperado. Antes era += total_qtd (bug — marcava todas
+            # como concluídas mesmo se só uma tivesse passado).
             if preenchidos > 0:
-                status["concluidas"] += total_qtd
-                for n in numeros:
+                status["concluidas"] += preenchidos
+                # Só marca como "salva" as que realmente foram preenchidas
+                # (ordem de preenchimento = ordem dos números na lista)
+                for n in numeros[:preenchidos]:
                     status.setdefault("faturas_salvas", set()).add(n)
-                log(f"✅ GC {sistema} — operação criada. Acesse a plataforma para definir conta corrente e encaminhar.")
+
+                if preenchidos == total_qtd:
+                    log(f"✅ GC {sistema} — operação completa ({preenchidos}/{total_qtd}). Acesse a plataforma para definir conta corrente e encaminhar.")
+                else:
+                    faltam = total_qtd - preenchidos
+                    log(f"⚠️ GC {sistema} — operação PARCIAL ({preenchidos}/{total_qtd}). {faltam} título(s) não preenchido(s).")
+                    status["erros"].append(
+                        f"GC {sistema}: apenas {preenchidos}/{total_qtd} título(s) preenchido(s) — verifique manualmente"
+                    )
             else:
                 status["erros"].append(f"GC {sistema}: nenhum Núm.Nota foi preenchido")
         else:
