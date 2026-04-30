@@ -175,6 +175,24 @@ def get_faturas_cache():
     from services.excel_processor import _cache_faturas, processar_dataframes
     return {"faturas": _cache_faturas, "debug_complemento": getattr(processar_dataframes, "_last_debug", [])}
 
+@app.get("/api/debug-tz", dependencies=[Depends(get_current_user)])
+def debug_tz():
+    """Diagnóstico de timezone."""
+    from datetime import datetime
+    try:
+        from _tz import now_br
+        nb = now_br()
+        nb_iso = nb.isoformat()
+        nb_data = nb.strftime("%d/%m/%Y")
+    except Exception as e:
+        nb_iso = f"ERRO: {e}"
+        nb_data = "?"
+    return {
+        "datetime_now_local": datetime.now().isoformat(),
+        "now_br_iso": nb_iso,
+        "now_br_data": nb_data,
+    }
+
 @app.get("/api/debug-complemento", dependencies=[Depends(get_current_user)])
 async def debug_complemento():
     from services.excel_processor import processar_dataframes, _cache_faturas
