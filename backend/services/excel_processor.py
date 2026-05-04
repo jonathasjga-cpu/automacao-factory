@@ -707,57 +707,55 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
         if debug_info.get('totalSnippet'):
             _prog_log(f"  [fallback] total: {debug_info['totalSnippet'][:120]}")
 
-        # Parsea linhas: extrai número, emissão, vencimento, filial, valor, cliente, situação
+        # Parsea linhas: cada linha que tem checkbox ck* + número fatura X/AAAA é uma fatura.
+        # Padrão simples e tolerante (sem exigir contagem mínima de tds).
         faturas_dom = await page.evaluate(
             """() => {
                 function parseValor(t) {
                     if (!t) return 0;
-                    return parseFloat(String(t).replace(/[^0-9,.-]/g,'').replace(/\\./g,'').replace(',','.')) || 0;
+                    const s = String(t).replace(/[^0-9.,-]/g,'').replace(/\\./g,'').replace(',', '.');
+                    return parseFloat(s) || 0;
                 }
                 const out = [];
                 for (const tr of document.querySelectorAll('tr')) {
-                    const tds = [...tr.querySelectorAll('td')];
-                    if (tds.length < 8) continue;
-                    // Identifica linha de fatura: tem checkbox name=ck e link com número/AAAA
-                    const cb = tr.querySelector('input[id^="ck"]');
-                    if (!cb) continue;
-                    const linkFat = tr.querySelector('a');
-                    if (!linkFat) continue;
-                    const numeroMatch = (linkFat.textContent || '').trim().match(/(\\d{5,6})\\/(\\d{4})/);
-                    if (!numeroMatch) continue;
-                    const numero = numeroMatch[1].padStart(6, '0');
-                    // Coleta texto de cada td (limpando)
-                    const txt = tds.map(t => (t.textContent || '').trim());
-                    // Procura datas DD/MM/AAAA
-                    const datas = [];
-                    for (const t of txt) {
-                        const m = t.match(/^(\\d{2}\\/\\d{2}\\/\\d{4})$/);
-                        if (m) datas.push(m[1]);
-                    }
-                    // Procura cliente — primeiro td com texto longo que não é número/data
+                    if (!tr.querySelector('input[id^=\\"ck\\"]')) continue;
+                    const linhaTxt = tr.textContent || '';
+                    // Numero fatura
+                    const numMatch = linhaTxt.match(/(\\d{5,6})\\/(\\d{4})/);
+                    if (!numMatch) continue;
+                    const numero = numMatch[1].padStart(6, '0');
+                    // Datas (todas no formato DD/MM/AAAA)
+                    const datas = [...linhaTxt.matchAll(/(\\d{2}\\/\\d{2}\\/\\d{4})/g)].map(m => m[1]);
+                    // Valores (decimais brasileiros)
+                    const valores = [...linhaTxt.matchAll(/(\\d{1,3}(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
+                    // Cliente: primeiro td com texto > 5 que não seja número/data/lote
                     let cliente = '';
-                    for (const t of txt) {
-                        if (t.length > 8 && !/^\\d{5,6}\\/\\d{4}$/.test(t) && !/^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(t)
-                            && !/^[\\d.,]+$/.test(t) && !/^Lote/.test(t)) {
-                            cliente = t.replace(/\\s*\\[\\.\\.\\.\\]\\s*$/, '');
+                    for (const td of tr.querySelectorAll('td')) {
+                        const t = (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim();
+                        if (t.length > 5
+                            && !/^\\d/.test(t)
+                            && !/^Lote/i.test(t)
+                            && !/^\\d{2}\\/\\d{2}\\/\\d{4}/.test(t)
+                            && !/Em Aberto|Cancelad|Descontad|Sim|Não/i.test(t)) {
+                            cliente = t;
                             break;
                         }
                     }
-                    // Valor: procura o terceiro número decimal grande (Líquido)
-                    const valores = txt.filter(t => /^\\d{1,3}(\\.\\d{3})*,\\d{2}$/.test(t));
-                    const valor = valores.length ? parseValor(valores[valores.length - 1]) : 0;
-                    // Sit: pode estar em coluna específica - usa texto da linha
-                    const linhaTxt = tr.textContent || '';
-                    const sit = /Cancelad/.test(linhaTxt) ? 'Cancelada' :
-                                /Descontad/.test(linhaTxt) ? 'Descontada' : 'Em Aberto';
+                    // Filial: heurística pelo lote (col Lote: 2547=MATRIZ, 2548=SP) ou pelo texto
+                    let filial = 'MATRIZ';
+                    if (/SP\\b|S[.]?P[.]?\\b/.test(linhaTxt)) filial = 'Filial SP';
+                    // Situação
+                    const sit = /Cancelad/i.test(linhaTxt) ? 'Cancelada' :
+                                /Descontad/i.test(linhaTxt) ? 'Descontada (Factoring)' : 'Em Aberto';
 
                     out.push({
                         numero,
                         emissao: datas[0] || '',
-                        vencimento: datas[1] || '',
-                        valor,
+                        vencimento: datas[1] || datas[0] || '',
+                        valor: valores.length ? parseValor(valores[0]) : 0,
                         cliente_nome: cliente,
                         situacao: sit,
+                        filial,
                     });
                 }
                 return out;
@@ -807,19 +805,19 @@ async def processar_excels(user_id: int | None = None) -> list[dict]:
             faturas_final = []
             for f in fallback:
                 num = f["numero"]
-                # Filial inferida do CNPJ não disponível aqui — assume Matriz por default
-                # (usuário pode editar no front; importante é o número e valor)
+                filial = f.get("filial") or "MATRIZ"
+                is_sp = "SP" in filial
                 faturas_final.append({
                     "numero": num,
                     "emissao": f.get("emissao", ""),
                     "vencimento": f.get("vencimento", ""),
-                    "filial": "MATRIZ",  # fallback default
+                    "filial": filial,
                     "valor": f.get("valor", 0),
                     "cliente_nome": f.get("cliente_nome", ""),
                     "cliente_cnpj": "",
                     "situacao": f.get("situacao", "Em Aberto"),
                     "chave": chaves_map.get(num, ""),
-                    "factory_sugerida": "gc_matriz",
+                    "factory_sugerida": "gc_sp" if is_sp else "gc_matriz",
                 })
             _cache_faturas = faturas_final
             _prog_log(f"   {len(_cache_faturas)} fatura(s) recuperadas via fallback")
