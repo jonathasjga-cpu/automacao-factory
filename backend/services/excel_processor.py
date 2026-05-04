@@ -814,46 +814,60 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                     // "Descontadas" o saldo vira 0,00 mas o valor original continua na
                     // linha — então pegamos o MAIOR valor para representar o valor da
                     // fatura (zeros e descontos são sempre menores).
-                    const valoresStr = [...linhaTxt.matchAll(/(\\d{1,3}(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
+                    //
+                    // Regex aceita 2 formatos: "3.678,40" (com separador de milhar) e
+                    // "3678,40" (sem). Antes exigia o ponto de milhar, truncando
+                    // valores >= 1000 sem ponto (ex: "3678,40" virava "678,40").
+                    const valoresStr = [...linhaTxt.matchAll(/(\\d+(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
                     const valoresNum = valoresStr.map(parseValor);
                     const valor = valoresNum.length ? Math.max(...valoresNum) : 0;
                     // Lê todas as TDs com texto trimado — usado pra detectar
-                    // filial e situação por coluna específica (mais confiável
-                    // que regex sobre o texto inteiro da linha).
+                    // filial, cliente e situação por coluna específica (mais
+                    // confiável que regex sobre o texto inteiro da linha).
                     const tds = [...tr.querySelectorAll('td')]
                         .map(td => (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim());
 
-                    // Cliente: primeiro td com texto > 5 que não seja número/data/lote/situação
-                    let cliente = '';
+                    // Filial: detecta MATRIZ, "Filial SP", "Filial BA" e qualquer
+                    // outro "Filial XX". Empresa tem múltiplas filiais (não só
+                    // MATRIZ + SP — também BA descoberta no cache real).
+                    let filial = '';
                     for (const t of tds) {
-                        if (t.length > 5
-                            && !/^\\d/.test(t)
-                            && !/^Lote/i.test(t)
-                            && !/^\\d{2}\\/\\d{2}\\/\\d{4}/.test(t)
-                            && !/^MATRIZ$|^Filial /i.test(t)
-                            && !/Em Aberto|Cancelad|Descontad|Sim|Não/i.test(t)) {
-                            cliente = t;
+                        if (/^MATRIZ$/i.test(t)) { filial = 'MATRIZ'; break; }
+                        const mFil = t.match(/^Filial\\s+(.+)$/i);
+                        if (mFil) {
+                            const sigla = mFil[1].trim().toUpperCase();
+                            filial = `Filial ${sigla}`;
                             break;
                         }
+                        if (/^S[ãa]o\\s*Paulo$/i.test(t)) { filial = 'Filial SP'; break; }
+                    }
+                    // Fallback: regex no texto inteiro (compatibilidade) — só
+                    // se não achou em TD específica.
+                    if (!filial) {
+                        const mFil = linhaTxt.match(/Filial\\s+(SP|BA|RJ|MG|PR|RS|SC|GO|DF|BSB)/i);
+                        if (mFil) filial = `Filial ${mFil[1].toUpperCase()}`;
+                        else if (/MATRIZ/i.test(linhaTxt)) filial = 'MATRIZ';
+                        else filial = 'MATRIZ';  // default conservador
                     }
 
-                    // Filial: procura td com texto exato "MATRIZ" / "Filial SP" /
-                    // "São Paulo". Mais confiável que regex sobre texto inteiro
-                    // (que pode pegar "SP" em outros contextos).
-                    let filial = 'MATRIZ';
+                    // Cliente: procura primeira TD que tenha letras (>= 1 letra),
+                    // tamanho > 4, e que NÃO seja: número de fatura, data, lote,
+                    // valor, filial, situação. Aceita clientes que começam com
+                    // dígito (ex: "3M DO BRASIL", "4 RODAS PNEUS") desde que
+                    // tenham letras.
+                    let cliente = '';
                     for (const t of tds) {
-                        if (/^Filial\\s*SP$|^S[ãa]o\\s*Paulo$|^FILIAL\\s*SP$/i.test(t)) {
-                            filial = 'Filial SP';
-                            break;
-                        }
-                        if (/^MATRIZ$/i.test(t)) {
-                            filial = 'MATRIZ';
-                            break;
-                        }
-                    }
-                    // Fallback final: regex sobre linha inteira (compatibilidade)
-                    if (filial === 'MATRIZ' && /Filial\\s*SP|S[ãa]o\\s*Paulo/i.test(linhaTxt)) {
-                        filial = 'Filial SP';
+                        if (t.length < 4) continue;
+                        if (!/[A-Za-zÀ-ÿ]/.test(t)) continue;  // sem letra = pula (números puros)
+                        if (/^\\d{5,6}\\/?\\d{0,4}$/.test(t)) continue;  // n° fatura
+                        if (/^Lote/i.test(t)) continue;
+                        if (/^\\d{2}\\/\\d{2}\\/\\d{4}/.test(t)) continue;  // data
+                        if (/^\\d{1,3}(?:\\.\\d{3})*,\\d{2}$/.test(t)) continue;  // valor
+                        if (/^MATRIZ$|^Filial\\s+/i.test(t)) continue;
+                        if (/^S[ãa]o\\s*Paulo$/i.test(t)) continue;
+                        if (/^(Em Aberto|Cancelad|Descontad|Normal|Sim|Não)/i.test(t)) continue;
+                        cliente = t;
+                        break;
                     }
 
                     // Situação: procura td com texto exato dos status conhecidos
@@ -862,6 +876,7 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                         if (/^Cancelad/i.test(t)) { sit = 'Cancelada'; break; }
                         if (/^Descontad/i.test(t)) { sit = 'Descontada (Factoring)'; break; }
                         if (/^Em Aberto$/i.test(t)) { sit = 'Em Aberto'; break; }
+                        if (/^Normal$/i.test(t)) { sit = 'Normal'; break; }
                     }
 
                     out.push({
@@ -951,12 +966,15 @@ async def processar_excels(user_id: int | None = None) -> list[dict]:
             except Exception:
                 pass
 
-            # Monta lista no formato esperado
+            # Monta lista no formato esperado.
+            # factory_sugerida: SP→gc_sp, BA/MATRIZ/outras→gc_matriz (default).
+            # Filiais não-mapeadas caem em gc_matriz mas o usuário pode reatribuir
+            # manualmente no UI antes de executar.
             faturas_final = []
             for f in fallback:
                 num = f["numero"]
                 filial = f.get("filial") or "MATRIZ"
-                is_sp = "SP" in filial
+                is_sp = "SP" in filial.upper().replace("FILIAL ", "")
                 faturas_final.append({
                     "numero": num,
                     "emissao": f.get("emissao", ""),

@@ -23,3 +23,6 @@ backend/operacoes_historico.json
 
 # Build
 {backend,frontend
+node_modules
+package.json
+package-lock.json
