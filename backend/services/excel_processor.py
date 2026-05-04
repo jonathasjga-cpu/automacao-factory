@@ -809,8 +809,14 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                     const numero = numMatch[1].padStart(6, '0');
                     // Datas (todas no formato DD/MM/AAAA)
                     const datas = [...linhaTxt.matchAll(/(\\d{2}\\/\\d{2}\\/\\d{4})/g)].map(m => m[1]);
-                    // Valores (decimais brasileiros)
-                    const valores = [...linhaTxt.matchAll(/(\\d{1,3}(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
+                    // Valores monetários brasileiros (com vírgula). O GW exibe múltiplas
+                    // colunas (Valor, Saldo, Multa, Juros, Desconto). Para faturas
+                    // "Descontadas" o saldo vira 0,00 mas o valor original continua na
+                    // linha — então pegamos o MAIOR valor para representar o valor da
+                    // fatura (zeros e descontos são sempre menores).
+                    const valoresStr = [...linhaTxt.matchAll(/(\\d{1,3}(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
+                    const valoresNum = valoresStr.map(parseValor);
+                    const valor = valoresNum.length ? Math.max(...valoresNum) : 0;
                     // Cliente: primeiro td com texto > 5 que não seja número/data/lote
                     let cliente = '';
                     for (const td of tr.querySelectorAll('td')) {
@@ -835,7 +841,7 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                         numero,
                         emissao: datas[0] || '',
                         vencimento: datas[1] || datas[0] || '',
-                        valor: valores.length ? parseValor(valores[0]) : 0,
+                        valor,
                         cliente_nome: cliente,
                         situacao: sit,
                         filial,
