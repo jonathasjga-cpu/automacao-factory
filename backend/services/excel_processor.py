@@ -900,14 +900,15 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                         cliente_nome: cliente,
                         situacao: sit,
                         filial,
+                        // Debug: amostra da linha pra investigação de valor zerado
+                        _debug_linha: linhaTxt.replace(/\\s+/g, ' ').slice(0, 400),
+                        _debug_valores: valoresStr,
                     });
                 }
                 return out;
             }"""
         )
         # Log diagnóstico — distribuição por filial e situação detectadas.
-        # Útil pra confirmar se a heurística está funcionando ou se há padrão
-        # que precisa ser ajustado.
         from collections import Counter
         if faturas_dom:
             por_filial = Counter(f.get("filial", "?") for f in faturas_dom)
@@ -916,6 +917,24 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             _prog_log(f"  [fallback] distribuição filial: {dict(por_filial)}")
             _prog_log(f"  [fallback] distribuição situação: {dict(por_situacao)}")
             _prog_log(f"  [fallback] valores: {dict(por_valor)}")
+
+            # Diagnóstico do valor zerado: mostra a linha completa de até 3 amostras
+            # com valor=0 e 1 amostra com valor>0 (referência). Isso permite
+            # identificar exatamente qual padrão de DOM está produzindo o 0.
+            zeros = [f for f in faturas_dom if f.get("valor", 0) == 0][:3]
+            naozeros = [f for f in faturas_dom if f.get("valor", 0) > 0][:1]
+            for f in zeros:
+                _prog_log(f"  [debug VALOR=0] {f.get('numero')}: valores_encontrados={f.get('_debug_valores')}")
+                _prog_log(f"     linha: {f.get('_debug_linha')}")
+            for f in naozeros:
+                _prog_log(f"  [debug VALOR>0 ref] {f.get('numero')}: valores_encontrados={f.get('_debug_valores')}")
+                _prog_log(f"     linha: {f.get('_debug_linha')}")
+
+        # Remove campos de debug antes de retornar (não persistir no cache)
+        for f in faturas_dom:
+            f.pop("_debug_linha", None)
+            f.pop("_debug_valores", None)
+
         await browser.close()
         return faturas_dom
 
