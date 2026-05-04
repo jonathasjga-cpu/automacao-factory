@@ -201,33 +201,39 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     await page.wait_for_timeout(1000)  # aguarda filtros do relatório selecionado atualizarem
 
     if preencher_data:
-        # Preenche os dois campos de data do filtro de EmissÃ£o (inÃ­cio e fim = hoje)
-        # A linha do filtro contÃ©m "EmissÃ£o" no label e dois inputs de texto para as datas
-        await page.evaluate(f"""
-            () => {{
-                const hoje = {repr(data_hoje)};
-                // Encontra a linha da tabela que tem "emiss" no texto (label do filtro)
-                const trs = [...document.querySelectorAll('tr')];
-                for (const tr of trs) {{
-                    const textoLinha = tr.textContent.toLowerCase();
-                    if (textoLinha.includes('emiss')) {{
-                        const inputs = [...tr.querySelectorAll('input[type="text"]')];
-                        let preencheu = 0;
-                        for (const inp of inputs) {{
-                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                                window.HTMLInputElement.prototype, 'value').set;
-                            nativeInputValueSetter.call(inp, hoje);
-                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            preencheu++;
-                            if (preencheu >= 2) break;
-                        }}
-                        if (preencheu > 0) return preencheu;
-                    }}
-                }}
-                return 0;
-            }}
-        """)
+        # Identifica os 2 inputs de data via JS (retorna ids ou seletores absolutos)
+        seletores_data = await page.evaluate("""() => {
+            const trs = [...document.querySelectorAll('tr')];
+            for (const tr of trs) {
+                const textoLinha = (tr.textContent || '').toLowerCase();
+                if (textoLinha.includes('emiss')) {
+                    const inputs = [...tr.querySelectorAll('input[type="text"]')].slice(0, 2);
+                    if (inputs.length >= 2) {
+                        // Marca cada input com data-fillme=1,2 para podermos selecionar via Playwright
+                        inputs[0].setAttribute('data-fillme', 'd1');
+                        inputs[1].setAttribute('data-fillme', 'd2');
+                        return ['[data-fillme="d1"]', '[data-fillme="d2"]'];
+                    }
+                }
+            }
+            return [];
+        }""")
+        if seletores_data and len(seletores_data) >= 2:
+            # Usa page.fill que dispara eventos nativos (mais confiável que evaluate em headless)
+            for sel in seletores_data:
+                try:
+                    await page.locator(sel).first.fill(data_hoje)
+                except Exception as e:
+                    print(f"[gerar_rel] AVISO: fill {sel} falhou: {e}")
+            # Confirma valor preenchido (debug)
+            valores = await page.evaluate("""() => {
+                const a = document.querySelector('[data-fillme=\\"d1\\"]');
+                const b = document.querySelector('[data-fillme=\\"d2\\"]');
+                return [a ? a.value : null, b ? b.value : null];
+            }""")
+            print(f"[gerar_rel] datas preenchidas: dt1={valores[0]!r} dt2={valores[1]!r} (esperado={data_hoje!r})")
+        else:
+            print(f"[gerar_rel] AVISO: nao achou inputs de data — relatorio pode vir sem filtro")
 
     # Garante formato Excel selecionado (primeiro radio antes do botão Gerar = XLS)
     await page.evaluate("""
