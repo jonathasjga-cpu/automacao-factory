@@ -621,6 +621,133 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
 
     return faturas
 
+async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list[dict]:
+    """
+    Fallback: quando o Excel 'Automação Operações' vem vazio (cache do GW
+    pode estar travado), busca direto em /consultafatura?acao=consultar
+    com filtro de emissão = hoje.
+    Retorna lista no MESMO formato de processar_dataframes.
+    """
+    from _tz import now_br
+    creds = get_credencial("gw", user_id=user_id)
+    base = "https://webtrans.saas.gwsistemas.com.br"
+    hoje = now_br().strftime("%d/%m/%Y")
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        ctx = await browser.new_context()
+        page = await ctx.new_page()
+
+        # Login GW
+        await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=30000)
+        await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
+        await page.fill('input[name="login"]', creds["usuario"])
+        await page.fill('input[name="senha"]', creds["senha"])
+        await page.locator('button.button-login').click()
+        try:
+            await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(1500)
+
+        # Acessa consultafatura
+        await page.goto(f"{base}/consultafatura?acao=iniciar", wait_until="domcontentloaded", timeout=30000)
+        await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
+
+        await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
+        await page.fill('input[name="dtemissao1"]', hoje)
+        await page.fill('input[name="dtemissao2"]', hoje)
+        # filialId 0 = TODAS
+        try:
+            await page.select_option('select[name="filialId"]', value="0")
+        except Exception:
+            pass
+        try:
+            await page.select_option('select[name="finalizada"]', label="Todas")
+        except Exception:
+            pass
+        try:
+            await page.select_option('select[name="limiteResultados"]', value="200")
+        except Exception:
+            pass
+
+        # Pesquisar — espera response
+        try:
+            async with page.expect_response(
+                lambda r: "consultafatura" in r.url and "acao=consultar" in r.url,
+                timeout=30000,
+            ):
+                await page.click('input[value="Pesquisar"]')
+        except Exception:
+            await page.click('input[value="Pesquisar"]')
+            await page.wait_for_timeout(2000)
+        try:
+            await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(500)
+
+        # Parsea linhas: extrai número, emissão, vencimento, filial, valor, cliente, situação
+        # A tabela do GW tem colunas: [chk, anexos, Fatura/Lote, Emissão, Cliente, Vencimento, Valor, ..., Status, Data Pgto, Sit., ..., Rem., trash]
+        faturas_dom = await page.evaluate(
+            """() => {
+                function parseValor(t) {
+                    if (!t) return 0;
+                    return parseFloat(String(t).replace(/[^0-9,.-]/g,'').replace(/\\./g,'').replace(',','.')) || 0;
+                }
+                const out = [];
+                for (const tr of document.querySelectorAll('tr')) {
+                    const tds = [...tr.querySelectorAll('td')];
+                    if (tds.length < 8) continue;
+                    // Identifica linha de fatura: tem checkbox name=ck e link com número/AAAA
+                    const cb = tr.querySelector('input[id^="ck"]');
+                    if (!cb) continue;
+                    const linkFat = tr.querySelector('a');
+                    if (!linkFat) continue;
+                    const numeroMatch = (linkFat.textContent || '').trim().match(/(\\d{5,6})\\/(\\d{4})/);
+                    if (!numeroMatch) continue;
+                    const numero = numeroMatch[1].padStart(6, '0');
+                    // Coleta texto de cada td (limpando)
+                    const txt = tds.map(t => (t.textContent || '').trim());
+                    // Procura datas DD/MM/AAAA
+                    const datas = [];
+                    for (const t of txt) {
+                        const m = t.match(/^(\\d{2}\\/\\d{2}\\/\\d{4})$/);
+                        if (m) datas.push(m[1]);
+                    }
+                    // Procura cliente — primeiro td com texto longo que não é número/data
+                    let cliente = '';
+                    for (const t of txt) {
+                        if (t.length > 8 && !/^\\d{5,6}\\/\\d{4}$/.test(t) && !/^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(t)
+                            && !/^[\\d.,]+$/.test(t) && !/^Lote/.test(t)) {
+                            cliente = t.replace(/\\s*\\[\\.\\.\\.\\]\\s*$/, '');
+                            break;
+                        }
+                    }
+                    // Valor: procura o terceiro número decimal grande (Líquido)
+                    const valores = txt.filter(t => /^\\d{1,3}(\\.\\d{3})*,\\d{2}$/.test(t));
+                    const valor = valores.length ? parseValor(valores[valores.length - 1]) : 0;
+                    // Sit: pode estar em coluna específica - usa texto da linha
+                    const linhaTxt = tr.textContent || '';
+                    const sit = /Cancelad/.test(linhaTxt) ? 'Cancelada' :
+                                /Descontad/.test(linhaTxt) ? 'Descontada' : 'Em Aberto';
+
+                    out.push({
+                        numero,
+                        emissao: datas[0] || '',
+                        vencimento: datas[1] || '',
+                        valor,
+                        cliente_nome: cliente,
+                        situacao: sit,
+                    });
+                }
+                return out;
+            }"""
+        )
+        await browser.close()
+        return faturas_dom
+
+
 async def processar_excels(user_id: int | None = None) -> list[dict]:
     """Entry point: baixa relatÃ³rios do GW e processa"""
     global _cache_faturas
@@ -630,6 +757,54 @@ async def processar_excels(user_id: int | None = None) -> list[dict]:
         path1, path2 = await baixar_relatorios_gw(user_id=user_id)
         _prog_log("📊 Processando planilhas...")
         _cache_faturas = processar_dataframes(path1, path2)
+
+        # FALLBACK: se o relatório customizado vier vazio, busca direto
+        # via /consultafatura (que sabidamente funciona).
+        if not _cache_faturas:
+            _prog_log("⚠️ Relatório personalizado vazio — usando fallback /consultafatura")
+            try:
+                fallback = await _buscar_faturas_via_consultafatura(user_id=user_id)
+            except Exception as e:
+                _prog_log(f"❌ Fallback falhou: {e}")
+                fallback = []
+
+            # Cruza com chaves do Complemento (já processado em processar_dataframes)
+            chaves_map: dict[str, str] = {}
+            try:
+                debug = getattr(processar_dataframes, "_last_debug", []) or []
+                # Re-lê o Complemento pra mapear chaves
+                if path2:
+                    df2 = pd.read_excel(path2, skiprows=1, dtype=str)
+                    if len(df2.columns) >= 4:
+                        for _, row in df2.iterrows():
+                            num = str(row.iloc[3] or "").strip().split("/")[0].split(".")[0].zfill(6)
+                            ch = str(row.iloc[2] or "").strip()
+                            if num and ch and len(ch) == 44 and num not in chaves_map:
+                                chaves_map[num] = ch
+            except Exception:
+                pass
+
+            # Monta lista no formato esperado
+            faturas_final = []
+            for f in fallback:
+                num = f["numero"]
+                # Filial inferida do CNPJ não disponível aqui — assume Matriz por default
+                # (usuário pode editar no front; importante é o número e valor)
+                faturas_final.append({
+                    "numero": num,
+                    "emissao": f.get("emissao", ""),
+                    "vencimento": f.get("vencimento", ""),
+                    "filial": "MATRIZ",  # fallback default
+                    "valor": f.get("valor", 0),
+                    "cliente_nome": f.get("cliente_nome", ""),
+                    "cliente_cnpj": "",
+                    "situacao": f.get("situacao", "Em Aberto"),
+                    "chave": chaves_map.get(num, ""),
+                    "factory_sugerida": "gc_matriz",
+                })
+            _cache_faturas = faturas_final
+            _prog_log(f"   {len(_cache_faturas)} fatura(s) recuperadas via fallback")
+
         _salvar_cache(_cache_faturas)   # persiste em disco
         _prog_log(f"✅ {len(_cache_faturas)} fatura(s) carregada(s)")
         _prog_finalizar(True)
