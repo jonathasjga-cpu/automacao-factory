@@ -691,10 +691,23 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
         except Exception:
             pass
-        await page.wait_for_timeout(500)
+        await page.wait_for_timeout(1000)
+
+        # Debug: conta checkboxes e linhas
+        debug_info = await page.evaluate("""() => {
+            const ckboxes = document.querySelectorAll('input[id^="ck"]').length;
+            const trs = document.querySelectorAll('tr').length;
+            const links = document.querySelectorAll('a').length;
+            const url = location.href;
+            // Pega texto de "Total de" se existir
+            const m = (document.body.innerText || '').match(/Total[^\\n]{0,80}/);
+            return {ckboxes, trs, links, url: url.slice(0, 200), totalSnippet: m ? m[0] : ''};
+        }""")
+        _prog_log(f"  [fallback] checkboxes={debug_info.get('ckboxes')} trs={debug_info.get('trs')} url={debug_info.get('url')[:80]}")
+        if debug_info.get('totalSnippet'):
+            _prog_log(f"  [fallback] total: {debug_info['totalSnippet'][:120]}")
 
         # Parsea linhas: extrai número, emissão, vencimento, filial, valor, cliente, situação
-        # A tabela do GW tem colunas: [chk, anexos, Fatura/Lote, Emissão, Cliente, Vencimento, Valor, ..., Status, Data Pgto, Sit., ..., Rem., trash]
         faturas_dom = await page.evaluate(
             """() => {
                 function parseValor(t) {
