@@ -849,30 +849,53 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
 
 
 async def processar_excels(user_id: int | None = None) -> list[dict]:
-    """Entry point: baixa relatÃ³rios do GW e processa"""
+    """Entry point: baixa relatórios do GW e processa.
+
+    Estratégia em 2 estágios:
+      1. Tenta baixar os relatórios personalizados ("Automação"/"Complemento") —
+         caminho rápido com chaves NF-e prontas.
+      2. Se isso falhar (relatório não cadastrado, vazio, ou exception qualquer),
+         cai no fallback /consultafatura que sabidamente funciona em qualquer
+         ambiente sem depender de relatório customizado.
+    """
     global _cache_faturas
     _prog_reset()
+    path1: Path | None = None
+    path2: Path | None = None
+    erro_relatorio: str | None = None
+
     try:
         _prog_log("🚀 Iniciando download dos relatórios do GW...")
-        path1, path2 = await baixar_relatorios_gw(user_id=user_id)
-        _prog_log("📊 Processando planilhas...")
-        _cache_faturas = processar_dataframes(path1, path2)
+        try:
+            path1, path2 = await baixar_relatorios_gw(user_id=user_id)
+            _prog_log("📊 Processando planilhas...")
+            _cache_faturas = processar_dataframes(path1, path2)
+        except Exception as e:
+            # Relatório não encontrado, GW indisponível, parser falhou, etc.
+            # Não aborta — o fallback /consultafatura cobre esse caso.
+            erro_relatorio = str(e)
+            _prog_log(f"⚠️ Não foi possível usar relatórios personalizados: {erro_relatorio[:200]}")
+            _cache_faturas = []
 
-        # FALLBACK: se o relatório customizado vier vazio, busca direto
-        # via /consultafatura (que sabidamente funciona).
+        # FALLBACK: dispara quando o relatório falhou OU veio vazio.
+        # /consultafatura funciona em qualquer instalação do GW (não depende
+        # de relatório customizado por usuário).
         if not _cache_faturas:
-            _prog_log("⚠️ Relatório personalizado vazio — usando fallback /consultafatura")
+            if erro_relatorio:
+                _prog_log("🔄 Buscando faturas via /consultafatura (relatório indisponível)...")
+            else:
+                _prog_log("⚠️ Relatório personalizado vazio — usando fallback /consultafatura")
             try:
                 fallback = await _buscar_faturas_via_consultafatura(user_id=user_id)
             except Exception as e:
-                _prog_log(f"❌ Fallback falhou: {e}")
+                _prog_log(f"❌ Fallback /consultafatura também falhou: {e}")
                 fallback = []
 
-            # Cruza com chaves do Complemento (já processado em processar_dataframes)
+            # Cruza com chaves do Complemento (se o Complemento foi baixado
+            # com sucesso na etapa 1; se não, fica sem chave NF-e — é apenas
+            # uma melhoria de UX, não bloqueia a operação).
             chaves_map: dict[str, str] = {}
             try:
-                debug = getattr(processar_dataframes, "_last_debug", []) or []
-                # Re-lê o Complemento pra mapear chaves
                 if path2:
                     df2 = pd.read_excel(path2, skiprows=1, dtype=str)
                     if len(df2.columns) >= 4:
@@ -904,6 +927,11 @@ async def processar_excels(user_id: int | None = None) -> list[dict]:
                 })
             _cache_faturas = faturas_final
             _prog_log(f"   {len(_cache_faturas)} fatura(s) recuperadas via fallback")
+
+        # Se chegou aqui sem nada, agora sim falha duro (sem caminho viável)
+        if not _cache_faturas:
+            msg = erro_relatorio or "Nenhuma fatura encontrada (relatório vazio e fallback sem resultados)"
+            raise Exception(msg)
 
         _salvar_cache(_cache_faturas)   # persiste em disco
         _prog_log(f"✅ {len(_cache_faturas)} fatura(s) carregada(s)")
