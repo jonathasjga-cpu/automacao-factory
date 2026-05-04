@@ -2,10 +2,29 @@
 import json
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
+
+from _tz import now_br, TZ_BR
 
 _DATA_DIR = Path(os.getenv("DATA_DIR", str(Path.home() / ".automacao_factory")))
 HISTORICO_FILE = _DATA_DIR / "operacoes_historico.json"
+
+
+def _parse_dt(s: str) -> datetime | None:
+    """Parse ISO datetime aceitando tanto formatos com timezone (UTC '...Z' ou
+    '+00:00') quanto naive. Retorna sempre datetime com tzinfo (Brasília se naive)."""
+    if not s:
+        return None
+    try:
+        # JS toISOString() termina com 'Z' que fromisoformat só aceita a partir do Python 3.11
+        s_norm = s.replace("Z", "+00:00") if s.endswith("Z") else s
+        dt = datetime.fromisoformat(s_norm)
+    except Exception:
+        return None
+    # Naive → assume Brasília
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=TZ_BR)
+    return dt
 
 def carregar_historico() -> list:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -23,11 +42,13 @@ def salvar_operacao(op_id: str, status: dict):
     inicio = status.get("inicio")
     fim = status.get("fim")
     duracao_seg = None
-    if inicio and fim:
+    t0, t1 = _parse_dt(inicio), _parse_dt(fim)
+    if t0 and t1:
         try:
-            t0 = datetime.fromisoformat(inicio)
-            t1 = datetime.fromisoformat(fim)
             duracao_seg = round((t1 - t0).total_seconds())
+            # Sanity: duração negativa ou absurda (>24h) não vai pro histórico
+            if duracao_seg < 0 or duracao_seg > 86400:
+                duracao_seg = None
         except Exception:
             pass
 
@@ -76,7 +97,7 @@ def salvar_operacao(op_id: str, status: dict):
 
     entrada = {
         "op_id": op_id,
-        "data": fim or inicio or datetime.now().isoformat(),
+        "data": fim or inicio or now_br().isoformat(),
         "inicio": inicio,
         "fim": fim,
         "duracao_seg": duracao_seg,

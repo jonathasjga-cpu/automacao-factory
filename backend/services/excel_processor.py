@@ -45,7 +45,8 @@ _progresso: dict = {"status": "ocioso", "logs": [], "inicio": None, "fim": None}
 def _prog_reset():
     _progresso["status"] = "executando"
     _progresso["logs"] = []
-    _progresso["inicio"] = datetime.now().isoformat()
+    from _tz import now_br
+    _progresso["inicio"] = now_br().isoformat()
     _progresso["fim"] = None
 
 def _prog_log(msg: str):
@@ -53,7 +54,8 @@ def _prog_log(msg: str):
 
 def _prog_finalizar(ok: bool, erro: str | None = None):
     _progresso["status"] = "concluido" if ok else "erro"
-    _progresso["fim"] = datetime.now().isoformat()
+    from _tz import now_br
+    _progresso["fim"] = now_br().isoformat()
     if erro:
         _progresso["logs"].append(f"❌ {erro}")
 
@@ -89,8 +91,16 @@ async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentat
         return unicodedata.normalize("NFC", s).lower()
 
     for tentativa in range(tentativas):
-        await page.goto(meus_rel_url, wait_until="load", timeout=60000)
-        await page.wait_for_timeout(2000)
+        # domcontentloaded é responsivo; wait_for_function abaixo confirma a tabela
+        await page.goto(meus_rel_url, wait_until="domcontentloaded", timeout=30000)
+        # Aguarda tabela renderizar — sai imediato quando há linhas
+        try:
+            await page.wait_for_function(
+                "() => document.querySelectorAll('tr').length > 1",
+                timeout=8000,
+            )
+        except Exception:
+            pass
         rows = await page.query_selector_all("tr")
         # Não usar any(await ... for row in rows) — cria async generator que any() não itera
         encontrado = False
@@ -105,7 +115,9 @@ async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentat
         if encontrado:
             return await _baixar_meu_relatorio(page, context, nome, meus_rel_url)
         if tentativa < tentativas - 1:
-            await page.wait_for_timeout(5000)
+            # Espera curta entre re-checks de Meus Relatórios — relatório pode levar
+            # alguns segundos pra processar; 2s é bem mais responsivo que 5s.
+            await page.wait_for_timeout(2000)
 
     raise Exception(
         f"RelatÃ³rio '{nome}' nÃ£o encontrado. Verifique se existe um relatÃ³rio personalizado "
@@ -124,10 +136,18 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
 
-    # Sempre navega para garantir estado limpo
+    # Sempre navega para garantir estado limpo. domcontentloaded é responsivo;
+    # wait_for_function abaixo confirma que a UI renderizou.
     url_rel = f"{base}/relcontasreceber?acao=iniciar&modulo=webtrans"
-    await page.goto(url_rel, wait_until="load", timeout=60000)
-    await page.wait_for_timeout(1500)
+    await page.goto(url_rel, wait_until="domcontentloaded", timeout=30000)
+    # Aguarda a página de relatórios renderizar (alguma aba/td/tr clicável). Sai imediato.
+    try:
+        await page.wait_for_function(
+            "() => document.querySelectorAll('td, th, tr').length > 5",
+            timeout=8000,
+        )
+    except Exception:
+        pass
 
     # Se GW retornou 403, a sessão expirou — relança erro claro
     titulo = await page.title()
@@ -148,7 +168,7 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     try:
         await page.wait_for_selector('input[type="radio"]', timeout=8000)
     except Exception:
-        await page.wait_for_timeout(2000)
+        pass
 
     # Seleciona o radio button pelo nome do relatório
     # Usa normalização NFC para garantir comparação correta de acentos
@@ -198,7 +218,21 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     if isinstance(selecionado, str) and selecionado.startswith('NAO_ENCONTRADO'):
         raise Exception(f"Radio '{nome_relatorio}' não encontrado na lista do GW. {selecionado}")
 
-    await page.wait_for_timeout(1000)  # aguarda filtros do relatório selecionado atualizarem
+    # Aguarda os filtros do relatório atualizarem — espera responsivamente que algum
+    # input de data apareça (sinal de que a UI reagiu ao radio click). Sai imediato.
+    try:
+        await page.wait_for_function(
+            """() => {
+                const trs = [...document.querySelectorAll('tr')];
+                return trs.some(tr => {
+                    const t = (tr.textContent || '').toLowerCase();
+                    return t.includes('emiss') && tr.querySelectorAll('input[type=\\"text\\"]').length >= 2;
+                });
+            }""",
+            timeout=4000,
+        )
+    except Exception:
+        pass
 
     if preencher_data:
         # Identifica os 2 inputs de data via JS (retorna ids ou seletores absolutos)
@@ -253,8 +287,17 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
     async def _clicar_gerar():
-        # Aguarda o botão estar disponível na página antes de clicar
-        await page.wait_for_timeout(500)
+        # Aguarda o botão Gerar estar disponível antes de clicar (sem sleep fixo)
+        try:
+            await page.wait_for_function(
+                """() => {
+                    const btns = [...document.querySelectorAll('input[type="submit"], input[type="button"]')];
+                    return btns.some(b => b.value && b.value.includes('Gerar'));
+                }""",
+                timeout=3000,
+            )
+        except Exception:
+            pass
         await page.evaluate("""
             () => {
                 const btn = [...document.querySelectorAll('input[type="submit"], input[type="button"]')]
@@ -271,7 +314,14 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             popup = await popup_info.value
             # Aguarda o popup carregar (GW exibe "Seu relatório já foi gerado. Clique no link...")
             await popup.wait_for_load_state("domcontentloaded", timeout=30000)
-            await popup.wait_for_timeout(2000)
+            # Aguarda link aparecer no popup — sinal responsivo de que a tela renderizou
+            try:
+                await popup.wait_for_function(
+                    "() => document.querySelectorAll('a').length > 0",
+                    timeout=8000,
+                )
+            except Exception:
+                pass
             try:
                 async with popup.expect_download(timeout=60000) as dl_info:
                     # GW não faz download automático — precisa clicar no link azul do popup
@@ -298,7 +348,9 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     else:
         await _clicar_gerar()
 
-    await page.wait_for_timeout(3000)
+    # Margem mínima para o GW iniciar o processamento do relatório.
+    # O fallback _aguardar_e_baixar já faz polling — não precisa de sleep grande aqui.
+    await page.wait_for_timeout(800)
 
 
 async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path | None]:
@@ -326,17 +378,29 @@ async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path |
         await page.fill('#login', creds["usuario"])
         await page.fill('#senha', creds["senha"])
         await page.click('.button-login')
-        await page.wait_for_load_state("load", timeout=60000)
-        await page.wait_for_timeout(3000)
+        # Aguarda redirect pra fora do login (sai assim que muda)
+        try:
+            await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
+        except Exception:
+            pass
 
         # Verifica se ainda está na tela de login (credenciais erradas ou problema no login)
         current_url = page.url
         if "login" in current_url.lower():
             raise Exception("Login GW falhou. Verifique as credenciais em Configurações.")
 
-        # Aguarda a home carregar para garantir sessão ativa antes de navegar
-        await page.goto(f"{base}/home", wait_until="load", timeout=60000)
-        await page.wait_for_timeout(1500)
+        # Aguarda a home carregar para garantir sessão ativa antes de navegar.
+        # domcontentloaded + wait_for_function = saída no momento certo, sem
+        # esperar todos os recursos da home.
+        await page.goto(f"{base}/home", wait_until="domcontentloaded", timeout=30000)
+        # Espera sinal de UI renderizada (link/iframe da home) — responsivo
+        try:
+            await page.wait_for_function(
+                "() => !!document.querySelector('a[href], iframe, [onclick]')",
+                timeout=8000,
+            )
+        except Exception:
+            pass
 
         # Se caiu em 403 ou redirect de volta ao login, lança erro
         current_url = page.url
@@ -416,19 +480,32 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
         el_txt = (await el.inner_text()).lower()
         if "gerar" in el_txt or "atualizar" in el_txt or "processar" in el_txt:
             await el.click()
-            await page.wait_for_timeout(8000)  # aguarda o GW processar o relatÃ³rio
-            # Recarrega a lista de relatÃ³rios para pegar o link de download atualizado
-            await page.goto(
-                f"https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios",
-                wait_until="load", timeout=60000
-            )
-            await page.wait_for_timeout(2000)
-            # Re-localiza a linha apÃ³s reload
-            rows = await page.query_selector_all("tr")
-            for row in rows:
-                txt = await row.inner_text()
-                if norm(nome) in norm(txt):
-                    linha_alvo = row
+            # Espera responsiva: faz polling rápido recarregando a página até
+            # aparecer link de "Excel/Baixar" na linha alvo (sinal de que está pronto).
+            # Cap de 15s para não travar.
+            url_rel = "https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios"
+            import time as _time
+            inicio_wait = _time.monotonic()
+            while _time.monotonic() - inicio_wait < 15:
+                await page.wait_for_timeout(800)
+                try:
+                    await page.goto(url_rel, wait_until="domcontentloaded", timeout=20000)
+                except Exception:
+                    continue
+                rows = await page.query_selector_all("tr")
+                pronto = False
+                for row in rows:
+                    txt = await row.inner_text()
+                    if norm(nome) in norm(txt):
+                        linha_alvo = row
+                        # Há link clicável de download/excel?
+                        for a in await row.query_selector_all("a"):
+                            atxt = (await a.inner_text()).lower()
+                            if "excel" in atxt or "baixar" in atxt:
+                                pronto = True
+                                break
+                        break
+                if pronto:
                     break
             break
 
@@ -654,9 +731,8 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
         except Exception:
             pass
-        await page.wait_for_timeout(1500)
-
-        # Acessa consultafatura
+        # Acessa consultafatura — o wait_for do select abaixo já é a confirmação responsiva
+        # de que a sessão GW estabilizou (se ainda estivesse carregando, o select não existiria).
         await page.goto(f"{base}/consultafatura?acao=iniciar", wait_until="domcontentloaded", timeout=30000)
         await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
 
@@ -686,12 +762,19 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                 await page.click('input[value="Pesquisar"]')
         except Exception:
             await page.click('input[value="Pesquisar"]')
-            await page.wait_for_timeout(2000)
+        # Aguarda a tabela renderizar — sai imediatamente quando os checkboxes aparecem,
+        # ou quando uma mensagem de "0 resultados" aparece. Sem sleep fixo.
         try:
-            await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
+            await page.wait_for_function(
+                """() => {
+                    if (document.querySelectorAll('input[id^="ck"]').length > 0) return true;
+                    const t = (document.body && document.body.innerText) || '';
+                    return /Nenhum (?:resultado|registro)|N[ãa]o h[áa] registros|sem resultados/i.test(t);
+                }""",
+                timeout=15000,
+            )
         except Exception:
             pass
-        await page.wait_for_timeout(1000)
 
         # Debug: conta checkboxes e linhas
         debug_info = await page.evaluate("""() => {

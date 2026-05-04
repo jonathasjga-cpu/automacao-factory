@@ -123,13 +123,25 @@ async def _login_gw(page: Page, user_id: int | None = None):
 
     # Garante que chegamos na home (o GW pode redirecionar por etapas)
     if "/home" not in page.url:
-        await page.goto(f"{BASE_GW}/home", wait_until="load", timeout=30000)
-    # Aguarda a home inicializar a sessão Java no servidor (networkidle com fallback)
+        # domcontentloaded é mais responsivo — o wait_for_function abaixo
+        # confirma que a UI realmente renderizou. "load" pode travar 30s
+        # quando a home tem muitos recursos pesados pra carregar.
+        await page.goto(f"{BASE_GW}/home", wait_until="domcontentloaded", timeout=30000)
+    # Aguarda a home inicializar a sessão Java no servidor.
+    # Em vez de sleep fixo, espera responsivamente algum sinal de que a UI renderizou
+    # (links/iframes/menu). Sai imediatamente quando a home está pronta; cap curto.
     try:
-        await page.wait_for_load_state("networkidle", timeout=15000)
+        await page.wait_for_function(
+            """() => {
+                if (!document.body) return false;
+                if ((document.body.innerText || '').trim().length < 5) return false;
+                // sinal forte: algum link/menu/iframe da home apareceu
+                return !!document.querySelector('a[href], iframe, [onclick]');
+            }""",
+            timeout=8000,
+        )
     except Exception:
         pass
-    await page.wait_for_timeout(1500)
 
     # Reverifica após o /home (alguns redirecionamentos só acontecem nessa etapa)
     await _diagnosticar_pos_login(page)
@@ -321,17 +333,29 @@ async def _baixar_cte_de_meus_relatorios(
             return None
 
         try:
-            await page.goto(URL_REL, wait_until="load", timeout=30000)
+            # domcontentloaded — wait_for_function abaixo confirma a tabela ter renderizado.
+            # Meus Relatórios pode ter dezenas de relatórios e relatorios grandes; "load"
+            # esperaria recursos pesados sem necessidade.
+            await page.goto(URL_REL, wait_until="domcontentloaded", timeout=30000)
         except Exception as e:
             log(f"    Erro ao abrir Meus Relatórios: {e}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(3)
             continue
-        await page.wait_for_timeout(1500)
+        # Aguarda a tabela de relatórios renderizar — sai imediatamente quando há linhas
+        try:
+            await page.wait_for_function(
+                "() => document.querySelectorAll('table tr').length > 1",
+                timeout=8000,
+            )
+        except Exception:
+            pass
 
-        # Procura linha mais recente: Rotina contém "CT-e" e Status="Gerado"
-        # com timestamp >= marcador_dt
+        # Procura linha mais recente: Rotina contém "CT-e" com timestamp >= marcador_dt.
+        # Retorna {idx, status} para que possamos logar diferentemente "Gerado" vs
+        # "Em processamento"/"Aguardando" — diferença crítica pra saber se o GW
+        # já recebeu o pedido (silenciosamente) ou se ainda não viu nada.
         marcador_iso = marcador_dt.strftime("%Y-%m-%dT%H:%M")
-        linha_idx = await page.evaluate(
+        info_linha = await page.evaluate(
             """(marcadorIso) => {
                 const rows = [...document.querySelectorAll('tr')];
                 const isoMin = marcadorIso;  // 'YYYY-MM-DDTHH:MM'
@@ -343,7 +367,14 @@ async def _baixar_cte_de_meus_relatorios(
                     const txt = tds.map(t => (t.textContent || '').trim());
                     const all = txt.join(' | ');
                     if (!/CT-?e|Modelo\\s*17/i.test(all)) continue;
-                    if (!/Gerado/i.test(all)) continue;
+                    // Detecta status — "Gerado" é o que queremos; "Em processamento",
+                    // "Aguardando", "Processando" indicam que o GW recebeu mas ainda
+                    // está calculando.
+                    let status = 'desconhecido';
+                    if (/Gerado/i.test(all)) status = 'gerado';
+                    else if (/Em processamento|Processando|Em fila|Aguardando/i.test(all)) status = 'processando';
+                    else if (/Erro|Falha/i.test(all)) status = 'erro';
+                    else continue;  // não tem status reconhecível, pula
                     // procura timestamp DD/MM/AAAA, HH:MM:SS no row
                     const dts = [];
                     for (const t of txt) {
@@ -354,26 +385,43 @@ async def _baixar_cte_de_meus_relatorios(
                         }
                     }
                     if (!dts.length) continue;
-                    // usa o maior (processado em)
                     const maxIso = dts.sort().pop();
                     if (maxIso >= isoMin) {
-                        candidatos.push({i, maxIso, all});
+                        candidatos.push({i, maxIso, status, all});
                     }
                 }
-                if (!candidatos.length) return -1;
-                // pega o mais recente
+                if (!candidatos.length) return {idx: -1, status: 'nenhum'};
+                // Prioriza Gerado; senão pega o mais recente em qualquer status
+                const gerados = candidatos.filter(c => c.status === 'gerado');
+                if (gerados.length) {
+                    gerados.sort((a, b) => b.maxIso.localeCompare(a.maxIso));
+                    return {idx: gerados[0].i, status: 'gerado'};
+                }
                 candidatos.sort((a, b) => b.maxIso.localeCompare(a.maxIso));
-                return candidatos[0].i;
+                return {idx: -1, status: candidatos[0].status};
             }""",
             marcador_iso,
         )
+        linha_idx = info_linha.get("idx", -1)
+        status_atual = info_linha.get("status", "nenhum")
+
         if linha_idx < 0:
             elapsed = int(time.monotonic() - inicio)
-            log(f"    Meus Relatórios: ainda não tem CT-e gerado pra essa busca ({elapsed}s, máx {max_seconds}s)")
-            await asyncio.sleep(15)
+            # Loga só a cada ~12s pra não inundar o log.
+            # Se já existe linha "processando", informa ao usuário — assim ele sabe
+            # que o GW recebeu o pedido e está só esperando processar.
+            if elapsed % 12 < 4:
+                if status_atual == "processando":
+                    log(f"    Meus Relatórios: GW está processando o relatório ({elapsed}s, máx {max_seconds}s)")
+                elif status_atual == "erro":
+                    log(f"    ⚠️ Meus Relatórios: GW reportou erro na geração — abortando")
+                    return None
+                else:
+                    log(f"    Meus Relatórios: aguardando GW receber o pedido ({elapsed}s, máx {max_seconds}s)")
+            await asyncio.sleep(4)
             continue
 
-        log(f"    Meus Relatórios: relatório CT-e encontrado na linha {linha_idx}")
+        log(f"    Meus Relatórios: relatório CT-e encontrado na linha {linha_idx} (status=Gerado)")
 
         # Captura URL do S3 via route interception ao clicar "Baixar PDF"
         s3_url_holder: dict = {}
@@ -510,13 +558,13 @@ async def baixar_faturas_pdf(
                     except Exception as e_url:
                         log(f"  AVISO expect_response timeout: {e_url}")
                         log(f"  URL atual: {page.url}")
-                    # Aguarda os checkboxes ck* aparecerem = resultados renderizados
+                    # Aguarda os checkboxes ck* aparecerem = resultados renderizados.
+                    # expect_response já confirmou a resposta; o wait_for_selector
+                    # garante que o JS do GW terminou de hidratar a tabela.
                     try:
                         await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
                     except Exception:
                         pass
-
-                    await page.wait_for_timeout(300)
 
                     # Faturas retornadas pelo GW
                     na_pagina = []
@@ -744,7 +792,10 @@ async def baixar_faturas_pdf(
                             try:
                                 aba_pdf = await context.new_page()
                                 try:
-                                    await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
+                                    # domcontentloaded — o que importa é a route do PDF
+                                    # ser disparada (capturada pelo handler), não a página
+                                    # inteira terminar de carregar.
+                                    await aba_pdf.goto(abs_url, wait_until="domcontentloaded", timeout=30000)
                                 except Exception:
                                     pass
                                 for _t in range(75):  # 75 × 0.4s = 30s
@@ -867,14 +918,20 @@ async def baixar_ctes_pdf(
                     log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
 
                     try:
-                        # 1. Navega para CT-e — load é mais estável que networkidle no GW
+                        # 1. Navega para CT-e — domcontentloaded retorna assim que o HTML
+                        # é parseado (~1-2s); wait_for_selector("#pesquisar") abaixo é o
+                        # sinal real de "tela pronta para uso". Usar wait_until="load"
+                        # aqui causa timeout de 60s quando a fatura tem muitos CT-es,
+                        # porque "load" espera TODOS os recursos (scripts/imgs) terminarem.
                         await page.goto(
                             f"{BASE_GW}/CTeControlador?acao=listar&&tipoTransporte=false",
-                            wait_until="load",
-                            timeout=60000,
+                            wait_until="domcontentloaded",
+                            timeout=30000,
                         )
                         try:
-                            await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
+                            # Botão #pesquisar visível = tela utilizável.
+                            # 60s aqui cobre fatura com volume grande (renderização lenta).
+                            await page.locator("#pesquisar").wait_for(state="visible", timeout=60000)
                         except Exception:
                             url_atual = page.url
                             try:
@@ -1051,8 +1108,9 @@ async def baixar_ctes_pdf(
                             CTES_LIMITE_FILA = 50
                             if total_ctes > CTES_LIMITE_FILA:
                                 log(f"    📦 {total_ctes} CT-es: pulando popup, indo direto pro Meus Relatórios")
-                                # Pequena pausa pra garantir que o servidor recebeu o pedido
-                                await asyncio.sleep(3)
+                                # Pequena pausa só pra garantir que o servidor recebeu o pedido.
+                                # O fallback Meus Relatórios já faz polling, então não precisa de muito.
+                                await asyncio.sleep(0.8)
                                 pdf_bytes = None
                             else:
                                 # Aguarda o JS do GW gerar e carregar o PDF.
@@ -1138,15 +1196,18 @@ async def baixar_ctes_pdf(
                             await context.unroute("**/*", _ctx_rota_cte)
 
                         # Fallback final: Meus Relatórios. Quando a fatura tem muitos
-                        # CT-es, o GW às vezes processa de forma assíncrona — o popup
-                        # não retorna o PDF, mas ele aparece em /RelatorioControlador
-                        # como um relatório novo (Modelo 17, Status=Gerado).
+                        # CT-es, o GW processa de forma assíncrona — o popup não retorna
+                        # o PDF, mas ele aparece em /RelatorioControlador como um relatório
+                        # novo (Modelo 17, Status=Gerado).
+                        # Timeout adaptativo: ~2s por CT-e + base 120s, cap em 600s.
+                        # Ex: 30 CTes → 180s, 113 CTes → 346s, 300+ CTes → 600s.
                         if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
-                            log(f"    Tentando fallback Meus Relatórios...")
+                            timeout_adapt = min(600, max(180, 120 + total_ctes * 2))
+                            log(f"    Tentando fallback Meus Relatórios (cap {timeout_adapt}s para {total_ctes} CT-es)...")
                             try:
                                 pdf_bytes = await _baixar_cte_de_meus_relatorios(
                                     page, context, marcador_relatorio, log,
-                                    max_seconds=180,  # 3min — relatórios já chegam em 1-2min
+                                    max_seconds=timeout_adapt,
                                 )
                             except Exception as e:
                                 log(f"    Erro fallback Meus Relatórios: {e}")

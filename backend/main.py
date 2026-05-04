@@ -7,6 +7,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 
+from _tz import now_br
+
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
@@ -188,7 +190,7 @@ def debug_tz():
         nb_iso = f"ERRO: {e}"
         nb_data = "?"
     return {
-        "datetime_now_local": datetime.now().isoformat(),
+        "datetime_now_local": now_br().isoformat(),
         "now_br_iso": nb_iso,
         "now_br_data": nb_data,
     }
@@ -241,7 +243,7 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
         "resumo": [],
         "faturas_cache": faturas_cache,
         "faturas_por_factory": faturas_por_factory,
-        "inicio": req.inicio or datetime.now().isoformat(),
+        "inicio": req.inicio or now_br().isoformat(),
         "fim": None,
         "arquivos": {},
         "pasta_destino": req.pasta_destino or "",
@@ -341,7 +343,7 @@ async def cancelar_operacao(op_id: str):
         if not t.done():
             t.cancel()
     op["status"] = "cancelado"
-    op["fim"] = datetime.now().isoformat()
+    op["fim"] = now_br().isoformat()
     op["logs"].append("🛑 Operação cancelada pelo usuário")
     return {"ok": True}
 
@@ -426,7 +428,7 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
 
     # Se cancelado durante a execução, para aqui
     if status["status"] == "cancelado":
-        status["fim"] = status.get("fim") or datetime.now().isoformat()
+        status["fim"] = status.get("fim") or now_br().isoformat()
         salvar_operacao(op_id, status)
         return
 
@@ -476,12 +478,12 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
 
     # Se cancelado em qualquer momento (antes ou durante salvamento), não sobrescreve status
     if status["status"] == "cancelado":
-        status["fim"] = status.get("fim") or datetime.now().isoformat()
+        status["fim"] = status.get("fim") or now_br().isoformat()
         salvar_operacao(op_id, status)
         return
 
     status["status"] = "concluido" if not tem_erros else "concluido_com_erros"
-    status["fim"] = datetime.now().isoformat()
+    status["fim"] = now_br().isoformat()
     salvar_operacao(op_id, status)
 
     # Persiste arquivos gerados por 2 dias para re-download

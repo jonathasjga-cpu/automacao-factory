@@ -72,17 +72,17 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
         except Exception:
             pass
-        await page.wait_for_timeout(2000)
         log(f"  GW — login OK")
 
         # ── Navega para Gerar Arquivo de Remessa ──────────────────────────────
         # URL real descoberta via inspeção do menu (li[href="./jspexporta_boleto.jsp"])
-        await page.goto(f"{BASE_GW}/jspexporta_boleto.jsp", wait_until="load", timeout=30000)
+        # domcontentloaded é responsivo; o wait_for do select abaixo confirma a tela.
+        await page.goto(f"{BASE_GW}/jspexporta_boleto.jsp", wait_until="domcontentloaded", timeout=30000)
+        # Espera responsiva: o select de campoDeConsulta é o sinal de que a tela renderizou
         try:
-            await page.wait_for_load_state("networkidle", timeout=10000)
+            await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
         except Exception:
             pass
-        await page.wait_for_timeout(1000)
 
         # ── Preenche filtros ──────────────────────────────────────────────────
         # Tipo de busca: Data de Emissão
@@ -136,7 +136,19 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             await page.wait_for_load_state("load", timeout=20000)
         except Exception:
             pass
-        await page.wait_for_timeout(1500)
+        # Espera a tabela carregar — sai imediato quando há linhas com checkboxes
+        # ou mensagem de "0 resultados".
+        try:
+            await page.wait_for_function(
+                """() => {
+                    if (document.querySelectorAll('table tr input[type="checkbox"]').length > 0) return true;
+                    const t = (document.body && document.body.innerText) || '';
+                    return /Nenhum (?:resultado|registro)|N[ãa]o h[áa] registros|sem resultados/i.test(t);
+                }""",
+                timeout=10000,
+            )
+        except Exception:
+            pass
 
         # ── Marca apenas as faturas selecionadas ──────────────────────────────
         # Tabela: col 0 = checkbox, col 1 = Fatura, col 2 = Nosso Número, ...
@@ -215,11 +227,14 @@ async def fazer_login_gc(page: Page, sistema: str):
         await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=20000)
     except Exception:
         pass
+    # Espera responsiva: o menu/sidebar do SPA aparece quando o login terminou
     try:
-        await page.wait_for_load_state("networkidle", timeout=10000)
+        await page.wait_for_function(
+            "() => !!document.querySelector('a[href*=\"/operacao\"], .menu, nav')",
+            timeout=8000,
+        )
     except Exception:
         pass
-    await page.wait_for_timeout(1000)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -246,7 +261,17 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
     if not clicou:
         log("  ⚠️ Link 'Digitação' não encontrado no menu")
         return False
-    await page.wait_for_timeout(3000)
+    # Espera tela de digitação carregar — sai imediato quando botão Novo aparece
+    try:
+        await page.wait_for_function(
+            """() => {
+                const btns = [...document.querySelectorAll('button')];
+                return btns.some(b => b.offsetParent && b.textContent.trim() === 'Novo');
+            }""",
+            timeout=10000,
+        )
+    except Exception:
+        pass
 
     # ── 2. Clica Novo → abre modal 'Cadastro de títulos' ──────────────────────
     clicou_novo = await page.evaluate("""() => {
@@ -263,7 +288,17 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
     except Exception:
         log("  ⚠️ Modal 'Cadastro de títulos' não abriu")
         return False
-    await page.wait_for_timeout(1000)
+    # Aguarda o botão 'Importar Leiaute' renderizar dentro do modal
+    try:
+        await page.wait_for_function(
+            """() => {
+                const btns = [...document.querySelectorAll('button')];
+                return btns.some(b => b.offsetParent && b.textContent.trim().includes('Importar Leiaute'));
+            }""",
+            timeout=6000,
+        )
+    except Exception:
+        pass
 
     # ── 3. Clica 'Importar Leiaute' → abre 2º modal de upload ─────────────────
     clicou_imp = await page.evaluate("""() => {
@@ -277,7 +312,11 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
     if not clicou_imp:
         log("  ⚠️ Botão 'Importar Leiaute' não encontrado")
         return False
-    await page.wait_for_timeout(2000)
+    # Espera o modal Leiaute abrir (input#arquivo aparece)
+    try:
+        await page.wait_for_selector('#arquivo', timeout=6000)
+    except Exception:
+        pass
 
     # ── 4. Upload do .rem no input#arquivo (oculto, mas set_input_files funciona) ─
     try:
@@ -286,7 +325,14 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
             log("  ⚠️ Campo #arquivo não encontrado no modal Leiaute")
             return False
         await input_file.set_input_files(str(caminho_rem))
-        await page.wait_for_timeout(2000)
+        # Espera responsiva: o GC mostra o nome do arquivo no DOM após anexar
+        try:
+            await page.wait_for_function(
+                "() => { const f = document.querySelector('#arquivo'); return f && f.files && f.files.length > 0; }",
+                timeout=4000,
+            )
+        except Exception:
+            pass
     except Exception as e:
         log(f"  ⚠️ Erro ao anexar .rem: {e}")
         return False
@@ -304,8 +350,36 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
     if not clicou_env:
         log("  ⚠️ Botão 'Enviar' do modal Leiaute não encontrado")
         return False
-    # Aguarda o servidor processar o .rem e importar os títulos
-    await page.wait_for_timeout(6000)
+    # Aguarda responsivamente o servidor processar o .rem.
+    # Sinais de fim: o modal Leiaute fechou OU surgiu uma toast/mensagem de sucesso
+    # OU já há linhas de títulos no modal principal.
+    try:
+        await page.wait_for_function(
+            r"""() => {
+                const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+                // sinal 1: nenhum modal Leiaute aberto agora
+                const aindaTemLeiaute = modais.some(m => {
+                    const t = m.querySelector('.modal-titulo')?.textContent?.trim() || '';
+                    return t.includes('Leiaute');
+                });
+                if (!aindaTemLeiaute && modais.length > 0) return true;
+                // sinal 2: tabela do modal principal já tem linhas com docs (5–6 dígitos)
+                for (const m of modais) {
+                    for (const tr of m.querySelectorAll('tbody tr')) {
+                        if (!tr.offsetParent) continue;
+                        const tds = [...tr.querySelectorAll('td')].map(td => (td.textContent||'').trim());
+                        if (tds.some(t => /^\d{5,6}$/.test(t))) return true;
+                    }
+                }
+                // sinal 3: toast de sucesso visível
+                const t = (document.body && document.body.innerText) || '';
+                if (/sucesso|importad/i.test(t.slice(-2000))) return true;
+                return false;
+            }""",
+            timeout=20000,
+        )
+    except Exception:
+        pass
 
     # ── 6. Fecha modal Leiaute (X) — o modal principal fica aberto ────────────
     await page.evaluate("""() => {
@@ -318,7 +392,17 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
             if (x) x.click();
         }
     }""")
-    await page.wait_for_timeout(1500)
+    # Aguarda o modal Leiaute desaparecer — sai imediato
+    try:
+        await page.wait_for_function(
+            """() => {
+                const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+                return !modais.some(m => (m.querySelector('.modal-titulo')?.textContent || '').includes('Leiaute'));
+            }""",
+            timeout=4000,
+        )
+    except Exception:
+        pass
 
     log("  ✅ Arquivo .rem importado com sucesso")
     return True
@@ -345,7 +429,24 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
             if (li.textContent.trim() === 'Operação' && li.offsetParent) { li.click(); return; }
         }
     }""")
-    await page.wait_for_timeout(2000)
+    # Aguarda a aba carregar — sai imediato quando há linhas com docs (sem sleep fixo)
+    try:
+        await page.wait_for_function(
+            r"""() => {
+                const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+                for (const m of modais) {
+                    for (const tr of m.querySelectorAll('tbody tr')) {
+                        if (!tr.offsetParent) continue;
+                        const tds = [...tr.querySelectorAll('td')].map(td => (td.textContent||'').trim());
+                        if (tds.some(t => /^\d{5,6}$/.test(t))) return true;
+                    }
+                }
+                return false;
+            }""",
+            timeout=8000,
+        )
+    except Exception:
+        pass
 
     total_preenchidos = 0
 
@@ -387,19 +488,59 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
             if not clicou:
                 log(f"  ⚠️ Botão Alterar não achado para doc {doc}")
                 continue
-            # Aguarda aba 'Digitação' virar ativa com os campos preenchidos
-            await page.wait_for_timeout(1200)
 
-            # Preenche #nume_nota com o próprio número do documento
-            campo = await page.query_selector('#nume_nota')
-            if not campo:
-                log(f"  ⚠️ Campo #nume_nota não encontrado para doc {doc}")
-                continue
+            # Aguarda a aba 'Digitação' ficar ativa com os campos do título carregado.
+            # Sinal: existe #nume_nota visível (offsetParent != null).
             try:
-                await campo.fill("")
+                await page.wait_for_function(
+                    """() => {
+                        const inputs = [...document.querySelectorAll('#nume_nota, input[name="nume_nota"]')];
+                        return inputs.some(i => i.offsetParent !== null);
+                    }""",
+                    timeout=6000,
+                )
             except Exception:
                 pass
-            await campo.fill(doc)
+
+            # Preenche o campo Núm.Nota — escolhe o input VISÍVEL (pode haver múltiplos
+            # com mesmo id em modais sobrepostos do SPA). Dispara eventos input/change
+            # para garantir que o framework reativo (Vue/Angular do GC) detecte a mudança.
+            preenchido = await page.evaluate(f"""() => {{
+                const valor = '{doc}';
+                const cands = [...document.querySelectorAll('#nume_nota, input[name="nume_nota"]')];
+                const visiveis = cands.filter(i => i.offsetParent !== null && !i.disabled && !i.readOnly);
+                if (!visiveis.length) return {{ ok: false, motivo: 'nenhum #nume_nota visível', total: cands.length }};
+                const el = visiveis[0];
+                el.focus();
+                el.value = '';
+                el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                el.value = valor;
+                el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                el.blur();
+                return {{ ok: el.value === valor, valor_apos: el.value, total: cands.length, visiveis: visiveis.length }};
+            }}""")
+            if not preenchido.get("ok"):
+                log(f"  ⚠️ Não preencheu #nume_nota para doc {doc}: {preenchido}")
+                # Tenta como fallback o fill nativo do Playwright (locator visível)
+                try:
+                    await page.locator('#nume_nota:visible, input[name="nume_nota"]:visible').first.fill(doc)
+                    log(f"  ↩️ Fallback fill aplicado para doc {doc}")
+                except Exception as e_fb:
+                    log(f"  ⚠️ Fallback fill falhou: {e_fb}")
+                    continue
+            else:
+                log(f"  ✏️ #nume_nota preenchido em memória ({preenchido.get('visiveis')} visível/visíveis)")
+
+            # Confirma que o campo realmente tem o valor antes de salvar
+            valor_atual = await page.evaluate("""() => {
+                const cands = [...document.querySelectorAll('#nume_nota, input[name="nume_nota"]')];
+                const v = cands.find(i => i.offsetParent !== null);
+                return v ? v.value : '';
+            }""")
+            if valor_atual != doc:
+                log(f"  ⚠️ Núm.Nota não persistiu antes do Salvar (esperado={doc}, atual='{valor_atual}') — pulando")
+                continue
 
             # Clica Salvar (botão visível do formulário de edição)
             salvou = await page.evaluate("""() => {
@@ -412,8 +553,25 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
                 log(f"  ⚠️ Botão Salvar não encontrado para doc {doc}")
                 continue
 
-            # Aguarda o Salvar processar e a aba voltar para Operação
-            await page.wait_for_timeout(1200)
+            # Aguarda o Salvar processar — sinal: aba volta pra Operação (tabela visível)
+            try:
+                await page.wait_for_function(
+                    r"""() => {
+                        const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+                        for (const m of modais) {
+                            const tbodyTrs = m.querySelectorAll('tbody tr');
+                            for (const tr of tbodyTrs) {
+                                if (!tr.offsetParent) continue;
+                                const tds = [...tr.querySelectorAll('td')].map(td => (td.textContent||'').trim());
+                                if (tds.some(t => /^\d{5,6}$/.test(t))) return true;
+                            }
+                        }
+                        return false;
+                    }""",
+                    timeout=6000,
+                )
+            except Exception:
+                pass
             total_preenchidos += 1
             log(f"  ✅ Núm.Nota preenchido: {doc}")
 

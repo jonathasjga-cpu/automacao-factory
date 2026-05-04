@@ -1675,10 +1675,19 @@ async function executarAutomacao() {
     return;
   }
 
+  // Se "Carregar do GW" foi clicado há muito tempo (>15min), o timer fica
+  // poluído por testes intermediários. Nesse caso reseta para o clique do
+  // Executar — assim o "Tempo total" mostra só esta operação.
+  const LIMITE_CARGA_RECENTE_MS = 15 * 60 * 1000; // 15 min
+  const cargaRecente = operacaoStartTime && (Date.now() - operacaoStartTime) < LIMITE_CARGA_RECENTE_MS;
+  if (!cargaRecente) {
+    operacaoStartTime = Date.now();
+  }
+
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ faturas: selecionadas, pasta_destino: null, inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null }),
+    body: JSON.stringify({ faturas: selecionadas, pasta_destino: null, inicio: new Date(operacaoStartTime).toISOString() }),
   });
 
   const data = await resp.json();

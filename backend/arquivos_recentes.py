@@ -8,6 +8,8 @@ import shutil
 from pathlib import Path
 from datetime import datetime, timedelta
 
+from _tz import now_br
+
 DATA_DIR = Path(os.getenv("DATA_DIR", str(Path.home() / ".automacao_factory")))
 ROOT = DATA_DIR / "arquivos_recentes"
 ROOT.mkdir(parents=True, exist_ok=True)
@@ -32,7 +34,7 @@ def salvar_pacote(op_id: str, arquivos: dict[str, bytes], titulo: str = "", usua
         "op_id": op_id,
         "titulo": titulo or op_id,
         "usuario": usuario or "",
-        "criado_em": datetime.now().isoformat(),
+        "criado_em": now_br().isoformat(),
         "arquivos": [
             {"nome": n, "tamanho": len(b or b"")}
             for n, b in arquivos.items()
@@ -83,7 +85,7 @@ def limpar_todos() -> int:
 
 def _limpar_antigos():
     """Remove pacotes criados há mais de RETENCAO_DIAS dias."""
-    limite = datetime.now() - timedelta(days=RETENCAO_DIAS)
+    limite = now_br() - timedelta(days=RETENCAO_DIAS)
     for sub in ROOT.iterdir():
         if not sub.is_dir():
             continue
@@ -93,7 +95,12 @@ def _limpar_antigos():
                 meta = json.loads(meta_f.read_text(encoding="utf-8"))
                 dt = datetime.fromisoformat(meta["criado_em"])
             else:
-                dt = datetime.fromtimestamp(sub.stat().st_mtime)
+                from _tz import TZ_BR
+                dt = datetime.fromtimestamp(sub.stat().st_mtime, tz=TZ_BR)
+            # Se o dt salvo for naive (versão antiga), assume Brasília
+            if dt.tzinfo is None:
+                from _tz import TZ_BR
+                dt = dt.replace(tzinfo=TZ_BR)
             if dt < limite:
                 shutil.rmtree(sub, ignore_errors=True)
         except Exception:
