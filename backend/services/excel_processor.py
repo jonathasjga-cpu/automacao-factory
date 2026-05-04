@@ -827,6 +827,11 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                     const tds = [...tr.querySelectorAll('td')]
                         .map(td => (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim());
 
+                    // Extrai número do lote da linha (formato típico: "Lote: 2547").
+                    // Usado tanto no filtro do cliente quanto no fallback de filial.
+                    const mLote = linhaTxt.match(/Lote\\s*:?\\s*(\\d+)/i);
+                    const numLote = mLote ? parseInt(mLote[1]) : 0;
+
                     // Filial: detecta MATRIZ, "Filial SP", "Filial BA" e qualquer
                     // outro "Filial XX". Empresa tem múltiplas filiais (não só
                     // MATRIZ + SP — também BA descoberta no cache real).
@@ -841,31 +846,39 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                         }
                         if (/^S[ãa]o\\s*Paulo$/i.test(t)) { filial = 'Filial SP'; break; }
                     }
-                    // Fallback: regex no texto inteiro (compatibilidade) — só
-                    // se não achou em TD específica.
+                    // Fallback 1: regex no texto inteiro (caso a TD tenha texto extra).
                     if (!filial) {
                         const mFil = linhaTxt.match(/Filial\\s+(SP|BA|RJ|MG|PR|RS|SC|GO|DF|BSB)/i);
                         if (mFil) filial = `Filial ${mFil[1].toUpperCase()}`;
-                        else if (/MATRIZ/i.test(linhaTxt)) filial = 'MATRIZ';
-                        else filial = 'MATRIZ';  // default conservador
+                        else if (/\\bMATRIZ\\b/i.test(linhaTxt)) filial = 'MATRIZ';
                     }
+                    // Fallback 2: inferência pelo número do lote.
+                    // Mapeamento empírico (CLAUDE.md): 2547=MATRIZ, 2548=SP.
+                    // Lotes desconhecidos ficam como MATRIZ (default conservador).
+                    if (!filial && numLote > 0) {
+                        if (numLote === 2547) filial = 'MATRIZ';
+                        else if (numLote === 2548) filial = 'Filial SP';
+                        // Outros lotes: deixa cair no default abaixo
+                    }
+                    if (!filial) filial = 'MATRIZ';
 
                     // Cliente: procura primeira TD que tenha letras (>= 1 letra),
                     // tamanho > 4, e que NÃO seja: número de fatura, data, lote,
                     // valor, filial, situação. Aceita clientes que começam com
                     // dígito (ex: "3M DO BRASIL", "4 RODAS PNEUS") desde que
-                    // tenham letras.
+                    // tenham letras de fato (não TD com "fatura/ano + Lote").
                     let cliente = '';
                     for (const t of tds) {
                         if (t.length < 4) continue;
                         if (!/[A-Za-zÀ-ÿ]/.test(t)) continue;  // sem letra = pula (números puros)
-                        if (/^\\d{5,6}\\/?\\d{0,4}$/.test(t)) continue;  // n° fatura
-                        if (/^Lote/i.test(t)) continue;
+                        if (/^\\d{5,6}\\/?\\d{0,4}\\b/.test(t)) continue;  // começa com n° fatura/ano
+                        if (/Lote\\s*:?\\s*\\d/i.test(t)) continue;  // contém "Lote: 2547"
+                        if (/^Lote/i.test(t)) continue;  // td só com "Lote"
                         if (/^\\d{2}\\/\\d{2}\\/\\d{4}/.test(t)) continue;  // data
                         if (/^\\d{1,3}(?:\\.\\d{3})*,\\d{2}$/.test(t)) continue;  // valor
                         if (/^MATRIZ$|^Filial\\s+/i.test(t)) continue;
                         if (/^S[ãa]o\\s*Paulo$/i.test(t)) continue;
-                        if (/^(Em Aberto|Cancelad|Descontad|Normal|Sim|Não)/i.test(t)) continue;
+                        if (/^(Em Aberto|Cancelad[ao]?|Descontad[ao]?|Normal|Sim|Não)$/i.test(t)) continue;
                         cliente = t;
                         break;
                     }
