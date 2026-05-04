@@ -332,7 +332,8 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
                         }
                     """)
                 download = await dl_info.value
-                dest = DOWNLOAD_DIR / f"{nome_relatorio.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                from _tz import now_br
+                dest = DOWNLOAD_DIR / f"{nome_relatorio.replace(' ', '_')}_{now_br().strftime('%Y%m%d_%H%M%S')}.xlsx"
                 await download.save_as(str(dest))
                 if not hasattr(context, '_last_download'):
                     context._last_download = {}
@@ -450,8 +451,9 @@ def _is_valid_excel(path: Path) -> bool:
 
 async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Path:
     """Clica em 'Baixar Excel' para o relatÃ³rio mais recente com o nome dado"""
+    from _tz import now_br
     prefixo = nome.replace(' ', '_')
-    caminho = DOWNLOAD_DIR / f"{prefixo}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    caminho = DOWNLOAD_DIR / f"{prefixo}_{now_br().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
     import unicodedata
     import httpx

@@ -522,12 +522,23 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
             }}""")
             if not preenchido.get("ok"):
                 log(f"  ⚠️ Não preencheu #nume_nota para doc {doc}: {preenchido}")
-                # Tenta como fallback o fill nativo do Playwright (locator visível)
-                try:
-                    await page.locator('#nume_nota:visible, input[name="nume_nota"]:visible').first.fill(doc)
-                    log(f"  ↩️ Fallback fill aplicado para doc {doc}")
-                except Exception as e_fb:
-                    log(f"  ⚠️ Fallback fill falhou: {e_fb}")
+                # Fallback: itera todos os candidatos e fica com o primeiro
+                # visível (Playwright .first pode pegar invisível em SPA com
+                # modais aninhados, e `:visible` nem sempre funciona em SPAs
+                # que usam display dinâmico via JS).
+                candidatos = await page.locator('#nume_nota, input[name="nume_nota"]').all()
+                fallback_ok = False
+                for cand in candidatos:
+                    try:
+                        if await cand.is_visible():
+                            await cand.fill(doc, timeout=2000)
+                            fallback_ok = True
+                            log(f"  ↩️ Fallback fill aplicado para doc {doc}")
+                            break
+                    except Exception:
+                        continue
+                if not fallback_ok:
+                    log(f"  ⚠️ Fallback fill: nenhum #nume_nota visível encontrado")
                     continue
             else:
                 log(f"  ✏️ #nume_nota preenchido em memória ({preenchido.get('visiveis')} visível/visíveis)")

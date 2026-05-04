@@ -162,9 +162,10 @@ _BUSCA_CTE_ERRO_MARKERS = (
 async def _salvar_screenshot_debug(page: Page, prefix: str) -> str | None:
     """Salva screenshot em backend/debug/. Retorna o caminho ou None em falha."""
     try:
+        from _tz import now_br
         debug_dir = Path(__file__).resolve().parent.parent / "debug"
         debug_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        stamp = now_br().strftime("%Y%m%d-%H%M%S")
         path = debug_dir / f"{prefix}-{stamp}.png"
         await page.screenshot(path=str(path), full_page=True)
         return str(path)
@@ -913,7 +914,16 @@ async def baixar_ctes_pdf(
                     numero_busca = numero.split("/")[0].strip().zfill(6)
                     emissao = fatura.get("emissao", "")
                     ano_busca = emissao.split("/")[-1] if emissao and "/" in emissao else _ano_atual()
-                    filial_label = "MATRIZ" if "matriz" in sistema else "Filial SP"
+                    # Filial: prefere a filial REAL da fatura (vem do parser).
+                    # Antes era hardcoded MATRIZ/SP pelo sistema (factory destino),
+                    # mas isso falha pra Filial BA — fatura de BA + factory gc_matriz
+                    # buscava CTes filtrando MATRIZ e não encontrava nada.
+                    filial_real = fatura.get("filial", "").strip()
+                    if filial_real and filial_real not in ("", "?"):
+                        filial_label = filial_real
+                    else:
+                        # Fallback: deriva do nome do sistema (legado)
+                        filial_label = "MATRIZ" if "matriz" in sistema else "Filial SP"
 
                     log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
 
@@ -981,7 +991,29 @@ async def baixar_ctes_pdf(
                             const opt = [...s.options].find(o => o.text.includes('1000'));
                             if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); }
                         }""")
-                        await page.locator("#filial").select_option(label=filial_label)
+                        # Filial: tenta o label exato; se falhar (opção não existe
+                        # no select porque o usuário GW não tem acesso a essa filial),
+                        # tenta partial match (ex: "Filial BA" → opção que tenha "BA").
+                        try:
+                            await page.locator("#filial").select_option(label=filial_label)
+                        except Exception:
+                            opt_value = await page.evaluate(f"""() => {{
+                                const s = document.querySelector('#filial');
+                                if (!s) return null;
+                                const alvo = {repr(filial_label)};
+                                // Match partial: separa "Filial BA" → procura "BA"
+                                const sigla = alvo.replace(/^Filial\\s+/i, '').trim();
+                                const opt = [...s.options].find(o =>
+                                    o.text.toUpperCase().includes(sigla.toUpperCase()) ||
+                                    o.text.toUpperCase().includes(alvo.toUpperCase())
+                                );
+                                return opt ? opt.value : null;
+                            }}""")
+                            if opt_value:
+                                await page.locator("#filial").select_option(value=opt_value)
+                                log(f"    ⚠️ Filial '{filial_label}' não encontrada exatamente — usando partial match")
+                            else:
+                                log(f"    ⚠️ Filial '{filial_label}' não encontrada no select GW — busca pode retornar 0 CT-es")
 
                         # 6b. LIMPA filtros de data — busca é por número de FATURA, não por
                         # data de emissão do CT-e (CT-es da fatura podem ter sido emitidos
@@ -1089,7 +1121,8 @@ async def baixar_ctes_pdf(
                                     pass
 
                         # Marca o instante ANTES de clicar — usado pelo fallback Meus Relatórios
-                        marcador_relatorio = datetime.now()
+                        from _tz import now_br
+                        marcador_relatorio = now_br()
 
                         # Instala no CONTEXTO antes do clique
                         await context.route("**/*", _ctx_rota_cte)
