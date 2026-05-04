@@ -900,14 +900,48 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                         cliente_nome: cliente,
                         situacao: sit,
                         filial,
-                        // Debug: amostra estruturada da linha pra investigação
-                        _debug_tds: tds.slice(0, 20),  // até 20 colunas com texto
-                        _debug_valores: valoresStr,
                     });
                 }
                 return out;
             }"""
         )
+
+        # Debug separado: lê amostras de TDs apenas para até 4 linhas (3 zeros
+        # + 1 não-zero) — em chamada SEPARADA pra não inflar o retorno principal.
+        # Isso evita estourar limites de tamanho de resposta no Railway.
+        debug_amostras = []
+        try:
+            zeros_nums = [f["numero"] for f in faturas_dom if f.get("valor", 0) == 0][:3]
+            naozeros_nums = [f["numero"] for f in faturas_dom if f.get("valor", 0) > 0][:1]
+            alvos = zeros_nums + naozeros_nums
+            if alvos:
+                debug_amostras = await page.evaluate(
+                    """(numerosAlvo) => {
+                        function parseValor(t) {
+                            if (!t) return 0;
+                            const s = String(t).replace(/[^0-9.,-]/g,'').replace(/\\./g,'').replace(',', '.');
+                            return parseFloat(s) || 0;
+                        }
+                        const out = [];
+                        for (const tr of document.querySelectorAll('tr')) {
+                            if (!tr.querySelector('input[id^=\\"ck\\"]')) continue;
+                            const linhaTxt = tr.textContent || '';
+                            const numMatch = linhaTxt.match(/(\\d{5,6})\\/(\\d{4})/);
+                            if (!numMatch) continue;
+                            const numero = numMatch[1].padStart(6, '0');
+                            if (!numerosAlvo.includes(numero)) continue;
+                            const tds = [...tr.querySelectorAll('td')]
+                                .map(td => (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim())
+                                .slice(0, 15);
+                            const valoresStr = [...linhaTxt.matchAll(/(\\d+(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
+                            out.push({ numero, tds, valoresStr });
+                        }
+                        return out;
+                    }""",
+                    alvos,
+                )
+        except Exception as _e:
+            debug_amostras = []
         # Log diagnóstico — distribuição por filial e situação detectadas.
         from collections import Counter
         if faturas_dom:
@@ -918,26 +952,18 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             _prog_log(f"  [fallback] distribuição situação: {dict(por_situacao)}")
             _prog_log(f"  [fallback] valores: {dict(por_valor)}")
 
-            # Diagnóstico do valor zerado: lista cada TD separadamente.
-            # Isso revela em qual coluna o valor original está no GW —
-            # impossível inferir só do textContent concatenado.
-            zeros = [f for f in faturas_dom if f.get("valor", 0) == 0][:3]
-            naozeros = [f for f in faturas_dom if f.get("valor", 0) > 0][:1]
-            for f in zeros:
-                _prog_log(f"  [debug VALOR=0] fatura {f.get('numero')} (sit={f.get('situacao')}):")
-                _prog_log(f"     valores no regex: {f.get('_debug_valores')}")
-                for i, td in enumerate(f.get("_debug_tds", [])):
+            # Diagnóstico do valor zerado: usa as amostras coletadas em chamada
+            # separada (não embutidas em cada fatura — isso estava inflando
+            # o retorno e estourando limites no Railway).
+            faturas_por_num = {f["numero"]: f for f in faturas_dom}
+            for amostra in debug_amostras:
+                num = amostra.get("numero", "?")
+                f = faturas_por_num.get(num, {})
+                tag = "VALOR=0" if f.get("valor", 0) == 0 else "VALOR>0 ref"
+                _prog_log(f"  [debug {tag}] fatura {num} (sit={f.get('situacao')}, val={f.get('valor')}):")
+                _prog_log(f"     valores no regex: {amostra.get('valoresStr')}")
+                for i, td in enumerate(amostra.get("tds", [])):
                     _prog_log(f"     td[{i}]: {td!r}")
-            for f in naozeros:
-                _prog_log(f"  [debug VALOR>0 ref] fatura {f.get('numero')} (sit={f.get('situacao')}, val={f.get('valor')}):")
-                _prog_log(f"     valores no regex: {f.get('_debug_valores')}")
-                for i, td in enumerate(f.get("_debug_tds", [])):
-                    _prog_log(f"     td[{i}]: {td!r}")
-
-        # Remove campos de debug antes de retornar (não persistir no cache)
-        for f in faturas_dom:
-            f.pop("_debug_tds", None)
-            f.pop("_debug_valores", None)
 
         await browser.close()
         return faturas_dom
