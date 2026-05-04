@@ -817,25 +817,52 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                     const valoresStr = [...linhaTxt.matchAll(/(\\d{1,3}(?:\\.\\d{3})*,\\d{2})/g)].map(m => m[1]);
                     const valoresNum = valoresStr.map(parseValor);
                     const valor = valoresNum.length ? Math.max(...valoresNum) : 0;
-                    // Cliente: primeiro td com texto > 5 que não seja número/data/lote
+                    // Lê todas as TDs com texto trimado — usado pra detectar
+                    // filial e situação por coluna específica (mais confiável
+                    // que regex sobre o texto inteiro da linha).
+                    const tds = [...tr.querySelectorAll('td')]
+                        .map(td => (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim());
+
+                    // Cliente: primeiro td com texto > 5 que não seja número/data/lote/situação
                     let cliente = '';
-                    for (const td of tr.querySelectorAll('td')) {
-                        const t = (td.textContent || '').trim().replace(/\\[\\.\\.\\.\\]/g, '').trim();
+                    for (const t of tds) {
                         if (t.length > 5
                             && !/^\\d/.test(t)
                             && !/^Lote/i.test(t)
                             && !/^\\d{2}\\/\\d{2}\\/\\d{4}/.test(t)
+                            && !/^MATRIZ$|^Filial /i.test(t)
                             && !/Em Aberto|Cancelad|Descontad|Sim|Não/i.test(t)) {
                             cliente = t;
                             break;
                         }
                     }
-                    // Filial: heurística pelo lote (col Lote: 2547=MATRIZ, 2548=SP) ou pelo texto
+
+                    // Filial: procura td com texto exato "MATRIZ" / "Filial SP" /
+                    // "São Paulo". Mais confiável que regex sobre texto inteiro
+                    // (que pode pegar "SP" em outros contextos).
                     let filial = 'MATRIZ';
-                    if (/SP\\b|S[.]?P[.]?\\b/.test(linhaTxt)) filial = 'Filial SP';
-                    // Situação
-                    const sit = /Cancelad/i.test(linhaTxt) ? 'Cancelada' :
-                                /Descontad/i.test(linhaTxt) ? 'Descontada (Factoring)' : 'Em Aberto';
+                    for (const t of tds) {
+                        if (/^Filial\\s*SP$|^S[ãa]o\\s*Paulo$|^FILIAL\\s*SP$/i.test(t)) {
+                            filial = 'Filial SP';
+                            break;
+                        }
+                        if (/^MATRIZ$/i.test(t)) {
+                            filial = 'MATRIZ';
+                            break;
+                        }
+                    }
+                    // Fallback final: regex sobre linha inteira (compatibilidade)
+                    if (filial === 'MATRIZ' && /Filial\\s*SP|S[ãa]o\\s*Paulo/i.test(linhaTxt)) {
+                        filial = 'Filial SP';
+                    }
+
+                    // Situação: procura td com texto exato dos status conhecidos
+                    let sit = 'Em Aberto';
+                    for (const t of tds) {
+                        if (/^Cancelad/i.test(t)) { sit = 'Cancelada'; break; }
+                        if (/^Descontad/i.test(t)) { sit = 'Descontada (Factoring)'; break; }
+                        if (/^Em Aberto$/i.test(t)) { sit = 'Em Aberto'; break; }
+                    }
 
                     out.push({
                         numero,
@@ -850,6 +877,17 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                 return out;
             }"""
         )
+        # Log diagnóstico — distribuição por filial e situação detectadas.
+        # Útil pra confirmar se a heurística está funcionando ou se há padrão
+        # que precisa ser ajustado.
+        from collections import Counter
+        if faturas_dom:
+            por_filial = Counter(f.get("filial", "?") for f in faturas_dom)
+            por_situacao = Counter(f.get("situacao", "?") for f in faturas_dom)
+            por_valor = Counter("zero" if f.get("valor", 0) == 0 else "ok" for f in faturas_dom)
+            _prog_log(f"  [fallback] distribuição filial: {dict(por_filial)}")
+            _prog_log(f"  [fallback] distribuição situação: {dict(por_situacao)}")
+            _prog_log(f"  [fallback] valores: {dict(por_valor)}")
         await browser.close()
         return faturas_dom
 
