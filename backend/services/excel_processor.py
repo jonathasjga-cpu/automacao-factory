@@ -739,6 +739,11 @@ async def _buscar_faturas_via_consultafatura_impl(user_id: int | None = None) ->
         ctx = await browser.new_context()
         page = await ctx.new_page()
 
+        # Handler de dialog: GW pode disparar confirm/alert ao clicar Pesquisar
+        # quando o filtro retorna muitas faturas. Sem este handler, o Playwright
+        # trava aguardando o dialog ser tratado.
+        page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
+
         # Login GW
         _prog_log("  🔄 [fallback] login GW...")
         await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=30000)
