@@ -707,6 +707,21 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     return faturas
 
 async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list[dict]:
+    """Wrapper com timeout global de 3min para evitar travamento."""
+    try:
+        return await asyncio.wait_for(
+            _buscar_faturas_via_consultafatura_impl(user_id),
+            timeout=180,
+        )
+    except asyncio.TimeoutError:
+        _prog_log("❌ [fallback] timeout de 3min — fluxo travou em alguma etapa")
+        return []
+    except Exception as e:
+        _prog_log(f"❌ [fallback] exception: {type(e).__name__}: {str(e)[:200]}")
+        return []
+
+
+async def _buscar_faturas_via_consultafatura_impl(user_id: int | None = None) -> list[dict]:
     """
     Fallback: quando o Excel 'Automação Operações' vem vazio (cache do GW
     pode estar travado), busca direto em /consultafatura?acao=consultar
@@ -718,12 +733,14 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
     base = "https://webtrans.saas.gwsistemas.com.br"
     hoje = now_br().strftime("%d/%m/%Y")
 
+    _prog_log("  🔄 [fallback] iniciando navegador headless...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         ctx = await browser.new_context()
         page = await ctx.new_page()
 
         # Login GW
+        _prog_log("  🔄 [fallback] login GW...")
         await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=30000)
         await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
         await page.fill('input[name="login"]', creds["usuario"])
@@ -733,10 +750,14 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
         except Exception:
             pass
+        _prog_log(f"  🔄 [fallback] login OK (url={page.url[:80]})")
+
         # Acessa consultafatura — o wait_for do select abaixo já é a confirmação responsiva
         # de que a sessão GW estabilizou (se ainda estivesse carregando, o select não existiria).
+        _prog_log("  🔄 [fallback] abrindo /consultafatura...")
         await page.goto(f"{base}/consultafatura?acao=iniciar", wait_until="domcontentloaded", timeout=30000)
         await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
+        _prog_log("  🔄 [fallback] tela /consultafatura carregada")
 
         await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
         await page.fill('input[name="dtemissao1"]', hoje)
@@ -754,8 +775,10 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
             await page.select_option('select[name="limiteResultados"]', value="200")
         except Exception:
             pass
+        _prog_log(f"  🔄 [fallback] filtros configurados (emissão={hoje})")
 
         # Pesquisar — espera response
+        _prog_log("  🔄 [fallback] clicando Pesquisar e aguardando resposta...")
         try:
             async with page.expect_response(
                 lambda r: "consultafatura" in r.url and "acao=consultar" in r.url,
@@ -764,6 +787,7 @@ async def _buscar_faturas_via_consultafatura(user_id: int | None = None) -> list
                 await page.click('input[value="Pesquisar"]')
         except Exception:
             await page.click('input[value="Pesquisar"]')
+        _prog_log("  🔄 [fallback] resposta recebida, aguardando tabela renderizar...")
         # Aguarda a tabela renderizar — sai imediatamente quando os checkboxes aparecem,
         # ou quando uma mensagem de "0 resultados" aparece. Sem sleep fixo.
         try:
