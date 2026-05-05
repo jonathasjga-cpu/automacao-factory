@@ -78,6 +78,65 @@ def serial_excel_para_data(serial) -> str:
     except:
         return str(serial)
 
+async def _buscar_relatorio_recente_gerado(page, nome: str, meus_rel_url: str, max_idade_min: int = 10) -> bool:
+    """
+    Verifica se já existe um relatório com esse nome em Meus Relatórios com:
+    - status="Gerado"
+    - solicitado nos últimos `max_idade_min` minutos
+    Retorna True se sim (evita gerar de novo). Navega o page até Meus Relatórios.
+    """
+    import unicodedata
+    from _tz import now_br
+    def norm(s):
+        return unicodedata.normalize("NFC", s).lower()
+
+    try:
+        await page.goto(meus_rel_url, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_function(
+            "() => document.querySelectorAll('tr').length > 1",
+            timeout=8000,
+        )
+    except Exception:
+        return False
+
+    # Lê todas as linhas e procura o relatório recente
+    info = await page.evaluate(
+        """(alvo) => {
+            function norm(s) { return (s || '').normalize('NFC').toLowerCase(); }
+            const out = [];
+            for (const tr of document.querySelectorAll('tr')) {
+                const txt = tr.innerText || '';
+                if (!norm(txt).includes(norm(alvo))) continue;
+                if (!/gerado/i.test(txt)) continue;
+                // Extrai data DD/MM/AAAA HH:MM:SS da coluna "Solicitado em"
+                const m = txt.match(/(\\d{2})\\/(\\d{2})\\/(\\d{4}),?\\s+(\\d{2}):(\\d{2}):(\\d{2})/);
+                if (m) {
+                    const iso = `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`;
+                    out.push(iso);
+                }
+            }
+            return out;
+        }""",
+        nome,
+    )
+    if not info:
+        return False
+
+    # Calcula idade em minutos do mais recente
+    from datetime import datetime
+    from _tz import TZ_BR
+    agora_br = now_br()
+    for iso in sorted(info, reverse=True):
+        try:
+            dt = datetime.fromisoformat(iso).replace(tzinfo=TZ_BR)
+        except Exception:
+            continue
+        idade_min = (agora_br - dt).total_seconds() / 60
+        if 0 <= idade_min <= max_idade_min:
+            return True
+    return False
+
+
 async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentativas: int = 8) -> Path:
     """Retorna o arquivo jÃ¡ capturado durante _gerar_relatorio_personalizado, ou busca em Meus RelatÃ³rios."""
     # Verifica se o download jÃ¡ foi capturado durante a geraÃ§Ã£o
@@ -416,31 +475,39 @@ async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path |
         if "login" in current_url.lower() or "403" in current_url.lower():
             raise Exception("Sessão GW inválida após login. Tente novamente.")
 
-        # Gera Automação com data de hoje
-        _prog_log("📄 Gerando relatório 'Automação Operações'...")
-        await _gerar_relatorio_personalizado(
-            page, "Automação Operações - Jonathas", hoje, base, context=context
-        )
-        _prog_log("⬇️ Baixando 'Automação Operações'...")
-        arquivo1 = await _aguardar_e_baixar(
-            page, context, "Automação Operações - Jonathas", meus_rel_url
-        )
-        _prog_log("✓ Arquivo 'Automação' baixado")
+        # ── Automação Operações ──────────────────────────────────────────────
+        # Antes de gerar: verifica se já tem um relatório recente (≤10min)
+        # com status "Gerado". Se tem, reusa em vez de criar nova solicitação
+        # (evita poluir Meus Relatórios com cópias acumuladas).
+        nome_aut = "Automação Operações - Jonathas"
+        ja_existe_aut = await _buscar_relatorio_recente_gerado(page, nome_aut, meus_rel_url)
+        if ja_existe_aut:
+            _prog_log(f"♻️ Reusando '{nome_aut}' já gerado nos últimos 10min (evita duplicar)")
+        else:
+            _prog_log(f"📄 Gerando relatório '{nome_aut}'...")
+            await _gerar_relatorio_personalizado(page, nome_aut, hoje, base, context=context)
+        _prog_log(f"⬇️ Baixando '{nome_aut}'...")
+        arquivo1 = await _aguardar_e_baixar(page, context, nome_aut, meus_rel_url)
+        _prog_log(f"✓ Arquivo '{nome_aut.split(' - ')[0]}' baixado")
 
-        # Complemento: página já está aberta na aba Relatórios Personalizados após o Automação
-        # Usa navegar=False para não recarregar — só clica no radio e preenche a data
+        # ── Complemento Operações ────────────────────────────────────────────
         arquivo2 = None
+        nome_comp = "Complemento Operações - Jonathas"
         try:
-            _prog_log("📄 Gerando relatório 'Complemento Operações'...")
-            await _gerar_relatorio_personalizado(
-                page, "Complemento Operações - Jonathas", hoje, base,
-                preencher_data=True, context=context, navegar=False
-            )
-            _prog_log("⬇️ Baixando 'Complemento Operações'...")
-            arquivo2 = await _aguardar_e_baixar(
-                page, context, "Complemento Operações - Jonathas", meus_rel_url
-            )
-            _prog_log("✓ Arquivo 'Complemento' baixado")
+            ja_existe_comp = await _buscar_relatorio_recente_gerado(page, nome_comp, meus_rel_url)
+            if ja_existe_comp:
+                _prog_log(f"♻️ Reusando '{nome_comp}' já gerado nos últimos 10min")
+            else:
+                _prog_log(f"📄 Gerando relatório '{nome_comp}'...")
+                # navegar=True porque acabamos de vir de Meus Relatórios (não está mais
+                # na aba Relatórios Personalizados)
+                await _gerar_relatorio_personalizado(
+                    page, nome_comp, hoje, base,
+                    preencher_data=True, context=context, navegar=True,
+                )
+            _prog_log(f"⬇️ Baixando '{nome_comp}'...")
+            arquivo2 = await _aguardar_e_baixar(page, context, nome_comp, meus_rel_url)
+            _prog_log(f"✓ Arquivo '{nome_comp.split(' - ')[0]}' baixado")
         except Exception as e:
             raise Exception(f"[Complemento] Falha: {e}")
 
