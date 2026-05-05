@@ -102,26 +102,34 @@ async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentat
         except Exception:
             pass
         rows = await page.query_selector_all("tr")
-        # Não usar any(await ... for row in rows) — cria async generator que any() não itera
-        encontrado = False
+        # Procura a linha do relatório com status "Gerado" (não "Em processamento").
+        # Antes só verificava se o NOME estava presente — chamava _baixar_meu_relatorio
+        # com o relatório ainda processando, o que disparava regeneração desnecessária.
+        encontrado_gerado = False
+        encontrado_processando = False
         for row in rows:
             try:
                 txt = await row.inner_text()
-                if norm(nome) in norm(txt):
-                    encontrado = True
+                txt_low = txt.lower()
+                if norm(nome) not in norm(txt):
+                    continue
+                if "gerado" in txt_low:
+                    encontrado_gerado = True
                     break
+                if "process" in txt_low or "aguard" in txt_low or "fila" in txt_low:
+                    encontrado_processando = True
             except Exception:
                 continue
-        if encontrado:
+        if encontrado_gerado:
             return await _baixar_meu_relatorio(page, context, nome, meus_rel_url)
         if tentativa < tentativas - 1:
-            # Espera curta entre re-checks de Meus Relatórios — relatório pode levar
-            # alguns segundos pra processar; 2s é bem mais responsivo que 5s.
-            await page.wait_for_timeout(2000)
+            # Se está processando, espera mais um pouco (4s); se nem apareceu, 2s é suficiente.
+            await page.wait_for_timeout(4000 if encontrado_processando else 2000)
 
     raise Exception(
-        f"RelatÃ³rio '{nome}' nÃ£o encontrado. Verifique se existe um relatÃ³rio personalizado "
-        "com esse nome no GW (RelatÃ³rios > RelatÃ³rios Personalizados)."
+        f"Relatório '{nome}' não ficou pronto em Meus Relatórios após {tentativas} tentativas. "
+        "Verifique se existe um relatório personalizado com esse nome no GW e se o processamento "
+        "está concluindo (Relatórios > Meus Relatórios)."
     )
 
 
@@ -461,55 +469,53 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
     def norm(s):
         return unicodedata.normalize("NFC", s).lower()
 
-    # Busca a linha do relatÃ³rio na tabela
-    rows = await page.query_selector_all("tr")
-    linha_alvo = None
-    for row in rows:
-        txt = await row.inner_text()
-        if norm(nome) in norm(txt):
-            linha_alvo = row
-            break
+    # Busca a linha MAIS RECENTE do relatório com status="Gerado".
+    # IMPORTANTE: o código antigo pegava a primeira linha que matchasse o nome
+    # E clicava em "Gerar/Atualizar" se houvesse — isso REGENERAVA o relatório
+    # (criava uma 2ª linha duplicada) sem necessidade. Agora só queremos
+    # encontrar a linha já pronta e clicar "Baixar Excel".
+    url_rel = "https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios"
+
+    async def achar_linha_gerada():
+        """Procura linha mais recente com nome+status=Gerado. Retorna handle ou None."""
+        rows = await page.query_selector_all("tr")
+        candidatos = []
+        for row in rows:
+            try:
+                txt = await row.inner_text()
+            except Exception:
+                continue
+            if norm(nome) not in norm(txt):
+                continue
+            # Filtra só linhas com status "Gerado" (não "Em processamento", etc.)
+            if "gerado" not in txt.lower():
+                continue
+            candidatos.append(row)
+        # Última linha que match = mais recente (GW lista por ordem cronológica)
+        return candidatos[-1] if candidatos else None
+
+    linha_alvo = await achar_linha_gerada()
+
+    # Polling responsivo se ainda não está "Gerado": espera processar
+    # (cap 60s, recheck a cada 2s). Sem clicar em Atualizar — o GW processa sozinho.
+    if not linha_alvo:
+        import time as _time
+        inicio_wait = _time.monotonic()
+        while _time.monotonic() - inicio_wait < 60:
+            await page.wait_for_timeout(2000)
+            try:
+                await page.goto(url_rel, wait_until="domcontentloaded", timeout=20000)
+            except Exception:
+                continue
+            linha_alvo = await achar_linha_gerada()
+            if linha_alvo:
+                break
 
     if not linha_alvo:
         raise Exception(
-            f"RelatÃ³rio '{nome}' nÃ£o encontrado em Meus RelatÃ³rios. "
-            "Gere-o manualmente no GW (RelatÃ³rios > Meus RelatÃ³rios) e tente novamente."
+            f"Relatório '{nome}' não está com status 'Gerado' em Meus Relatórios. "
+            "Verifique no GW se o processamento concluiu."
         )
-
-    # Tenta clicar em "Gerar" / "Atualizar" para garantir link S3 fresco
-    links_linha = await linha_alvo.query_selector_all("a, button")
-    for el in links_linha:
-        el_txt = (await el.inner_text()).lower()
-        if "gerar" in el_txt or "atualizar" in el_txt or "processar" in el_txt:
-            await el.click()
-            # Espera responsiva: faz polling rápido recarregando a página até
-            # aparecer link de "Excel/Baixar" na linha alvo (sinal de que está pronto).
-            # Cap de 15s para não travar.
-            url_rel = "https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios"
-            import time as _time
-            inicio_wait = _time.monotonic()
-            while _time.monotonic() - inicio_wait < 15:
-                await page.wait_for_timeout(800)
-                try:
-                    await page.goto(url_rel, wait_until="domcontentloaded", timeout=20000)
-                except Exception:
-                    continue
-                rows = await page.query_selector_all("tr")
-                pronto = False
-                for row in rows:
-                    txt = await row.inner_text()
-                    if norm(nome) in norm(txt):
-                        linha_alvo = row
-                        # Há link clicável de download/excel?
-                        for a in await row.query_selector_all("a"):
-                            atxt = (await a.inner_text()).lower()
-                            if "excel" in atxt or "baixar" in atxt:
-                                pronto = True
-                                break
-                        break
-                if pronto:
-                    break
-            break
 
     # Captura URL do S3 via route interception e baixa com httpx
     links = await linha_alvo.query_selector_all("a")
