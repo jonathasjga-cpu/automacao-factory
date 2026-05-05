@@ -71,6 +71,8 @@ class ExecutarRequest(BaseModel):
     pasta_destino: Optional[str] = None
     inicio: Optional[str] = None  # ISO timestamp desde "Carregar do GW"
     apenas_documentos: Optional[bool] = False  # se True, pula factories e só baixa documentos
+    modo_demonstracao: Optional[bool] = False  # abre navegador visível + slow_mo (só local)
+    modo_passo_a_passo: Optional[bool] = False  # pausa entre etapas grandes esperando confirmação
 
 class DocumentosRequest(BaseModel):
     operacao_id: str
@@ -250,9 +252,53 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
         "usuario": current_user.login,
         "usuario_id": current_user.id,
         "apenas_documentos": bool(req.apenas_documentos),
+        "modo_demonstracao": bool(req.modo_demonstracao),
+        "modo_passo_a_passo": bool(req.modo_passo_a_passo),
+        # Eventos de pausa criados sob demanda em _aguardar_continuar
+        "_eventos_pausa": {},
+        "aguardando_confirmacao": None,
     }
     background_tasks.add_task(executar_automacao, op_id, req.faturas)
     return {"operacao_id": op_id}
+
+
+async def _aguardar_continuar(op_id: str, etapa: str, descricao: str):
+    """
+    Pausa a execução até o usuário clicar 'Continuar' no frontend.
+    Só faz pausa real se modo_passo_a_passo estiver ligado.
+    """
+    status = status_operacoes.get(op_id, {})
+    if not status.get("modo_passo_a_passo"):
+        return
+    ev = asyncio.Event()
+    status.setdefault("_eventos_pausa", {})[etapa] = ev
+    status["aguardando_confirmacao"] = {"etapa": etapa, "descricao": descricao}
+    status["logs"].append(f"⏸️ Aguardando confirmação: {descricao}")
+    try:
+        await ev.wait()
+    finally:
+        status["aguardando_confirmacao"] = None
+        status.get("_eventos_pausa", {}).pop(etapa, None)
+    status["logs"].append(f"▶️ Confirmado, continuando: {etapa}")
+
+
+@app.post("/api/operacao/{op_id}/continuar", dependencies=[Depends(get_current_user)])
+async def continuar_operacao(op_id: str, etapa: str | None = None):
+    """Destrava a pausa do passo-a-passo. Se etapa não for informada,
+    destrava a pausa atual (qualquer que seja)."""
+    status = status_operacoes.get(op_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    eventos = status.get("_eventos_pausa", {})
+    if etapa:
+        ev = eventos.get(etapa)
+        if ev:
+            ev.set()
+            return {"ok": True, "etapa": etapa}
+    # Sem etapa específica: destrava todas as pausas pendentes
+    for nome, ev in list(eventos.items()):
+        ev.set()
+    return {"ok": True, "destravadas": list(eventos.keys())}
 
 @app.get("/api/status/{op_id}", dependencies=[Depends(get_current_user)])
 def get_status(op_id: str):
@@ -263,7 +309,7 @@ def get_status(op_id: str):
     factories_clean = {}
     for sistema, fs in s.get("factories", {}).items():
         factories_clean[sistema] = {k: v for k, v in fs.items() if k not in ("faturas_cache", "faturas_salvas")}
-    result = {k: v for k, v in s.items() if k not in ("faturas_cache", "arquivos", "factories", "_tasks")}
+    result = {k: v for k, v in s.items() if k not in ("faturas_cache", "arquivos", "factories", "_tasks", "_eventos_pausa")}
     # Converte set para lista (set não é JSON-serializável)
     if isinstance(result.get("faturas_salvas"), set):
         result["faturas_salvas"] = list(result["faturas_salvas"])
@@ -372,14 +418,17 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
     # Cria sub-status por factory
     for sistema, fat_lista in por_factory.items():
         status["factories"][sistema] = {
-            "nome":           FACTORY_NAMES.get(sistema, sistema),
-            "status":         "aguardando",
-            "logs":           [],
-            "erros":          [],
-            "concluidas":     0,
-            "total":          len(fat_lista),
-            "faturas_cache":  status["faturas_cache"],
-            "faturas_salvas": set(),
+            "nome":              FACTORY_NAMES.get(sistema, sistema),
+            "status":            "aguardando",
+            "logs":              [],
+            "erros":             [],
+            "concluidas":        0,
+            "total":             len(fat_lista),
+            "faturas_cache":     status["faturas_cache"],
+            "faturas_salvas":    set(),
+            # Propaga flags pro sub-status (services consomem daqui)
+            "modo_demonstracao": status.get("modo_demonstracao", False),
+            "usuario_id":        status.get("usuario_id"),
         }
 
     async def _run(sistema: str, fat_lista: list):
@@ -418,6 +467,13 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
                 fs["faturas_salvas"].add(sel.numero)
         tasks = []
     else:
+        # PAUSA #1: antes de iniciar a digitação nas factories
+        nomes_fact = ", ".join(FACTORY_NAMES.get(s, s) for s in por_factory.keys())
+        await _aguardar_continuar(
+            op_id,
+            "antes_factories",
+            f"Pronto para iniciar digitação em: {nomes_fact}. Confirme para prosseguir."
+        )
         # Executa todas as factories em paralelo — guarda tasks para poder cancelar
         tasks = [asyncio.create_task(_run(sistema, fat_lista)) for sistema, fat_lista in por_factory.items()]
     status["_tasks"] = tasks
@@ -458,6 +514,14 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
     status["logs"].append(f"✅ {MSG_FINALIZAR_MANUAL}")
     if tem_erros:
         status["logs"].append(f"⚠️ {len(status['erros'])} fatura(s) com erro — verifique os cards acima")
+
+    # PAUSA #2: antes de baixar boletos/CTes
+    if status["faturas_por_factory"] and status["status"] != "cancelado":
+        await _aguardar_continuar(
+            op_id,
+            "antes_documentos",
+            "Operações nas factories concluídas. Confirme para baixar boletos e CTes do GW."
+        )
 
     # Salvamento de documentos — agora também cancelável.
     # Registramos como task em _tasks para que /api/cancelar possa interromper.

@@ -692,12 +692,14 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
     """
     log = lambda msg: status["logs"].append(msg)
     faturas_dados = status.get("faturas_cache", {})
+    modo_demo = bool(status.get("modo_demonstracao"))
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             **launch_kwargs(
                 headless=True,
                 extra_args=["--disable-blink-features=AutomationControlled"],
+                modo_demo=modo_demo,
             ),
             ignore_default_args=["--enable-automation"],
         )

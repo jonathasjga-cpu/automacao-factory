@@ -589,9 +589,10 @@ async def _finalizar_na_pagina(page, sistema: str, status: dict):
 async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
     log = lambda msg: status["logs"].append(msg)
     faturas_dados = status.get("faturas_cache", {})
+    modo_demo = bool(status.get("modo_demonstracao"))
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs(headless=True))
+        browser = await p.chromium.launch(**launch_kwargs(headless=True, modo_demo=modo_demo))
         page = await browser.new_page()
 
         log(f"[LOGIN] Fazendo login na Firma ({sistema})...")

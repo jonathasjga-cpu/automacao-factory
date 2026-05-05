@@ -497,9 +497,10 @@ async def baixar_faturas_pdf(
 ):
     log = lambda msg: status["logs"].append(msg)
     resumo_docs = status.setdefault("resumo_documentos", {})
+    modo_demo = bool(status.get("modo_demonstracao"))
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs(headless=False))
+        browser = await p.chromium.launch(**launch_kwargs(headless=False, modo_demo=modo_demo))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 
@@ -888,9 +889,10 @@ async def baixar_ctes_pdf(
     import httpx
     log = lambda msg: status["logs"].append(msg)
     resumo_docs = status.setdefault("resumo_documentos", {})
+    modo_demo = bool(status.get("modo_demonstracao"))
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs(headless=False))
+        browser = await p.chromium.launch(**launch_kwargs(headless=False, modo_demo=modo_demo))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
 

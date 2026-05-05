@@ -770,6 +770,20 @@
       <div class="count-badge" id="count-badge">0 faturas</div>
     </div>
 
+    <!-- Toggles de modo de execução — ficam visíveis sempre, agem só no Executar/Apenas Baixar -->
+    <div style="display:flex;gap:18px;align-items:center;margin-bottom:14px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;font-size:13px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text2)" title="Abre o navegador visível e roda em câmera lenta. Só funciona local — Railway não tem display.">
+        <input type="checkbox" id="toggle-modo-demo" style="width:16px;height:16px;cursor:pointer">
+        🎬 <strong style="color:var(--text)">Modo Demonstração</strong>
+        <span style="color:var(--muted);font-size:11px">— vê o robô trabalhando (só local)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text2)" title="Pausa entre cada etapa grande esperando você clicar Continuar.">
+        <input type="checkbox" id="toggle-passo-a-passo" style="width:16px;height:16px;cursor:pointer">
+        ⏸️ <strong style="color:var(--text)">Passo-a-Passo</strong>
+        <span style="color:var(--muted);font-size:11px">— aprovo cada etapa antes de seguir</span>
+      </label>
+    </div>
+
     <div id="faturas-container">
       <div class="empty-state">
         <span class="icon">📄</span>
@@ -1646,6 +1660,8 @@ async function _disparaOperacao(apenasDocumentos) {
     alert('Nenhuma fatura selecionada!');
     return;
   }
+  const modoDemo = document.getElementById('toggle-modo-demo')?.checked || false;
+  const passoAPasso = document.getElementById('toggle-passo-a-passo')?.checked || false;
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1654,6 +1670,8 @@ async function _disparaOperacao(apenasDocumentos) {
       pasta_destino: null,
       inicio: operacaoStartTime ? new Date(operacaoStartTime).toISOString() : null,
       apenas_documentos: !!apenasDocumentos,
+      modo_demonstracao: modoDemo,
+      modo_passo_a_passo: passoAPasso,
     }),
   });
   const data = await resp.json();
@@ -1684,10 +1702,19 @@ async function executarAutomacao() {
     operacaoStartTime = Date.now();
   }
 
+  const modoDemo = document.getElementById('toggle-modo-demo')?.checked || false;
+  const passoAPasso = document.getElementById('toggle-passo-a-passo')?.checked || false;
+
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ faturas: selecionadas, pasta_destino: null, inicio: new Date(operacaoStartTime).toISOString() }),
+    body: JSON.stringify({
+      faturas: selecionadas,
+      pasta_destino: null,
+      inicio: new Date(operacaoStartTime).toISOString(),
+      modo_demonstracao: modoDemo,
+      modo_passo_a_passo: passoAPasso,
+    }),
   });
 
   const data = await resp.json();
@@ -1695,6 +1722,19 @@ async function executarAutomacao() {
   _conclusaoScrollado = false;
   showPage('status');
   iniciarPolling();
+}
+
+// Destrava pausa do passo-a-passo
+async function continuarOperacao(etapa) {
+  if (!operacaoAtual) return;
+  try {
+    await fetch(`${API}/operacao/${operacaoAtual}/continuar?etapa=${encodeURIComponent(etapa || '')}`, {
+      method: 'POST',
+    });
+    // Polling vai detectar a mudança e atualizar a UI
+  } catch (e) {
+    alert('Erro ao continuar: ' + (e.message || e));
+  }
 }
 
 // ── STATUS ───────────────────────────────────────────────
@@ -1832,6 +1872,25 @@ function renderStatus(s) {
     setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 80);
   }
 
+  // Card de pausa do passo-a-passo: aparece quando o backend está aguardando confirmação
+  const pausa = s.aguardando_confirmacao;
+  const pausaBox = pausa ? `
+    <div style="background:linear-gradient(135deg,rgba(245,158,11,0.08) 0%,var(--surface) 100%);border:1px solid rgba(245,158,11,0.35);border-radius:14px;padding:24px 28px;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 4px 24px rgba(245,158,11,0.06);position:relative;overflow:hidden">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--yellow,#F59E0B);border-radius:14px 0 0 14px"></div>
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="width:44px;height:44px;border-radius:10px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <h3 style="font-size:15px;font-weight:700;margin-bottom:4px;color:var(--text)">⏸️ Aguardando sua confirmação</h3>
+          <p style="color:var(--text2);font-size:13px;margin:0">${pausa.descricao || pausa.etapa || 'Etapa pausada'}</p>
+        </div>
+        <button class="btn btn-success" onclick="continuarOperacao('${pausa.etapa}')" style="flex-shrink:0">
+          Continuar →
+        </button>
+      </div>
+    </div>` : '';
+
   const cancelBox = isCancelado ? `
     <div style="background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);border:1px solid rgba(239,68,68,0.25);border-radius:14px;padding:32px 28px;text-align:center;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 8px 32px rgba(0,0,0,.4),0 0 40px rgba(239,68,68,0.04);position:relative;overflow:hidden">
       <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--red);border-radius:14px 0 0 14px"></div>
@@ -1866,6 +1925,7 @@ function renderStatus(s) {
     </div>` : '';
 
   container.innerHTML = `
+    ${pausaBox}
     ${cancelBox}
     ${confirmBox}
     <div class="card">

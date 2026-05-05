@@ -54,11 +54,12 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
     creds_gw = get_credencial("gw", user_id=status.get("usuario_id"))
     conta    = CONTA_POR_SISTEMA.get(sistema, "")
     hoje     = _hoje()
+    modo_demo = bool(status.get("modo_demonstracao"))
 
     log(f"  GW — gerando remessa para conta '{conta}'...")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs(headless=True))
+        browser = await p.chromium.launch(**launch_kwargs(headless=True, modo_demo=modo_demo))
         context = await browser.new_context(accept_downloads=True)
         page    = await context.new_page()
 
@@ -625,8 +626,9 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
         return {}
 
     # ── Etapas 2–3: importar e preencher na GC ───────────────────────────────
+    modo_demo_gc = bool(status.get("modo_demonstracao"))
     async with async_playwright() as p:
-        browser = await p.chromium.launch(**launch_kwargs(headless=True))
+        browser = await p.chromium.launch(**launch_kwargs(headless=True, modo_demo=modo_demo_gc))
         page    = await browser.new_page()
 
         log(f"🔑 GC {sistema} — fazendo login...")
