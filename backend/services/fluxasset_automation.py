@@ -66,118 +66,104 @@ async def _resolver_captcha_no_chrome_visivel(page: Page, log) -> None:
 
 
 async def _resolver_captcha_via_frontend(page: Page, status: dict | None, log) -> None:
-    """Estratégia Railway (sem display): pede o sitekey, frontend mostra widget Turnstile,
-    usuário resolve, backend recebe token e injeta na sessão Playwright."""
-    if status is None:
-        raise Exception(
-            "FluxAsset no Railway requer 'status' para receber o token do captcha. "
-            "Esta operação não pode rodar sem o painel de status do AutoFactory."
-        )
+    """Estratégia Railway (sem display).
 
-    # Detecta o widget Turnstile na página e extrai sitekey
-    log("[FluxAsset] Procurando widget Cloudflare Turnstile na página...")
-    sitekey_info = None
-    for tentativa in range(20):  # ~30s — Cloudflare pode demorar pra renderizar
-        await page.wait_for_timeout(1500)
-        try:
-            sitekey_info = await page.evaluate("""
-                () => {
-                    // Estratégia 1: elemento com data-sitekey (formato comum)
-                    const el = document.querySelector('[data-sitekey]');
-                    if (el) return { sitekey: el.getAttribute('data-sitekey'), action: el.getAttribute('data-action') || '' };
-                    // Estratégia 2: turnstile global (script já carregado)
-                    if (window.turnstile && window.turnstile.getSiteKey) {
-                        try { return { sitekey: window.turnstile.getSiteKey(), action: '' }; } catch (e) {}
-                    }
-                    // Estratégia 3: iframe da Cloudflare com sitekey na URL
-                    for (const iframe of document.querySelectorAll('iframe')) {
-                        const src = iframe.src || '';
-                        const m = src.match(/[?&]k=([^&]+)/);
-                        if (m && src.includes('challenges.cloudflare.com')) {
-                            return { sitekey: decodeURIComponent(m[1]), action: '' };
-                        }
-                    }
-                    return null;
-                }
-            """)
-        except Exception:
-            sitekey_info = None
-        if sitekey_info and sitekey_info.get("sitekey"):
-            break
-        # Se já tem campo password visível, captcha já passou (pode ter sido pulado)
+    A FluxAsset usa o Cloudflare BROWSER CHECK (página "Just a moment / Um momento")
+    que valida passivamente o browser — não há captcha interativo pra clicar.
+    O Cloudflare libera sozinho em 5-30s SE o navegador parecer humano.
+
+    No Railway (Chromium headless rodando em IP de datacenter), o Cloudflare
+    geralmente detecta e bloqueia. Estratégia:
+
+    1. Aguardar passivamente até 90s — se Cloudflare liberar sozinho, segue
+    2. Se mesmo com cap aparecer Turnstile interativo (data-sitekey),
+       pede o token via frontend (suporta caso futuro do site mudar)
+    3. Se nada funcionar, erro claro orientando rodar local
+    """
+    SEGUNDOS_PASSIVO = 90  # Cloudflare Browser Check costuma liberar em 5-30s
+    INTERVALO = 1.5
+    log(f"[FluxAsset] Aguardando Cloudflare validar browser passivamente (até {SEGUNDOS_PASSIVO}s)...")
+    last_log = 0
+    inicio = 0.0
+    for tentativa in range(int(SEGUNDOS_PASSIVO / INTERVALO)):
+        await page.wait_for_timeout(int(INTERVALO * 1000))
+        elapsed = int(tentativa * INTERVALO)
+
+        # 1. Login disponível? (Cloudflare liberou sozinho)
         if await page.query_selector('input[type="password"]'):
-            log("[FluxAsset] Login disponível sem captcha — seguindo")
+            log(f"[FluxAsset] Browser Check liberado pelo Cloudflare em {elapsed}s")
             return
 
-    if not sitekey_info or not sitekey_info.get("sitekey"):
-        raise Exception(
-            "FluxAsset: não detectou widget Cloudflare Turnstile na página em 30s. "
-            "Pode ter mudado o layout do site ou o servidor está retornando erro."
-        )
+        # 2. Tem widget Turnstile interativo (data-sitekey)? Caso especial.
+        sitekey_info = await page.evaluate("""
+            () => {
+                const el = document.querySelector('[data-sitekey]');
+                if (el && el.getAttribute('data-sitekey')) {
+                    return { sitekey: el.getAttribute('data-sitekey') };
+                }
+                for (const iframe of document.querySelectorAll('iframe')) {
+                    const src = iframe.src || '';
+                    const m = src.match(/[?&]k=([^&]+)/);
+                    if (m && src.includes('challenges.cloudflare.com')) {
+                        return { sitekey: decodeURIComponent(m[1]) };
+                    }
+                }
+                return null;
+            }
+        """)
+        if sitekey_info and sitekey_info.get("sitekey"):
+            sitekey = sitekey_info["sitekey"]
+            log(f"[FluxAsset] Detectado Turnstile interativo (sitekey={sitekey[:12]}...) — pedindo ao usuário")
+            await _solicitar_token_via_frontend(page, status, log, sitekey)
+            return
 
-    sitekey = sitekey_info["sitekey"]
-    log(f"[FluxAsset] Widget detectado (sitekey={sitekey[:12]}...). Pedindo ao usuário no AutoFactory.")
+        if elapsed > 0 and elapsed - last_log >= 15:
+            log(f"[FluxAsset] ⏳ Ainda aguardando Cloudflare... ({elapsed}s/{SEGUNDOS_PASSIVO}s)")
+            last_log = elapsed
 
-    # Sinaliza ao frontend: aparece modal com widget Turnstile
+    # Esgotou: nem passou passivamente nem mostrou widget Turnstile
+    raise Exception(
+        "FluxAsset bloqueada pelo Cloudflare no servidor Railway.\n"
+        "Cloudflare detecta IP de datacenter e bloqueia mesmo sem captcha interativo. "
+        "Esta operação SÓ funciona localmente (Chrome real engana o Cloudflare).\n"
+        "→ Solução: rode esta operação em http://localhost:8000 (PC local com iniciar.bat).\n"
+        "Outras factories (Firma, GC) e download de boletos/CTes funcionam normalmente no Railway."
+    )
+
+
+async def _solicitar_token_via_frontend(page: Page, status: dict | None, log, sitekey: str) -> None:
+    """Caso o site mostre um widget Turnstile interativo (data-sitekey),
+    pede pro usuário resolver no AutoFactory e injeta o token de volta."""
+    if status is None:
+        raise Exception("FluxAsset: precisa de 'status' para receber o token do frontend.")
     ev = asyncio.Event()
     status["_evento_captcha"] = ev
     status["captcha_token"] = None
-    status["aguardando_captcha"] = {
-        "site": "FluxAsset",
-        "sitekey": sitekey,
-        "url": page.url,
-        "action": sitekey_info.get("action", ""),
-    }
-    status["logs"].append(
-        "🔒 Captcha Cloudflare detectado — resolva no card que apareceu acima do status."
-    )
-
-    # Aguarda o usuário resolver no frontend (cap 5 min)
+    status["aguardando_captcha"] = {"site": "FluxAsset", "sitekey": sitekey, "url": page.url}
+    status["logs"].append("🔒 Captcha Cloudflare interativo — resolva no card amarelo acima.")
     try:
         await asyncio.wait_for(ev.wait(), timeout=300)
     except asyncio.TimeoutError:
         status["aguardando_captcha"] = None
         status["_evento_captcha"] = None
-        raise Exception(
-            "FluxAsset: passaram 5 minutos sem o captcha ser resolvido no AutoFactory. "
-            "Operação cancelada."
-        )
-
+        raise Exception("FluxAsset: 5min sem o captcha ser resolvido. Cancelado.")
     token = status.get("captcha_token", "")
     status["aguardando_captcha"] = None
     status["_evento_captcha"] = None
     if not token:
-        raise Exception("FluxAsset: token de captcha não recebido.")
-
-    # Injeta o token na sessão Playwright e dispara o callback do widget
-    log("[FluxAsset] Injetando token na sessão e submetendo...")
-    await page.evaluate(f"""
-        (token) => {{
-            // Preenche o input hidden do Turnstile (formato padrão)
-            for (const inp of document.querySelectorAll('input[name="cf-turnstile-response"]')) {{
-                inp.value = token;
-            }}
-            // Tenta acionar o callback configurado no widget
-            try {{
-                const el = document.querySelector('[data-sitekey]');
-                const cbName = el && el.getAttribute('data-callback');
-                if (cbName && typeof window[cbName] === 'function') {{
-                    window[cbName](token);
-                }}
-            }} catch (e) {{}}
-        }}
-    """, token)
-
-    # Aguarda o login ficar disponível (pode demorar alguns segundos pra Cloudflare validar)
-    for _ in range(40):  # ~60s
+        raise Exception("FluxAsset: token não recebido do frontend.")
+    await page.evaluate(
+        "(token) => { for (const i of document.querySelectorAll('input[name=\"cf-turnstile-response\"]')) i.value = token; }",
+        token,
+    )
+    for _ in range(40):
         await page.wait_for_timeout(1500)
         if await page.query_selector('input[type="password"]'):
             log("[FluxAsset] Login liberado após injeção do token")
             return
     raise Exception(
-        "FluxAsset: token foi injetado mas o login não ficou disponível em 60s. "
-        "Cloudflare pode ter rejeitado o token (validação de IP de origem). "
-        "Tente rodar local (http://localhost:8000) para resolver no Chrome real."
+        "FluxAsset: token injetado mas Cloudflare rejeitou (provável validação de IP). "
+        "Rode local (http://localhost:8000)."
     )
 
 
