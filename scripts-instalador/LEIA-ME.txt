@@ -1,0 +1,108 @@
+================================================================
+  AUTOFACTORY — Instalacao no seu computador
+================================================================
+
+Este pacote contem 3 arquivos:
+
+  1. instalar-autofactory.bat   — execute UMA VEZ pra instalar
+  2. iniciar.bat                — execute toda vez que for usar
+  3. atualizar-autofactory.bat  — execute quando o admin avisar
+                                  que tem atualizacao
+
+
+----------------------------------------------------------------
+  COMO INSTALAR (primeira vez)
+----------------------------------------------------------------
+
+Passo 1: Coloque os 3 arquivos numa pasta de sua preferencia
+        (sugestao: crie uma pasta chamada "AutoFactory" na
+         area de trabalho)
+
+Passo 2: Clique 2x em "instalar-autofactory.bat"
+
+Passo 3: Aguarde a instalacao terminar (5 a 10 minutos)
+
+Passo 4: Pronto! Aparece um atalho "AutoFactory" na sua area
+        de trabalho.
+
+
+----------------------------------------------------------------
+  COMO USAR DIA A DIA
+----------------------------------------------------------------
+
+1. Clique 2x no atalho "AutoFactory" da area de trabalho
+   (ou execute "iniciar.bat")
+
+2. Uma janela preta vai abrir — NAO FECHE ela enquanto estiver
+   usando o sistema
+
+3. Seu navegador abre automaticamente em http://localhost:8000
+
+4. Faca login no AutoFactory:
+   - Primeira vez: clique em "Cadastrar" e crie sua conta
+   - Depois: use seu login e senha
+
+5. Configure suas credenciais:
+   - Em "Meu acesso GW": coloque seu usuario e senha do GW Webtrans
+
+6. Use normalmente:
+   - "Carregar do GW" para puxar as faturas
+   - Atribuir factory para cada fatura
+   - "Executar Selecionadas" para rodar a automacao
+
+7. Ao terminar, feche a janela preta para encerrar o sistema
+
+
+----------------------------------------------------------------
+  COMO ATUALIZAR
+----------------------------------------------------------------
+
+Quando o admin avisar que tem versao nova:
+
+1. Feche o AutoFactory (feche a janela preta se estiver aberta)
+2. Clique 2x em "atualizar-autofactory.bat"
+3. Aguarde (cerca de 30 segundos)
+4. Pronto! Pode usar normalmente.
+
+Suas credenciais salvas e historico NAO sao apagados na
+atualizacao.
+
+
+----------------------------------------------------------------
+  REQUISITOS DO SEU COMPUTADOR
+----------------------------------------------------------------
+
+- Windows 10 ou 11
+- Internet (so na hora de instalar/atualizar)
+- 500 MB livres em disco
+- Permissao de administrador (so pedido na primeira instalacao)
+- Google Chrome instalado (para a factory FluxAsset)
+
+
+----------------------------------------------------------------
+  PROBLEMAS COMUNS
+----------------------------------------------------------------
+
+PROBLEMA: "instalar-autofactory.bat" da erro de Python
+SOLUCAO: Baixe Python manualmente em https://www.python.org/downloads/
+         Marque "Add Python to PATH" ao instalar.
+         Reinicie o computador e tente de novo.
+
+PROBLEMA: O navegador nao abre sozinho
+SOLUCAO: Abra manualmente o endereco http://localhost:8000
+
+PROBLEMA: "Porta 8000 em uso"
+SOLUCAO: Feche outras janelas pretas do AutoFactory que estejam
+         abertas, e tente de novo.
+
+PROBLEMA: FluxAsset trava no captcha
+SOLUCAO: Quando aparecer a janela do Chrome com "Verificando se
+         voce e humano", clique no quadradinho do captcha.
+         Tem 3 minutos pra responder.
+
+
+----------------------------------------------------------------
+  DUVIDAS?
+----------------------------------------------------------------
+
+Fale com o administrador (Jonathas).
