@@ -21,60 +21,86 @@ def _data_operacao_str() -> str:
 FLUXASSET_URL = "https://portal.fluxasset.com.br/Factaconsult"
 
 
-async def fazer_login_fluxasset(page: Page, sistema: str):
-    """Faz login na FluxAsset (usa Chrome real para passar o Cloudflare Turnstile)"""
+async def fazer_login_fluxasset(page: Page, sistema: str, status: dict | None = None):
+    """Faz login na FluxAsset (usa Chrome real para passar o Cloudflare Turnstile).
+
+    Estratégia:
+    - Browser abre VISÍVEL (headless=False)
+    - Mostra aviso azul grande IMEDIATAMENTE no topo da janela orientando
+      o usuário a resolver o captcha
+    - Aguarda até 3 minutos pelo formulário de login aparecer (campo password)
+    - Loga progresso a cada 15s no painel de status do AutoFactory
+    """
+    log = (lambda msg: status["logs"].append(msg)) if status else (lambda msg: None)
     creds = get_credencial(sistema)
     await page.goto(f"{FLUXASSET_URL}/login", wait_until="domcontentloaded", timeout=60000)
 
-    # Aguarda o Cloudflare "Verificando se você é humano" passar.
-    # O browser está visível — se aparecer o desafio, complete manualmente na janela aberta.
+    # Mostra aviso visual GRANDE imediatamente (antes mesmo de saber se tem captcha)
+    # — se não tiver captcha, o aviso some sozinho quando a página redirecionar
+    try:
+        await page.evaluate("""
+            () => {
+                if (document.getElementById('_cf_aviso')) return;
+                const d = document.createElement('div');
+                d.id = '_cf_aviso';
+                d.style = 'position:fixed;top:0;left:0;right:0;'
+                        + 'background:linear-gradient(90deg,#1e40af,#3b82f6);color:#fff;'
+                        + 'padding:20px 28px;font-size:18px;z-index:2147483647;'
+                        + 'font-family:sans-serif;text-align:center;font-weight:600;'
+                        + 'box-shadow:0 4px 16px rgba(0,0,0,.3);border-bottom:3px solid #fbbf24';
+                d.innerHTML = '🤖 AutoFactory aguardando você. Se aparecer o captcha do Cloudflare ' +
+                              '("Verificando se você é humano"), <u>clique nele</u> para liberar o login.';
+                document.body.appendChild(d);
+            }
+        """)
+    except Exception:
+        pass
+
+    # Aguarda até 3 min pelo formulário de login aparecer
+    log("[FluxAsset] Aguardando captcha Cloudflare ser resolvido (até 3 min)...")
     cf_passou = False
-    for tentativa in range(60):  # até 90s (60 × 1,5s)
-        await page.wait_for_timeout(1500)
-        # try/except: page.evaluate lança "Execution context destroyed" durante navegação
-        try:
-            texto = await page.evaluate("() => (document.body && document.body.innerText) || ''")
-        except Exception:
-            texto = ""
-        tem_cf = any(p in texto for p in ['Verificando', 'Checking', 'Just a moment', 'cf-browser'])
+    SEGUNDOS_TOTAL = 180  # 3 min
+    INTERVALO = 1.5
+    TENTATIVAS = int(SEGUNDOS_TOTAL / INTERVALO)
+    last_log = 0
+    for tentativa in range(TENTATIVAS):
+        await page.wait_for_timeout(int(INTERVALO * 1000))
         tem_login = await page.query_selector('input[type="password"]')
         if tem_login:
             cf_passou = True
+            log(f"[FluxAsset] Captcha liberado após {int(tentativa * INTERVALO)}s")
             break
-        if tentativa == 5:  # ~7,5s sem login → avisa usuário
-            # injeta aviso visível na janela do browser aberta pela automação
-            try:
-                await page.evaluate("""
-                    () => {
-                        if (document.getElementById('_cf_aviso')) return;
-                        const d = document.createElement('div');
-                        d.id = '_cf_aviso';
-                        d.style = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);'
-                                + 'background:#1e40af;color:#fff;padding:12px 24px;border-radius:8px;'
-                                + 'font-size:16px;z-index:99999;font-family:sans-serif;text-align:center';
-                        d.innerText = '⚠️ Complete a verificação Cloudflare nesta janela para continuar';
-                        document.body.appendChild(d);
-                    }
-                """)
-            except Exception:
-                pass
+        # Loga progresso a cada 15s
+        elapsed = int(tentativa * INTERVALO)
+        if elapsed > 0 and elapsed - last_log >= 15:
+            log(f"[FluxAsset] ⏳ Ainda aguardando captcha... ({elapsed}s/{SEGUNDOS_TOTAL}s)")
+            last_log = elapsed
 
     if not cf_passou:
-        # Detecta se está rodando em servidor sem display (Railway). Sem display,
-        # o usuário não consegue clicar no Cloudflare manualmente — então a operação
-        # FluxAsset não tem como funcionar.
+        # Detecta Railway (sem display) e dá erro claro
         from browser_config import IS_RAILWAY
         if IS_RAILWAY:
             raise Exception(
                 "FluxAsset bloqueada pelo Cloudflare Turnstile no servidor (sem display "
                 "para você clicar manualmente). "
                 "Para usar a FluxAsset, rode esta operação na máquina local "
-                "(localhost:8000). Outras factories como Firma e GC funcionam aqui."
+                "(http://localhost:8000). Outras factories como Firma e GC funcionam aqui."
             )
         raise Exception(
-            "FluxAsset: timeout aguardando formulario de login. "
-            "Se apareceu verificacao Cloudflare, complete manualmente na janela do Chrome."
+            f"FluxAsset: passaram {SEGUNDOS_TOTAL}s sem o captcha ser resolvido. "
+            "Verifique se a janela do Chrome está aberta na sua tela e se tem captcha pendente."
         )
+
+    # Remove o aviso assim que o login aparece
+    try:
+        await page.evaluate("""
+            () => {
+                const d = document.getElementById('_cf_aviso');
+                if (d) d.remove();
+            }
+        """)
+    except Exception:
+        pass
 
     # Pequena pausa para a página estabilizar após o Cloudflare liberar
     await page.wait_for_timeout(800)
@@ -693,10 +719,16 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
     log = lambda msg: status["logs"].append(msg)
     faturas_dados = status.get("faturas_cache", {})
 
+    # FluxAsset usa Cloudflare Turnstile que bloqueia headless. Forçamos
+    # headless=False (Chrome real visível) — o usuário resolve o captcha
+    # manualmente quando ele aparece. Em Railway (sem display), launch_kwargs
+    # força headless=True automaticamente e fazer_login_fluxasset detecta
+    # IS_RAILWAY e dá erro claro orientando rodar local.
+    log("[FluxAsset] Abrindo navegador VISÍVEL — se aparecer captcha, complete na janela.")
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             **launch_kwargs(
-                headless=True,
+                headless=False,
                 extra_args=["--disable-blink-features=AutomationControlled"],
             ),
             ignore_default_args=["--enable-automation"],
@@ -704,7 +736,7 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
         page = await browser.new_page()
 
         log(f"[LOGIN] Fazendo login na FluxAsset ({sistema})...")
-        await fazer_login_fluxasset(page, sistema)
+        await fazer_login_fluxasset(page, sistema, status)
 
         log("[DIR] Navegando para Digitacao...")
         await navegar_para_digitacao(page)
