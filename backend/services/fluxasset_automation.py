@@ -21,22 +21,9 @@ def _data_operacao_str() -> str:
 FLUXASSET_URL = "https://portal.fluxasset.com.br/Factaconsult"
 
 
-async def fazer_login_fluxasset(page: Page, sistema: str, status: dict | None = None):
-    """Faz login na FluxAsset (usa Chrome real para passar o Cloudflare Turnstile).
-
-    Estratégia:
-    - Browser abre VISÍVEL (headless=False)
-    - Mostra aviso azul grande IMEDIATAMENTE no topo da janela orientando
-      o usuário a resolver o captcha
-    - Aguarda até 3 minutos pelo formulário de login aparecer (campo password)
-    - Loga progresso a cada 15s no painel de status do AutoFactory
-    """
-    log = (lambda msg: status["logs"].append(msg)) if status else (lambda msg: None)
-    creds = get_credencial(sistema)
-    await page.goto(f"{FLUXASSET_URL}/login", wait_until="domcontentloaded", timeout=60000)
-
-    # Mostra aviso visual GRANDE imediatamente (antes mesmo de saber se tem captcha)
-    # — se não tiver captcha, o aviso some sozinho quando a página redirecionar
+async def _resolver_captcha_no_chrome_visivel(page: Page, log) -> None:
+    """Estratégia local: Chrome está visível na tela do usuário; ele resolve manualmente."""
+    # Aviso visual GRANDE no topo da janela do Chrome
     try:
         await page.evaluate("""
             () => {
@@ -48,59 +35,174 @@ async def fazer_login_fluxasset(page: Page, sistema: str, status: dict | None = 
                         + 'padding:20px 28px;font-size:18px;z-index:2147483647;'
                         + 'font-family:sans-serif;text-align:center;font-weight:600;'
                         + 'box-shadow:0 4px 16px rgba(0,0,0,.3);border-bottom:3px solid #fbbf24';
-                d.innerHTML = '🤖 AutoFactory aguardando você. Se aparecer o captcha do Cloudflare ' +
-                              '("Verificando se você é humano"), <u>clique nele</u> para liberar o login.';
+                d.innerHTML = '🤖 AutoFactory aguardando você. Se aparecer o captcha, <u>clique nele</u> para continuar.';
                 document.body.appendChild(d);
             }
         """)
     except Exception:
         pass
 
-    # Aguarda até 3 min pelo formulário de login aparecer
     log("[FluxAsset] Aguardando captcha Cloudflare ser resolvido (até 3 min)...")
-    cf_passou = False
-    SEGUNDOS_TOTAL = 180  # 3 min
-    INTERVALO = 1.5
+    SEGUNDOS_TOTAL, INTERVALO = 180, 1.5
     TENTATIVAS = int(SEGUNDOS_TOTAL / INTERVALO)
     last_log = 0
     for tentativa in range(TENTATIVAS):
         await page.wait_for_timeout(int(INTERVALO * 1000))
-        tem_login = await page.query_selector('input[type="password"]')
-        if tem_login:
-            cf_passou = True
+        if await page.query_selector('input[type="password"]'):
             log(f"[FluxAsset] Captcha liberado após {int(tentativa * INTERVALO)}s")
-            break
-        # Loga progresso a cada 15s
+            try:
+                await page.evaluate("() => { const d = document.getElementById('_cf_aviso'); if (d) d.remove(); }")
+            except Exception:
+                pass
+            return
         elapsed = int(tentativa * INTERVALO)
         if elapsed > 0 and elapsed - last_log >= 15:
             log(f"[FluxAsset] ⏳ Ainda aguardando captcha... ({elapsed}s/{SEGUNDOS_TOTAL}s)")
             last_log = elapsed
+    raise Exception(
+        f"FluxAsset: passaram {SEGUNDOS_TOTAL}s sem o captcha ser resolvido. "
+        "Verifique se a janela do Chrome está aberta e se tem captcha pendente."
+    )
 
-    if not cf_passou:
-        # Detecta Railway (sem display) e dá erro claro
-        from browser_config import IS_RAILWAY
-        if IS_RAILWAY:
-            raise Exception(
-                "FluxAsset bloqueada pelo Cloudflare Turnstile no servidor (sem display "
-                "para você clicar manualmente). "
-                "Para usar a FluxAsset, rode esta operação na máquina local "
-                "(http://localhost:8000). Outras factories como Firma e GC funcionam aqui."
-            )
+
+async def _resolver_captcha_via_frontend(page: Page, status: dict | None, log) -> None:
+    """Estratégia Railway (sem display): pede o sitekey, frontend mostra widget Turnstile,
+    usuário resolve, backend recebe token e injeta na sessão Playwright."""
+    if status is None:
         raise Exception(
-            f"FluxAsset: passaram {SEGUNDOS_TOTAL}s sem o captcha ser resolvido. "
-            "Verifique se a janela do Chrome está aberta na sua tela e se tem captcha pendente."
+            "FluxAsset no Railway requer 'status' para receber o token do captcha. "
+            "Esta operação não pode rodar sem o painel de status do AutoFactory."
         )
 
-    # Remove o aviso assim que o login aparece
+    # Detecta o widget Turnstile na página e extrai sitekey
+    log("[FluxAsset] Procurando widget Cloudflare Turnstile na página...")
+    sitekey_info = None
+    for tentativa in range(20):  # ~30s — Cloudflare pode demorar pra renderizar
+        await page.wait_for_timeout(1500)
+        try:
+            sitekey_info = await page.evaluate("""
+                () => {
+                    // Estratégia 1: elemento com data-sitekey (formato comum)
+                    const el = document.querySelector('[data-sitekey]');
+                    if (el) return { sitekey: el.getAttribute('data-sitekey'), action: el.getAttribute('data-action') || '' };
+                    // Estratégia 2: turnstile global (script já carregado)
+                    if (window.turnstile && window.turnstile.getSiteKey) {
+                        try { return { sitekey: window.turnstile.getSiteKey(), action: '' }; } catch (e) {}
+                    }
+                    // Estratégia 3: iframe da Cloudflare com sitekey na URL
+                    for (const iframe of document.querySelectorAll('iframe')) {
+                        const src = iframe.src || '';
+                        const m = src.match(/[?&]k=([^&]+)/);
+                        if (m && src.includes('challenges.cloudflare.com')) {
+                            return { sitekey: decodeURIComponent(m[1]), action: '' };
+                        }
+                    }
+                    return null;
+                }
+            """)
+        except Exception:
+            sitekey_info = None
+        if sitekey_info and sitekey_info.get("sitekey"):
+            break
+        # Se já tem campo password visível, captcha já passou (pode ter sido pulado)
+        if await page.query_selector('input[type="password"]'):
+            log("[FluxAsset] Login disponível sem captcha — seguindo")
+            return
+
+    if not sitekey_info or not sitekey_info.get("sitekey"):
+        raise Exception(
+            "FluxAsset: não detectou widget Cloudflare Turnstile na página em 30s. "
+            "Pode ter mudado o layout do site ou o servidor está retornando erro."
+        )
+
+    sitekey = sitekey_info["sitekey"]
+    log(f"[FluxAsset] Widget detectado (sitekey={sitekey[:12]}...). Pedindo ao usuário no AutoFactory.")
+
+    # Sinaliza ao frontend: aparece modal com widget Turnstile
+    ev = asyncio.Event()
+    status["_evento_captcha"] = ev
+    status["captcha_token"] = None
+    status["aguardando_captcha"] = {
+        "site": "FluxAsset",
+        "sitekey": sitekey,
+        "url": page.url,
+        "action": sitekey_info.get("action", ""),
+    }
+    status["logs"].append(
+        "🔒 Captcha Cloudflare detectado — resolva no card que apareceu acima do status."
+    )
+
+    # Aguarda o usuário resolver no frontend (cap 5 min)
     try:
-        await page.evaluate("""
-            () => {
-                const d = document.getElementById('_cf_aviso');
-                if (d) d.remove();
-            }
-        """)
-    except Exception:
-        pass
+        await asyncio.wait_for(ev.wait(), timeout=300)
+    except asyncio.TimeoutError:
+        status["aguardando_captcha"] = None
+        status["_evento_captcha"] = None
+        raise Exception(
+            "FluxAsset: passaram 5 minutos sem o captcha ser resolvido no AutoFactory. "
+            "Operação cancelada."
+        )
+
+    token = status.get("captcha_token", "")
+    status["aguardando_captcha"] = None
+    status["_evento_captcha"] = None
+    if not token:
+        raise Exception("FluxAsset: token de captcha não recebido.")
+
+    # Injeta o token na sessão Playwright e dispara o callback do widget
+    log("[FluxAsset] Injetando token na sessão e submetendo...")
+    await page.evaluate(f"""
+        (token) => {{
+            // Preenche o input hidden do Turnstile (formato padrão)
+            for (const inp of document.querySelectorAll('input[name="cf-turnstile-response"]')) {{
+                inp.value = token;
+            }}
+            // Tenta acionar o callback configurado no widget
+            try {{
+                const el = document.querySelector('[data-sitekey]');
+                const cbName = el && el.getAttribute('data-callback');
+                if (cbName && typeof window[cbName] === 'function') {{
+                    window[cbName](token);
+                }}
+            }} catch (e) {{}}
+        }}
+    """, token)
+
+    # Aguarda o login ficar disponível (pode demorar alguns segundos pra Cloudflare validar)
+    for _ in range(40):  # ~60s
+        await page.wait_for_timeout(1500)
+        if await page.query_selector('input[type="password"]'):
+            log("[FluxAsset] Login liberado após injeção do token")
+            return
+    raise Exception(
+        "FluxAsset: token foi injetado mas o login não ficou disponível em 60s. "
+        "Cloudflare pode ter rejeitado o token (validação de IP de origem). "
+        "Tente rodar local (http://localhost:8000) para resolver no Chrome real."
+    )
+
+
+async def fazer_login_fluxasset(page: Page, sistema: str, status: dict | None = None):
+    """Faz login na FluxAsset.
+
+    Detecta o ambiente e usa estratégia apropriada para o Cloudflare Turnstile:
+    - LOCAL (Chrome visível): usuário resolve o captcha na própria janela do Chrome
+    - RAILWAY (sem display): pede o sitekey, envia ao frontend AutoFactory, usuário
+      resolve no widget embutido, backend recebe o token e injeta na sessão Playwright
+    """
+    from browser_config import IS_RAILWAY
+    log = (lambda msg: status["logs"].append(msg)) if status else (lambda msg: None)
+    creds = get_credencial(sistema)
+    await page.goto(f"{FLUXASSET_URL}/login", wait_until="domcontentloaded", timeout=60000)
+
+    if IS_RAILWAY:
+        # ── ESTRATÉGIA RAILWAY: usuário resolve captcha NO FRONTEND do AutoFactory ──
+        await _resolver_captcha_via_frontend(page, status, log)
+    else:
+        # ── ESTRATÉGIA LOCAL: usuário resolve no Chrome visível ──
+        await _resolver_captcha_no_chrome_visivel(page, log)
+
+    # Pequena pausa para a página estabilizar após o Cloudflare liberar
+    await page.wait_for_timeout(800)
 
     # Pequena pausa para a página estabilizar após o Cloudflare liberar
     await page.wait_for_timeout(800)

@@ -1836,6 +1836,28 @@ function renderStatus(s) {
       </p>
     </div>` : '';
 
+  // Card de captcha: aparece quando backend pede pro usuário resolver Turnstile.
+  // Aparece SÓ se s.aguardando_captcha está setado.
+  const captchaBox = (s.aguardando_captcha && s.aguardando_captcha.sitekey) ? `
+    <div id="captcha-box" data-sitekey="${s.aguardando_captcha.sitekey}" style="background:linear-gradient(135deg,rgba(245,158,11,0.08) 0%,var(--surface) 100%);border:1px solid rgba(245,158,11,0.4);border-radius:14px;padding:24px 28px;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 4px 24px rgba(245,158,11,0.08);position:relative;overflow:hidden">
+      <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:#F59E0B;border-radius:14px 0 0 14px"></div>
+      <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:16px">
+        <div style="width:44px;height:44px;border-radius:10px;background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.35);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+        </div>
+        <div style="flex:1;min-width:0">
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text)">🔒 Cloudflare Turnstile — ${s.aguardando_captcha.site || 'Verificação'}</h3>
+          <p style="color:var(--text2);font-size:13px;margin:0">
+            O sistema online não consegue resolver sozinho. Clique no captcha abaixo para liberar o login no servidor.
+          </p>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:center;padding:12px 0">
+        <div id="captcha-widget"></div>
+      </div>
+      <p id="captcha-status" style="text-align:center;color:var(--muted);font-size:12px;margin:0">Aguardando você resolver o captcha...</p>
+    </div>` : '';
+
   const temErros = s.status === 'concluido_com_erros';
   const confirmBox = isConcluido ? `
     <div style="background:linear-gradient(135deg,var(--surface) 0%,var(--surface2) 100%);border:1px solid ${temErros ? 'rgba(245,158,11,0.25)' : 'rgba(16,185,129,0.25)'};border-radius:14px;padding:32px 28px;text-align:center;margin-bottom:20px;box-shadow:0 0 0 1px var(--border),0 8px 32px rgba(0,0,0,.4),0 0 40px ${temErros ? 'rgba(245,158,11,0.04)' : 'rgba(16,185,129,0.04)'};position:relative;overflow:hidden">
@@ -1857,6 +1879,7 @@ function renderStatus(s) {
     </div>` : '';
 
   container.innerHTML = `
+    ${captchaBox}
     ${cancelBox}
     ${confirmBox}
     <div class="card">
@@ -1880,6 +1903,11 @@ function renderStatus(s) {
       ${factoryCards || `<div class="log-area" id="log-area">${renderLogLines(s.logs||[], isRunning)}</div>`}
       ${globalLogsHtml}
     </div>`;
+
+  // Renderiza o widget Turnstile se o card de captcha estiver presente
+  if (s.aguardando_captcha && s.aguardando_captcha.sitekey) {
+    _renderizarWidgetTurnstile(s.aguardando_captcha.sitekey, operacaoAtual);
+  }
 
   // Auto-scroll logs expandidos
   Object.keys(factories).forEach(sistema => {
@@ -1938,6 +1966,71 @@ function _formatarTempo(ms) {
   if (h > 0) return `${h}h ${m}min ${sec}s`;
   if (m > 0) return `${m}min ${sec}s`;
   return `${sec}s`;
+}
+
+// ── CAPTCHA TURNSTILE (resolução pelo usuário no AutoFactory) ──
+let _turnstileScriptLoaded = false;
+let _turnstileWidgetId = null;
+
+function _carregarScriptTurnstile() {
+  if (_turnstileScriptLoaded) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    s.async = true;
+    s.defer = true;
+    s.onload = () => { _turnstileScriptLoaded = true; resolve(); };
+    s.onerror = () => reject(new Error('Falha ao carregar script Turnstile'));
+    document.head.appendChild(s);
+  });
+}
+
+async function _renderizarWidgetTurnstile(sitekey, opId) {
+  const container = document.getElementById('captcha-widget');
+  if (!container) return;
+  // Se já renderizou pra este sitekey, não re-renderiza
+  if (container.dataset.rendered === sitekey) return;
+  container.dataset.rendered = sitekey;
+  container.innerHTML = '';
+
+  try {
+    await _carregarScriptTurnstile();
+    // Espera o objeto window.turnstile estar disponível
+    for (let i = 0; i < 30; i++) {
+      if (window.turnstile && window.turnstile.render) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!window.turnstile || !window.turnstile.render) {
+      throw new Error('Turnstile não carregou');
+    }
+    _turnstileWidgetId = window.turnstile.render(container, {
+      sitekey: sitekey,
+      callback: async (token) => {
+        const stat = document.getElementById('captcha-status');
+        if (stat) { stat.textContent = '⏳ Enviando token ao servidor...'; stat.style.color = 'var(--text2)'; }
+        try {
+          const r = await fetch(`${API}/operacao/${opId}/captcha`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token }),
+          });
+          if (r.ok) {
+            if (stat) { stat.textContent = '✅ Token enviado, aguardando servidor processar...'; stat.style.color = 'var(--green)'; }
+          } else {
+            if (stat) { stat.textContent = '❌ Erro ao enviar token: ' + r.status; stat.style.color = 'var(--red)'; }
+          }
+        } catch (e) {
+          if (stat) { stat.textContent = '❌ Erro de rede: ' + (e.message || e); stat.style.color = 'var(--red)'; }
+        }
+      },
+      'error-callback': () => {
+        const stat = document.getElementById('captcha-status');
+        if (stat) { stat.textContent = '⚠️ Erro no Cloudflare. Tente recarregar a página.'; stat.style.color = 'var(--red)'; }
+      },
+    });
+  } catch (e) {
+    container.innerHTML = `<p style="color:var(--red);font-size:13px">Erro ao carregar widget Cloudflare: ${e.message || e}</p>`;
+  }
 }
 
 function _renderResumoDocumentos(rd, opId) {

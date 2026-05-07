@@ -248,9 +248,33 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
         "usuario": current_user.login,
         "usuario_id": current_user.id,
         "apenas_documentos": bool(req.apenas_documentos),
+        # Estado de captcha pendente (Opção 2: usuário resolve no frontend)
+        "aguardando_captcha": None,    # { sitekey, url, site, op_id } ou None
+        "captcha_token": None,          # token recebido do frontend
+        "_evento_captcha": None,        # asyncio.Event setado quando token chega
     }
     background_tasks.add_task(executar_automacao, op_id, req.faturas)
     return {"operacao_id": op_id}
+
+
+@app.post("/api/operacao/{op_id}/captcha", dependencies=[Depends(get_current_user)])
+async def submeter_captcha(op_id: str, payload: dict):
+    """
+    Frontend envia o token Turnstile resolvido pelo usuário.
+    Backend libera a thread do Playwright que estava aguardando.
+    """
+    op = status_operacoes.get(op_id)
+    if not op:
+        raise HTTPException(status_code=404, detail="Operação não encontrada")
+    token = (payload or {}).get("token", "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Token vazio")
+    op["captcha_token"] = token
+    ev = op.get("_evento_captcha")
+    if ev and not ev.is_set():
+        ev.set()
+    op["logs"].append(f"✅ Captcha resolvido pelo usuário (token recebido)")
+    return {"ok": True}
 
 @app.get("/api/status/{op_id}", dependencies=[Depends(get_current_user)])
 def get_status(op_id: str):
@@ -261,7 +285,7 @@ def get_status(op_id: str):
     factories_clean = {}
     for sistema, fs in s.get("factories", {}).items():
         factories_clean[sistema] = {k: v for k, v in fs.items() if k not in ("faturas_cache", "faturas_salvas")}
-    result = {k: v for k, v in s.items() if k not in ("faturas_cache", "arquivos", "factories", "_tasks")}
+    result = {k: v for k, v in s.items() if k not in ("faturas_cache", "arquivos", "factories", "_tasks", "_evento_captcha")}
     # Converte set para lista (set não é JSON-serializável)
     if isinstance(result.get("faturas_salvas"), set):
         result["faturas_salvas"] = list(result["faturas_salvas"])
