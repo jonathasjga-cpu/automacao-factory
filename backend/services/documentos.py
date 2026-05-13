@@ -434,6 +434,101 @@ async def _baixar_cte_de_meus_relatorios(
 # ─── S3 CAPTURE ──────────────────────────────────────────────────────────────
 
 
+# ─── SEPARACAO DE PDF AGRUPADO EM INDIVIDUAIS ────────────────────────────────
+
+def _separar_pdf_por_fatura(pdf_bytes: bytes, numeros: list[str], log) -> dict[str, bytes]:
+    """
+    Recebe o PDF agrupado (Modelo 10 do GW com todas as faturas) e retorna
+    um dict {numero_fatura: pdf_bytes_individual}.
+
+    Estratégia:
+    1. Lê todas as páginas do PDF
+    2. Para cada página, extrai texto e procura número de fatura (5-6 dígitos)
+    3. Agrupa páginas consecutivas que pertencem à mesma fatura
+    4. Salva cada grupo como PDF individual
+
+    Fallback: se não conseguir identificar fatura por página, divide
+    proporcionalmente (N páginas / N faturas).
+    """
+    try:
+        import io as _io
+        from pypdf import PdfReader, PdfWriter
+    except Exception as e:
+        log(f"  ⚠️ pypdf não disponível: {e} — pulando separação")
+        return {}
+
+    try:
+        reader = PdfReader(_io.BytesIO(pdf_bytes))
+    except Exception as e:
+        log(f"  ⚠️ Erro lendo PDF agrupado: {e}")
+        return {}
+
+    total_paginas = len(reader.pages)
+    if total_paginas == 0:
+        return {}
+
+    # Set normalizado dos números esperados (sem zeros à esquerda)
+    numeros_normalizados = {_normalizar(n): n for n in numeros}
+
+    # ── Estratégia 1: identifica fatura por página via texto ──
+    pagina_fatura: list[str | None] = []  # i-ésimo elemento = número da fatura naquela página
+    for i in range(total_paginas):
+        try:
+            texto = reader.pages[i].extract_text() or ""
+        except Exception:
+            texto = ""
+        # Procura padrões tipo "Número: 005028", "Fatura: 005028" ou só "005028/2026"
+        numero_pagina = None
+        # Procura todos os números 5-6 dígitos opcionalmente com /AAAA
+        candidatos = re.findall(r'(\d{5,6})(?:/\d{4})?', texto)
+        for c in candidatos:
+            norm_c = _normalizar(c)
+            if norm_c in numeros_normalizados:
+                numero_pagina = numeros_normalizados[norm_c]
+                break
+        pagina_fatura.append(numero_pagina)
+
+    # ── Estratégia 2 (fallback): se nenhuma página identificou fatura, divide proporcionalmente ──
+    if all(p is None for p in pagina_fatura):
+        log(f"  ⚠️ Não foi possível identificar fatura por página — dividindo proporcionalmente")
+        if total_paginas % len(numeros) != 0:
+            log(f"  ⚠️ {total_paginas} páginas / {len(numeros)} faturas — não divide exato. Pulando individuais.")
+            return {}
+        paginas_por_fatura = total_paginas // len(numeros)
+        for i in range(total_paginas):
+            idx_fatura = i // paginas_por_fatura
+            if idx_fatura < len(numeros):
+                pagina_fatura[i] = numeros[idx_fatura]
+
+    # ── Agrupa páginas consecutivas por fatura ──
+    grupos: dict[str, list[int]] = {}
+    fatura_atual = None
+    for i, num in enumerate(pagina_fatura):
+        if num is None:
+            # Página sem número identificado: assume que pertence à fatura anterior
+            if fatura_atual:
+                grupos.setdefault(fatura_atual, []).append(i)
+            continue
+        fatura_atual = num
+        grupos.setdefault(num, []).append(i)
+
+    # ── Gera PDF individual para cada grupo ──
+    resultado: dict[str, bytes] = {}
+    for num, paginas in grupos.items():
+        try:
+            writer = PdfWriter()
+            for p in paginas:
+                writer.add_page(reader.pages[p])
+            buf = _io.BytesIO()
+            writer.write(buf)
+            resultado[num] = buf.getvalue()
+        except Exception as e:
+            log(f"  ⚠️ Erro gerando PDF individual da fatura {num}: {e}")
+
+    log(f"  📄 Separação: {total_paginas} páginas → {len(resultado)} PDFs individuais")
+    return resultado
+
+
 # ─── FATURAS PDF ─────────────────────────────────────────────────────────────
 # Fluxo: /consultafatura?acao=iniciar
 #   → filtro Data de Emissão = hoje, filial
@@ -790,6 +885,7 @@ async def baixar_faturas_pdf(
                         }
                         continue
 
+                    # ── Salva o PDF AGRUPADO (todas as faturas em um arquivo) ──
                     nome_arquivo = f"Fatura - {nome_factory} - {_hoje_fmt()}.pdf"
                     status.setdefault("arquivos", {})[nome_arquivo] = pdf_bytes
                     pasta = status.get("pasta_destino", "")
@@ -799,12 +895,29 @@ async def baixar_faturas_pdf(
                         log(f"  ✅ Salvo em disco: {pasta}\\{nome_arquivo}")
                     else:
                         log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
+
+                    # ── Separa o PDF agrupado em PDFs INDIVIDUAIS por fatura ──
+                    pdfs_individuais = _separar_pdf_por_fatura(pdf_bytes, nums_marcados, log)
+                    individuais_salvos: list[str] = []
+                    for num, pdf_ind in pdfs_individuais.items():
+                        nome_ind = f"Fatura - {num}.pdf"
+                        status.setdefault("arquivos", {})[nome_ind] = pdf_ind
+                        if pasta:
+                            try:
+                                (Path(pasta) / nome_ind).write_bytes(pdf_ind)
+                            except Exception as e:
+                                log(f"  ⚠️ Erro salvando {nome_ind} em disco: {e}")
+                        individuais_salvos.append(nome_ind)
+                    if individuais_salvos:
+                        log(f"  ✅ {len(individuais_salvos)} PDF(s) individual(is) salvos: {individuais_salvos[:3]}{' ...' if len(individuais_salvos) > 3 else ''}")
+
                     rd["fatura_pdf"] = {
                         "ok": True,
                         "arquivo": nome_arquivo,
                         "qtd": marcadas,
                         "faturas_marcadas": sorted(nums_marcados),
                         "faturas_faltando": faltando,
+                        "individuais": individuais_salvos,
                     }
 
                 except Exception as e:

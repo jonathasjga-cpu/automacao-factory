@@ -2039,12 +2039,14 @@ function _renderResumoDocumentos(rd, opId) {
   const linhas = Object.entries(rd).map(([sistema, info]) => {
     const nome = info.nome || sistema;
 
-    // Fatura PDF
+    // Fatura PDF (agrupado + individuais)
     const b = info.fatura_pdf;
     let boletoCell = '—';
     if (b) {
       if (b.ok) {
-        boletoCell = `<span style="color:var(--green)">✅ ${b.qtd} fatura(s)</span>`;
+        const ind = (b.individuais || []).length;
+        const indTxt = ind > 0 ? ` + ${ind} individual(is)` : '';
+        boletoCell = `<span style="color:var(--green)">✅ ${b.qtd} fatura(s)${indTxt}</span>`;
       } else {
         boletoCell = `<span style="color:var(--red)">❌ ${b.motivo || 'falhou'}</span>`;
       }
