@@ -437,10 +437,15 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
 async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: dict, sistema: str, status: dict):
     """
     Verifica que a operação foi realmente criada na Firma.
-    - Procura linha 'Aguardando' na grid de operações
-    - Compara Vlr.Total com a soma dos títulos enviados
-    - Se a operação não existir → marca ERRO (não foi feita de fato)
-    - Se valor divergir → marca ERRO
+
+    Estratégia robusta:
+    1. Captura TODAS as linhas 'Aguardando' da grid (não só a primeira)
+    2. Pra cada linha, extrai TODOS os valores monetários (não só o primeiro)
+    3. Para cada linha, identifica o MAIOR valor (provavelmente Vlr.Total)
+       — pois Vlr.Total > Vlr.Liquido > taxa/juros
+    4. Procura linha cujo Vlr.Total bate com o esperado (tolerância 0,02)
+    5. Se encontrar: ✅ valida
+    6. Se não encontrar: ❌ erro com listagem detalhada pra diagnóstico
     """
     log = lambda msg: status["logs"].append(msg)
     try:
@@ -451,29 +456,32 @@ async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: di
         if not faturas_salvas or valor_esperado == 0:
             return
 
-        vlr_total_str = await page.evaluate("""
+        # Captura todas as linhas Aguardando com lista de valores monetários
+        linhas_info = await page.evaluate("""
             () => {
-                const rows = [...document.querySelectorAll('tr')];
-                for (const row of rows) {
+                const out = [];
+                for (const row of document.querySelectorAll('tr')) {
                     if (!row.offsetParent) continue;
                     if (!row.textContent.includes('Aguardando')) continue;
-                    const cells = [...row.querySelectorAll('td')];
-                    for (const cell of cells) {
-                        const t = cell.textContent.trim().replace(/\\s+/g, ' ');
-                        if (/\\d{1,3}(\\.\\d{3})*,\\d{2}/.test(t) && !t.includes('/') && t.length < 25) {
-                            return t;
-                        }
+                    const cells = [...row.querySelectorAll('td')].map(c => c.textContent.trim().replace(/\\s+/g, ' '));
+                    // Extrai TODOS os valores monetários brasileiros da linha
+                    const valores = [];
+                    for (const t of cells) {
+                        if (t.includes('/')) continue;        // data DD/MM/AAAA
+                        if (t.length > 25) continue;          // texto longo
+                        const m = t.match(/\\d{1,3}(?:\\.\\d{3})*,\\d{2}/);
+                        if (m) valores.push(m[0]);
                     }
-                    return null;
+                    out.push({
+                        cells: cells,
+                        valores: valores,
+                    });
                 }
-                return null;
+                return out;
             }
         """)
 
-        if vlr_total_str is None:
-            # NÃO ACHOU OPERAÇÃO 'Aguardando' — significa que NADA foi salvo
-            # de fato na Firma, mesmo que o código tenha contado "concluidas".
-            # Marca como erro pra não silenciar o problema.
+        if not linhas_info:
             log(f"  ❌ Operação 'Aguardando' NÃO encontrada na Firma — provável falha silenciosa de salvamento")
             status["erros"].append(
                 f"[{sistema}] Operação não foi criada na Firma. "
@@ -481,21 +489,54 @@ async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: di
                 f"mas nenhuma linha 'Aguardando' foi encontrada na grid. "
                 f"Verifique manualmente — os títulos podem não ter sido salvos."
             )
-            # Reseta concluidas pra refletir realidade
             status["concluidas"] = 0
             status.setdefault("faturas_salvas", set()).clear()
             return
 
-        vlr_total = float(
-            vlr_total_str.replace("R$", "").replace(".", "").replace(",", ".").strip()
-        )
-        diff = abs(vlr_total - valor_esperado)
-        if diff < 0.02:
-            log(f"  ✅ Valor validado: R$ {vlr_total:,.2f} == esperado R$ {valor_esperado:,.2f}")
-        else:
-            log(f"  ❌ Divergencia de valor: operacao R$ {vlr_total:,.2f} vs esperado R$ {valor_esperado:,.2f} (diff R$ {diff:,.2f})")
+        def _parse_brl(s: str) -> float:
+            try:
+                return float(s.replace("R$", "").replace(".", "").replace(",", ".").strip())
+            except Exception:
+                return 0.0
+
+        # Pra cada linha Aguardando, identifica o MAIOR valor (provavelmente Vlr.Total)
+        # e armazena junto com TODOS os valores pra debug
+        linhas_processadas = []
+        for li in linhas_info:
+            valores_num = [_parse_brl(v) for v in li.get("valores", [])]
+            maior = max(valores_num) if valores_num else 0.0
+            linhas_processadas.append({
+                "maior": maior,
+                "todos": valores_num,
+                "todos_str": li.get("valores", []),
+            })
+
+        # Loga TODAS as linhas Aguardando encontradas — pra usuário entender o que o sistema viu
+        log(f"  📊 {len(linhas_processadas)} linha(s) 'Aguardando' na grid (esperado: R$ {valor_esperado:,.2f}):")
+        for i, lp in enumerate(linhas_processadas):
+            log(f"     [{i+1}] maior valor: R$ {lp['maior']:,.2f} | todos: {lp['todos_str']}")
+
+        # Procura linha cujo MAIOR valor bate com o esperado
+        match = None
+        for lp in linhas_processadas:
+            if abs(lp["maior"] - valor_esperado) < 0.02:
+                match = lp
+                break
+
+        if match:
+            log(f"  ✅ Valor validado: R$ {match['maior']:,.2f} == esperado R$ {valor_esperado:,.2f}")
+            return
+
+        # Não bate com nenhuma — mostra a "mais provável" (única ou mais recente) pra diagnóstico
+        provavel = linhas_processadas[-1] if linhas_processadas else None
+        if provavel:
+            log(f"  ❌ Divergencia: nenhuma operação 'Aguardando' tem Vlr.Total = R$ {valor_esperado:,.2f}")
+            log(f"     Última linha mais provável: R$ {provavel['maior']:,.2f} | todos os valores: {provavel['todos_str']}")
+            diff = abs(provavel["maior"] - valor_esperado)
             status["erros"].append(
-                f"[{sistema}] Valor da operacao R$ {vlr_total:,.2f} difere do esperado R$ {valor_esperado:,.2f}"
+                f"[{sistema}] Valor da operacao R$ {provavel['maior']:,.2f} difere do esperado R$ {valor_esperado:,.2f} "
+                f"(diff R$ {diff:,.2f}). Verifique manualmente — pode ser: (a) coluna lida errada, "
+                f"(b) operação antiga 'Aguardando' interferindo, (c) título digitado com valor errado."
             )
     except Exception as e:
         log(f"  [WARN] Erro ao validar valor da operacao: {e}")

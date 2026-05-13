@@ -632,7 +632,11 @@ async def preencher_titulo_fluxasset(page: Page, fatura: dict, status: dict):
 
 
 async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: dict, sistema: str, status: dict):
-    """Compara o Vlr.Total da operação na FluxAsset com a soma dos títulos enviados."""
+    """
+    Verifica que a operação foi realmente criada na FluxAsset.
+    Mesma estratégia robusta do Firma: lê TODAS as linhas Aguardando,
+    pega o MAIOR valor monetário de cada, e procura a que bate com o esperado.
+    """
     log = lambda msg: status["logs"].append(msg)
     try:
         valor_esperado = sum(
@@ -642,49 +646,75 @@ async def _verificar_valor_operacao(page, faturas_salvas: set, faturas_dados: di
         if not faturas_salvas or valor_esperado == 0:
             return
 
-        vlr_total_str = await page.evaluate("""
+        linhas_info = await page.evaluate("""
             () => {
-                const rows = [...document.querySelectorAll('tr')];
-                for (const row of rows) {
+                const out = [];
+                for (const row of document.querySelectorAll('tr')) {
                     if (!row.offsetParent) continue;
                     if (!row.textContent.includes('Aguardando')) continue;
-                    const cells = [...row.querySelectorAll('td')];
-                    for (const cell of cells) {
-                        const t = cell.textContent.trim().replace(/\\s+/g, ' ');
-                        if (/\\d{1,3}(\\.\\d{3})*,\\d{2}/.test(t) && !t.includes('/') && t.length < 25) {
-                            return t;
-                        }
+                    const cells = [...row.querySelectorAll('td')].map(c => c.textContent.trim().replace(/\\s+/g, ' '));
+                    const valores = [];
+                    for (const t of cells) {
+                        if (t.includes('/')) continue;
+                        if (t.length > 25) continue;
+                        const m = t.match(/\\d{1,3}(?:\\.\\d{3})*,\\d{2}/);
+                        if (m) valores.push(m[0]);
                     }
-                    return null;
+                    out.push({ cells: cells, valores: valores });
                 }
-                return null;
+                return out;
             }
         """)
 
-        if vlr_total_str is None:
-            # NÃO ACHOU OPERAÇÃO 'Aguardando' — significa que NADA foi salvo
-            # de fato, mesmo que o código tenha contado "concluidas".
+        if not linhas_info:
             log(f"  ❌ Operação 'Aguardando' NÃO encontrada na FluxAsset — provável falha silenciosa de salvamento")
             status["erros"].append(
                 f"[{sistema}] Operação não foi criada na FluxAsset. "
                 f"Esperava {len(faturas_salvas)} título(s) totalizando R$ {valor_esperado:,.2f}, "
                 f"mas nenhuma linha 'Aguardando' foi encontrada na grid. "
-                f"Verifique manualmente — os títulos podem não ter sido salvos."
+                f"Verifique manualmente."
             )
             status["concluidas"] = 0
             status.setdefault("faturas_salvas", set()).clear()
             return
 
-        vlr_total = float(
-            vlr_total_str.replace("R$", "").replace(".", "").replace(",", ".").strip()
-        )
-        diff = abs(vlr_total - valor_esperado)
-        if diff < 0.02:
-            log(f"  ✅ Valor validado: R$ {vlr_total:,.2f} == esperado R$ {valor_esperado:,.2f}")
-        else:
-            log(f"  ❌ Divergencia de valor: operacao R$ {vlr_total:,.2f} vs esperado R$ {valor_esperado:,.2f} (diff R$ {diff:,.2f})")
+        def _parse_brl(s: str) -> float:
+            try:
+                return float(s.replace("R$", "").replace(".", "").replace(",", ".").strip())
+            except Exception:
+                return 0.0
+
+        linhas_processadas = []
+        for li in linhas_info:
+            valores_num = [_parse_brl(v) for v in li.get("valores", [])]
+            maior = max(valores_num) if valores_num else 0.0
+            linhas_processadas.append({
+                "maior": maior,
+                "todos_str": li.get("valores", []),
+            })
+
+        log(f"  📊 {len(linhas_processadas)} linha(s) 'Aguardando' (esperado: R$ {valor_esperado:,.2f}):")
+        for i, lp in enumerate(linhas_processadas):
+            log(f"     [{i+1}] maior valor: R$ {lp['maior']:,.2f} | todos: {lp['todos_str']}")
+
+        match = None
+        for lp in linhas_processadas:
+            if abs(lp["maior"] - valor_esperado) < 0.02:
+                match = lp
+                break
+
+        if match:
+            log(f"  ✅ Valor validado: R$ {match['maior']:,.2f} == esperado R$ {valor_esperado:,.2f}")
+            return
+
+        provavel = linhas_processadas[-1] if linhas_processadas else None
+        if provavel:
+            diff = abs(provavel["maior"] - valor_esperado)
+            log(f"  ❌ Divergencia: nenhuma 'Aguardando' tem Vlr.Total = R$ {valor_esperado:,.2f}")
+            log(f"     Última linha mais provável: R$ {provavel['maior']:,.2f} | todos: {provavel['todos_str']}")
             status["erros"].append(
-                f"[{sistema}] Valor da operacao R$ {vlr_total:,.2f} difere do esperado R$ {valor_esperado:,.2f}"
+                f"[{sistema}] Valor da operacao R$ {provavel['maior']:,.2f} difere do esperado R$ {valor_esperado:,.2f} "
+                f"(diff R$ {diff:,.2f}). Verifique manualmente."
             )
     except Exception as e:
         log(f"  [WARN] Erro ao validar valor da operacao: {e}")
