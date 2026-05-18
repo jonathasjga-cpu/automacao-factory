@@ -6,6 +6,10 @@
 <title>AutoFactory</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234F8EF7'%3E%3Cpolygon points='13 2 3 14 12 14 11 22 21 10 12 10 13 2'/%3E%3C/svg%3E">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/themes/dark.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/l10n/pt.js"></script>
 <style>
   :root {
     --bg:       #0B0F1A;
@@ -174,6 +178,99 @@
   }
 
   /* ─── TOOLBAR ────────────────────────────────────────── */
+  /* ── Modal de periodo ── */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(7, 12, 21, 0.7);
+    backdrop-filter: blur(3px);
+    z-index: 9000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    animation: modalFadeIn .15s ease both;
+  }
+  .modal-overlay.is-open { display: flex; }
+  @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes modalSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+    width: 100%;
+    max-width: 380px;
+    overflow: hidden;
+    animation: modalSlideIn .2s ease both;
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .modal-close {
+    background: transparent;
+    border: 0;
+    color: var(--text2);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 4px;
+    transition: color .15s, background .15s;
+  }
+  .modal-close:hover { color: var(--text); background: var(--surface2); }
+  .modal-body {
+    padding: 14px 18px 8px;
+  }
+  .modal-hint {
+    margin: 0 0 12px;
+    color: var(--text2);
+    font-size: 12.5px;
+    line-height: 1.45;
+  }
+  .modal-range-display {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text);
+    text-align: center;
+  }
+  .modal-range-display strong { color: var(--accent); }
+  .modal-flatpickr-host {
+    display: flex;
+    justify-content: center;
+  }
+  .modal-flatpickr-host .flatpickr-calendar {
+    box-shadow: none;
+    background: transparent;
+    border: 0;
+  }
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--border);
+  }
+  /* Flatpickr dark theme tweaks (combina com vars do app) */
+  .flatpickr-calendar { background: var(--surface); border: 1px solid var(--border2); }
+  .flatpickr-day.selected,
+  .flatpickr-day.startRange,
+  .flatpickr-day.endRange { background: var(--accent); border-color: var(--accent); }
+  .flatpickr-day.inRange { background: var(--accent-s); border-color: transparent; }
+
   .toolbar {
     display: flex;
     align-items: center;
@@ -744,7 +841,7 @@
   <!-- ── FATURAS ──────────────────────────────────────── -->
   <div class="page active" id="page-faturas">
     <div class="toolbar">
-      <button class="btn btn-primary" id="btn-carregar" onclick="carregarFaturas()">
+      <button class="btn btn-primary" id="btn-carregar" onclick="abrirPeriodoModal()">
         <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
         Carregar do GW
       </button>
@@ -1405,9 +1502,18 @@ async function _tentarRecuperarViaCache() {
   return null;
 }
 
-async function carregarFaturas() {
+async function carregarFaturas(dataInicial, dataFinal) {
+  // Defaults pra chamadas externas (ex: console) sem datas: hoje-hoje
+  if (!dataInicial || !dataFinal) {
+    const d = new Date();
+    const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    dataInicial = dataInicial || iso;
+    dataFinal = dataFinal || dataInicial;
+  }
   operacaoStartTime = Date.now();
   const btn = document.getElementById('btn-carregar');
+  const labelOriginal = btn.innerHTML;
+
   btn.disabled = true;
   btn.innerHTML = '<span class="btn-spinner"></span> Baixando...';
 
@@ -1418,11 +1524,14 @@ async function carregarFaturas() {
   try {
     let data = null;
     try {
-      const resp = await fetch(`${API}/faturas`);
+      const qs = new URLSearchParams({ data_inicial: dataInicial, data_final: dataFinal }).toString();
+      const resp = await fetch(`${API}/faturas?${qs}`);
       if (resp.ok) {
         data = await resp.json();
       } else {
-        throw new Error(`HTTP ${resp.status}`);
+        let detail = `HTTP ${resp.status}`;
+        try { const j = await resp.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
+        throw new Error(detail);
       }
     } catch (netErr) {
       // Timeout do proxy ou erro de rede. Tenta recuperar via cache.
@@ -1443,7 +1552,7 @@ async function carregarFaturas() {
   } finally {
     _pararPollingCarregar();
     btn.disabled = false;
-    btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg> Carregar do GW';
+    btn.innerHTML = labelOriginal;
   }
 }
 
@@ -2733,6 +2842,122 @@ window.addEventListener('DOMContentLoaded', () => {
   const hash = location.hash.replace('#', '');
   if (['faturas','status','config','relatorios'].includes(hash)) showPage(hash, true);
 });
+
+// ── MODAL DE PERIODO (Flatpickr inline em modo range) ────
+let _periodoPicker = null;
+let _periodoUltimaSelecao = null;          // [Date, Date] preservada entre aberturas
+
+function _fmtBR(d) {
+  return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+}
+function _toISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function _atualizarDisplayPeriodo(dates) {
+  const el = document.getElementById('periodo-range-display');
+  if (!el) return;
+  if (!dates || dates.length === 0) {
+    el.innerHTML = '<strong>—</strong>';
+    return;
+  }
+  const ini = dates[0];
+  const fim = dates[dates.length - 1] || ini;
+  if (+ini === +fim) {
+    el.innerHTML = `<strong>${_fmtBR(ini)}</strong>`;
+  } else {
+    el.innerHTML = `<strong>${_fmtBR(ini)}</strong> &nbsp;→&nbsp; <strong>${_fmtBR(fim)}</strong>`;
+  }
+}
+
+function _initPeriodoPicker() {
+  const host = document.getElementById('periodo-flatpickr-host');
+  if (!host || typeof flatpickr === 'undefined') return;
+  const hoje = new Date();
+  const defaultDates = _periodoUltimaSelecao || [hoje, hoje];
+  // Cria input escondido pra Flatpickr controlar; mostra o calendario inline dentro do host
+  const hidden = document.createElement('input');
+  hidden.type = 'text';
+  hidden.style.display = 'none';
+  host.appendChild(hidden);
+  _periodoPicker = flatpickr(hidden, {
+    mode: 'range',
+    inline: true,
+    dateFormat: 'Y-m-d',
+    locale: (flatpickr.l10ns && flatpickr.l10ns.pt) || 'default',
+    defaultDate: defaultDates,
+    maxDate: 'today',
+    onReady: function(selDates) {
+      _atualizarDisplayPeriodo(selDates && selDates.length ? selDates : defaultDates);
+    },
+    onChange: function(selDates) {
+      _atualizarDisplayPeriodo(selDates);
+    },
+  });
+}
+
+function abrirPeriodoModal() {
+  const modal = document.getElementById('periodo-modal');
+  if (!modal) return;
+  // Lazy init na primeira abertura
+  if (!_periodoPicker) _initPeriodoPicker();
+  modal.classList.add('is-open');
+  // Permite fechar com ESC
+  document.addEventListener('keydown', _onPeriodoEsc);
+  // Clique no overlay (fora do card) fecha
+  modal.addEventListener('click', _onPeriodoOverlayClick);
+}
+
+function _fecharPeriodoModal() {
+  const modal = document.getElementById('periodo-modal');
+  if (!modal) return;
+  modal.classList.remove('is-open');
+  document.removeEventListener('keydown', _onPeriodoEsc);
+  modal.removeEventListener('click', _onPeriodoOverlayClick);
+}
+
+function _onPeriodoEsc(e) {
+  if (e.key === 'Escape') _fecharPeriodoModal();
+}
+function _onPeriodoOverlayClick(e) {
+  // Fecha so se o clique foi diretamente no overlay (nao no card)
+  if (e.target.id === 'periodo-modal') _fecharPeriodoModal();
+}
+
+function _confirmarPeriodoModal() {
+  if (!_periodoPicker) { _fecharPeriodoModal(); return; }
+  const sel = _periodoPicker.selectedDates || [];
+  if (sel.length === 0) {
+    alert('Selecione pelo menos uma data.');
+    return;
+  }
+  const ini = sel[0];
+  const fim = sel[sel.length - 1] || ini;
+  _periodoUltimaSelecao = [ini, fim];   // preserva pra proxima abertura
+  const data_inicial = _toISO(ini);
+  const data_final = _toISO(fim);
+  _fecharPeriodoModal();
+  carregarFaturas(data_inicial, data_final);
+}
 </script>
+
+<!-- ── MODAL DE PERIODO ────────────────────────────────────── -->
+<div id="periodo-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="periodo-modal-title">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="periodo-modal-title">Periodo de emissao das faturas</h3>
+      <button class="modal-close" type="button" aria-label="Fechar" onclick="_fecharPeriodoModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-hint">Selecione o intervalo de emissao das faturas que voce quer carregar. Clique na data inicial e depois na final (ou na mesma data duas vezes pra um unico dia).</p>
+      <div class="modal-range-display" id="periodo-range-display"><strong>—</strong></div>
+      <div class="modal-flatpickr-host" id="periodo-flatpickr-host"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" type="button" onclick="_fecharPeriodoModal()">Cancelar</button>
+      <button class="btn btn-primary" id="periodo-modal-confirm" type="button" onclick="_confirmarPeriodoModal()">Carregar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
