@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import json
 import pandas as pd
 from datetime import datetime, timedelta
@@ -113,10 +113,13 @@ async def _aguardar_e_baixar(page, context, nome: str, meus_rel_url: str, tentat
     )
 
 
-async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: str, base: str, preencher_data: bool = True, context=None, navegar: bool = True):
+async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: str, base: str, preencher_data: bool = True, context=None, navegar: bool = True, data_final: str | None = None):
     """
     Seleciona o relatório personalizado pelo nome, preenche data de emissão e clica em Gerar.
 
+    data_hoje    → data inicial (DD/MM/AAAA) preenchida no primeiro input do filtro Emissão.
+    data_final   → data final (DD/MM/AAAA). Se None, usa o mesmo valor de data_hoje
+                   (mantém compatibilidade com chamadas antigas).
     navegar=True  → primeira chamada: navega até a URL e clica na aba Relatórios Personalizados
     navegar=False → segunda chamada: página já está aberta na aba certa, só clica no radio
     """
@@ -201,33 +204,97 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     await page.wait_for_timeout(1000)  # aguarda filtros do relatório selecionado atualizarem
 
     if preencher_data:
-        # Preenche os dois campos de data do filtro de EmissÃ£o (inÃ­cio e fim = hoje)
-        # A linha do filtro contÃ©m "EmissÃ£o" no label e dois inputs de texto para as datas
-        await page.evaluate(f"""
+        # Preenche os dois campos de data do filtro de Emissão (inicio e fim).
+        # Aceita range (data_final diferente de data_hoje) ou mesmo dia (compatibilidade).
+        data_ini_js = data_hoje
+        data_fim_js = data_final or data_hoje
+        diag = await page.evaluate(f"""
             () => {{
-                const hoje = {repr(data_hoje)};
-                // Encontra a linha da tabela que tem "emiss" no texto (label do filtro)
-                const trs = [...document.querySelectorAll('tr')];
-                for (const tr of trs) {{
-                    const textoLinha = tr.textContent.toLowerCase();
-                    if (textoLinha.includes('emiss')) {{
-                        const inputs = [...tr.querySelectorAll('input[type="text"]')];
-                        let preencheu = 0;
-                        for (const inp of inputs) {{
-                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                                window.HTMLInputElement.prototype, 'value').set;
-                            nativeInputValueSetter.call(inp, hoje);
-                            inp.dispatchEvent(new Event('input', {{bubbles: true}}));
-                            inp.dispatchEvent(new Event('change', {{bubbles: true}}));
-                            preencheu++;
-                            if (preencheu >= 2) break;
-                        }}
-                        if (preencheu > 0) return preencheu;
+                const dataIni = {repr(data_ini_js)};
+                const dataFim = {repr(data_fim_js)};
+                const setter = Object.getOwnPropertyDescriptor(
+                    window.HTMLInputElement.prototype, 'value').set;
+
+                // Estrategia 1: ids/names conhecidos do GW (dtemissao1/dtemissao2, dataEmissao1/2)
+                const candidatos = ['dtemissao1','dtemissao2','dataEmissao1','dataEmissao2','dataEmissaoInicial','dataEmissaoFinal'];
+                let usados = [];
+                const inputsPorId = {{}};
+                for (const id of candidatos) {{
+                    const byId = document.getElementById(id);
+                    const byName = document.querySelector(`input[name="${{id}}"]`);
+                    if (byId) inputsPorId[id] = byId;
+                    else if (byName) inputsPorId[id] = byName;
+                }}
+                function fill(el, val) {{
+                    setter.call(el, val);
+                    el.dispatchEvent(new Event('input', {{bubbles:true}}));
+                    el.dispatchEvent(new Event('change', {{bubbles:true}}));
+                    el.dispatchEvent(new Event('blur', {{bubbles:true}}));
+                }}
+                // Procura par (inicial, final) por matching de nome
+                const pares = [
+                    ['dtemissao1','dtemissao2'],
+                    ['dataEmissao1','dataEmissao2'],
+                    ['dataEmissaoInicial','dataEmissaoFinal'],
+                ];
+                for (const [a,b] of pares) {{
+                    if (inputsPorId[a] && inputsPorId[b]) {{
+                        fill(inputsPorId[a], dataIni);
+                        fill(inputsPorId[b], dataFim);
+                        usados.push(a, b);
+                        break;
                     }}
                 }}
-                return 0;
+
+                // Estrategia 2 (fallback): tr/td que contenha "emiss" + 2 inputs text
+                let trsCom = 0, trsEscolhido = null, valoresFinal = [];
+                if (usados.length === 0) {{
+                    const trs = [...document.querySelectorAll('tr')];
+                    for (const tr of trs) {{
+                        const txt = tr.textContent.toLowerCase();
+                        if (!txt.includes('emiss')) continue;
+                        trsCom++;
+                        const inputs = [...tr.querySelectorAll('input[type="text"], input:not([type])')]
+                            .filter(i => !i.disabled && i.offsetParent !== null);
+                        if (inputs.length >= 2) {{
+                            trsEscolhido = tr.textContent.trim().substring(0, 80);
+                            fill(inputs[0], dataIni);
+                            fill(inputs[1], dataFim);
+                            usados.push('tr-input-0', 'tr-input-1');
+                            break;
+                        }}
+                    }}
+                }}
+
+                // RE-LER os valores depois de preencher (verifica se persistiu)
+                const verificacao = {{}};
+                if (inputsPorId.dtemissao1) verificacao.dtemissao1 = inputsPorId.dtemissao1.value;
+                if (inputsPorId.dtemissao2) verificacao.dtemissao2 = inputsPorId.dtemissao2.value;
+                if (inputsPorId.dataEmissao1) verificacao.dataEmissao1 = inputsPorId.dataEmissao1.value;
+                if (inputsPorId.dataEmissao2) verificacao.dataEmissao2 = inputsPorId.dataEmissao2.value;
+
+                return {{
+                    dataIni, dataFim,
+                    usados,
+                    inputsEncontradosPorId: Object.keys(inputsPorId),
+                    trsComEmiss: trsCom,
+                    trsEscolhido,
+                    verificacao,
+                }};
             }}
         """)
+        # Loga diagnostico no progresso (visivel pro usuario)
+        try:
+            _prog_log(f"📅 Fill range: {data_ini_js} → {data_fim_js}")
+            _prog_log(f"   estrategia: {diag.get('usados') or 'nenhuma'}")
+            if diag.get('inputsEncontradosPorId'):
+                _prog_log(f"   ids encontrados: {diag.get('inputsEncontradosPorId')}")
+            if diag.get('trsEscolhido'):
+                _prog_log(f"   tr escolhido: {diag.get('trsEscolhido')}")
+            if diag.get('verificacao'):
+                _prog_log(f"   verificacao pos-fill: {diag.get('verificacao')}")
+        except Exception:
+            pass
 
     # Garante formato Excel selecionado (primeiro radio antes do botão Gerar = XLS)
     await page.evaluate("""
@@ -295,16 +362,22 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     await page.wait_for_timeout(3000)
 
 
-async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path | None]:
+async def baixar_relatorios_gw(
+    user_id: int | None = None,
+    data_inicial_br: str | None = None,
+    data_final_br: str | None = None,
+) -> tuple[Path, Path | None]:
     """
     Gera os relatórios personalizados no GW e baixa via popup.
-    - Automação: filtra por emissão = hoje (ou ontem se hoje estiver vazio)
-    - Complemento: sem filtro de data (retorna todo o histórico, ~2.6 MB)
+
+    data_inicial_br / data_final_br no formato DD/MM/AAAA. Se omitidos, usa hoje (BR).
     """
     from _tz import now_br
     creds = get_credencial("gw", user_id=user_id)
     base = "https://webtrans.saas.gwsistemas.com.br"
     hoje = now_br().strftime("%d/%m/%Y")
+    data_ini = data_inicial_br or hoje
+    data_fim = data_final_br or data_ini
     ontem = (now_br() - timedelta(days=1)).strftime("%d/%m/%Y")
     meus_rel_url = f"{base}/RelatorioControlador?acao=abrirTelaMeusRelatorios"
 
@@ -337,10 +410,11 @@ async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path |
         if "login" in current_url.lower() or "403" in current_url.lower():
             raise Exception("Sessão GW inválida após login. Tente novamente.")
 
-        # Gera Automação com data de hoje
-        _prog_log("📄 Gerando relatório 'Automação Operações'...")
+        # Gera Automação com o range escolhido
+        _prog_log(f"📄 Gerando 'Automação Operações' ({data_ini} → {data_fim})...")
         await _gerar_relatorio_personalizado(
-            page, "Automação Operações - Jonathas", hoje, base, context=context
+            page, "Automação Operações - Jonathas", data_ini, base,
+            context=context, data_final=data_fim
         )
         _prog_log("⬇️ Baixando 'Automação Operações'...")
         arquivo1 = await _aguardar_e_baixar(
@@ -352,10 +426,11 @@ async def baixar_relatorios_gw(user_id: int | None = None) -> tuple[Path, Path |
         # Usa navegar=False para não recarregar — só clica no radio e preenche a data
         arquivo2 = None
         try:
-            _prog_log("📄 Gerando relatório 'Complemento Operações'...")
+            _prog_log(f"📄 Gerando 'Complemento Operações' ({data_ini} → {data_fim})...")
             await _gerar_relatorio_personalizado(
-                page, "Complemento Operações - Jonathas", hoje, base,
-                preencher_data=True, context=context, navegar=False
+                page, "Complemento Operações - Jonathas", data_ini, base,
+                preencher_data=True, context=context, navegar=False,
+                data_final=data_fim,
             )
             _prog_log("⬇️ Baixando 'Complemento Operações'...")
             arquivo2 = await _aguardar_e_baixar(
@@ -621,13 +696,37 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
 
     return faturas
 
-async def processar_excels(user_id: int | None = None) -> list[dict]:
-    """Entry point: baixa relatÃ³rios do GW e processa"""
+def _iso_para_br(iso: str | None) -> str | None:
+    """'2026-05-18' → '18/05/2026'. None se vazio."""
+    if not iso:
+        return None
+    s = str(iso)[:10]
+    parts = s.split("-")
+    if len(parts) == 3 and all(p.isdigit() for p in parts):
+        return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    return None
+
+
+async def processar_excels(
+    user_id: int | None = None,
+    data_inicial_iso: str | None = None,
+    data_final_iso: str | None = None,
+) -> list[dict]:
+    """Entry point: baixa relatorios do GW e processa.
+
+    data_inicial_iso / data_final_iso em 'YYYY-MM-DD'. Se omitidos, usa hoje (BR).
+    """
     global _cache_faturas
     _prog_reset()
     try:
+        data_ini_br = _iso_para_br(data_inicial_iso)
+        data_fim_br = _iso_para_br(data_final_iso)
         _prog_log("🚀 Iniciando download dos relatórios do GW...")
-        path1, path2 = await baixar_relatorios_gw(user_id=user_id)
+        path1, path2 = await baixar_relatorios_gw(
+            user_id=user_id,
+            data_inicial_br=data_ini_br,
+            data_final_br=data_fim_br,
+        )
         _prog_log("📊 Processando planilhas...")
         _cache_faturas = processar_dataframes(path1, path2)
         _salvar_cache(_cache_faturas)   # persiste em disco

@@ -151,12 +151,28 @@ def delete_factory_extra(factory_id: str):
     return {"ok": True}
 
 @app.get("/api/faturas")
-async def get_faturas(current_user = Depends(get_current_user)):
+async def get_faturas(
+    data_inicial: Optional[str] = None,
+    data_final: Optional[str] = None,
+    current_user = Depends(get_current_user),
+):
+    """Carrega faturas via GW (Playwright + Excel), filtrando por emissao da fatura no periodo.
+    data_inicial / data_final em 'YYYY-MM-DD'. Se omitidos, usa hoje (BR).
+    """
     try:
         from services.excel_processor import processar_dataframes
-        faturas = await processar_excels(user_id=current_user.id)
+        faturas = await processar_excels(
+            user_id=current_user.id,
+            data_inicial_iso=data_inicial,
+            data_final_iso=data_final,
+        )
         debug = getattr(processar_dataframes, "_last_debug", [])
-        return {"faturas": faturas, "debug_complemento": debug}
+        return {
+            "faturas": faturas,
+            "debug_complemento": debug,
+            "data_inicial": data_inicial,
+            "data_final": data_final,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
