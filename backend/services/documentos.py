@@ -12,6 +12,39 @@ from config_manager import get_credencial
 
 BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
 
+
+async def _safe_query_all(page: Page, selector: str, attempts: int = 4, espera_ms: int = 500):
+    """Resiliente a 'Execution context was destroyed'.
+
+    O GW as vezes renavega/re-renderiza no meio da query (form submit, redirect
+    interno). Quando isso acontece, o handle da execucao morre e Playwright lanca:
+        Page.query_selector_all: Execution context was destroyed, most likely because of a navigation
+
+    Esse wrapper:
+    - Tenta `query_selector_all` (ate `attempts` vezes)
+    - Em erro com a string 'execution context' / 'destroyed' / 'navigation': aguarda
+      DOM estabilizar (`domcontentloaded` + sleep crescente) e tenta de novo.
+    - Em outros erros: relanca imediatamente.
+    """
+    last_err = None
+    for i in range(attempts):
+        try:
+            return await page.query_selector_all(selector)
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            if any(t in msg for t in ("execution context", "destroyed", "navigation")):
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                except Exception:
+                    pass
+                await page.wait_for_timeout(espera_ms * (i + 1))
+                continue
+            raise
+    # Se chegou aqui, falhou todas as tentativas — propaga o ultimo erro
+    raise last_err  # type: ignore[misc]
+
+
 # ─── UTILS ───────────────────────────────────────────────────────────────────
 
 def _hoje_fmt() -> str:
@@ -613,9 +646,9 @@ async def baixar_faturas_pdf(
 
                     await page.wait_for_timeout(300)
 
-                    # Faturas retornadas pelo GW
+                    # Faturas retornadas pelo GW (com retry em caso de navegacao do GW)
                     na_pagina = []
-                    for tr in await page.query_selector_all("tr"):
+                    for tr in await _safe_query_all(page, "tr"):
                         try:
                             texto = await tr.inner_text()
                             m = re.search(r"(\d{5,6})/\d{4}", texto)
@@ -630,7 +663,7 @@ async def baixar_faturas_pdf(
                     # PASSO 2: ação   — usa page.locator() p/ referência fresca
                     # (ElementHandle fica stale se o GW atualiza o DOM no check)
 
-                    all_cbs = await page.query_selector_all('input[id^="ck"]')
+                    all_cbs = await _safe_query_all(page, 'input[id^="ck"]')
                     log(f"  Checkboxes encontrados: {len(all_cbs)}")
                     log(f"  Buscando: {sorted(numeros_norm)}")
 
