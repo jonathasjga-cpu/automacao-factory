@@ -23,6 +23,29 @@ def _hoje_gw() -> str:
     from _tz import now_br
     return now_br().strftime("%d/%m/%Y")
 
+
+def _range_emissao_das_faturas(faturas: list[dict]) -> tuple[str, str]:
+    """Extrai (data_inicial, data_final) em DD/MM/AAAA a partir do campo `emissao`
+    das faturas. Se nenhuma emissao for valida, retorna hoje-hoje como fallback.
+
+    Usado para evitar que `baixar_faturas_pdf` filtre por hoje e ignore as faturas
+    quando o usuario escolheu um range diferente no popup de periodo.
+    """
+    datas = []
+    for f in faturas:
+        e = str(f.get("emissao") or "").strip()
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", e):
+            datas.append(e)
+    if not datas:
+        h = _hoje_gw()
+        return h, h
+    # Ordena por chave AAAAMMDD pra comparar corretamente
+    def _key(d: str) -> str:
+        dd, mm, yy = d.split("/")
+        return f"{yy}{mm}{dd}"
+    datas.sort(key=_key)
+    return datas[0], datas[-1]
+
 def _ano_atual() -> str:
     from _tz import now_br
     return str(now_br().year)
@@ -568,7 +591,7 @@ async def baixar_faturas_pdf(
                 try:
                     # Submete o formulário para garantir que o GW atualize a sessão corretamente.
                     # Navegação direta para acao=consultar é ignorada — GW usa estado da sessão.
-                    hoje = _hoje_gw()
+                    data_ini_busca, data_fim_busca = _range_emissao_das_faturas(faturas)
                     filial_id = _FILIAL_ID.get(sistema, "1")
 
                     await page.goto(
@@ -578,13 +601,13 @@ async def baixar_faturas_pdf(
                     await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
 
                     titulo = await page.title()
-                    log(f"  Pagina: {titulo} | filialId={filial_id}")
+                    log(f"  Pagina: {titulo} | filialId={filial_id} | range={data_ini_busca} → {data_fim_busca}")
                     if "500" in titulo or "status 500" in titulo.lower():
                         raise Exception("GW retornou 500 na tela de faturas.")
 
                     await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
-                    await page.fill('input[name="dtemissao1"]', hoje)
-                    await page.fill('input[name="dtemissao2"]', hoje)
+                    await page.fill('input[name="dtemissao1"]', data_ini_busca)
+                    await page.fill('input[name="dtemissao2"]', data_fim_busca)
                     # Usa value numérico (não label) para evitar erro de texto exato
                     await page.select_option('select[name="filialId"]', value=filial_id)
                     await page.select_option('select[name="finalizada"]', label="Todas")
@@ -686,7 +709,7 @@ async def baixar_faturas_pdf(
                         except Exception as e_cb:
                             log(f"  ⚠️ Erro ao marcar {num}: {e_cb}")
 
-                    # Faturas que o usuário pediu mas o GW não retornou na busca de hoje
+                    # Faturas que o usuário pediu mas o GW não retornou na busca do range
                     nums_marcados_norm = {_normalizar(n) for n in nums_marcados}
                     faltando = sorted([
                         n for n in numeros_raw
@@ -695,9 +718,14 @@ async def baixar_faturas_pdf(
 
                     if marcadas == 0:
                         log(f"  ⚠️ Nenhuma fatura marcada. Esperado: {sorted(numeros_norm)} | Página: {na_pagina}")
+                        motivo_range = (
+                            f"data de hoje ({data_ini_busca})"
+                            if data_ini_busca == data_fim_busca
+                            else f"periodo {data_ini_busca} a {data_fim_busca}"
+                        )
                         rd["fatura_pdf"] = {
                             "ok": False,
-                            "motivo": "fatura não encontrada no GW (data de hoje)",
+                            "motivo": f"fatura não encontrada no GW ({motivo_range})",
                             "faturas_faltando": sorted(numeros_raw),
                         }
                         continue
