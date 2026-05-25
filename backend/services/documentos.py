@@ -13,6 +13,33 @@ from config_manager import get_credencial
 BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
 
 
+async def _safe_goto(page: Page, url: str, attempts: int = 3, timeout: int = 60000, **kwargs):
+    """Resiliente a timeouts e blips de rede em `page.goto`.
+
+    O GW as vezes demora alguns segundos a mais do que o normal pra responder
+    (especialmente apos um download pesado). Em vez de morrer no primeiro
+    timeout, tenta novamente com backoff.
+
+    - timeout default elevado pra 60s (era 30s no codigo antigo)
+    - Em erros com 'timeout' / 'navigation' / 'net::': aguarda 2s × tentativa
+      e tenta de novo, ate `attempts` vezes
+    - Outros erros propagam imediatamente
+    """
+    last_err = None
+    for i in range(attempts):
+        try:
+            return await page.goto(url, timeout=timeout, **kwargs)
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            transient = any(t in msg for t in ("timeout", "navigation", "net::", "err_"))
+            if transient and i < attempts - 1:
+                await page.wait_for_timeout(2000 * (i + 1))
+                continue
+            raise
+    raise last_err  # type: ignore[misc]
+
+
 async def _safe_query_all(page: Page, selector: str, attempts: int = 4, espera_ms: int = 500):
     """Resiliente a 'Execution context was destroyed'.
 
@@ -161,7 +188,7 @@ async def _diagnosticar_pos_login(page: Page) -> None:
 
 async def _login_gw(page: Page, user_id: int | None = None):
     creds = get_credencial("gw", user_id=user_id)
-    await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
+    await _safe_goto(page, f"{BASE_GW}/login", wait_until="domcontentloaded")
     # Aguarda campos de login renderizarem (mais confiável que timeout fixo)
     await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
     await page.locator('input[name="login"]').fill(creds["usuario"])
@@ -179,7 +206,7 @@ async def _login_gw(page: Page, user_id: int | None = None):
 
     # Garante que chegamos na home (o GW pode redirecionar por etapas)
     if "/home" not in page.url:
-        await page.goto(f"{BASE_GW}/home", wait_until="load", timeout=30000)
+        await _safe_goto(page, f"{BASE_GW}/home", wait_until="load")
     # Aguarda a home inicializar a sessão Java no servidor (networkidle com fallback)
     try:
         await page.wait_for_load_state("networkidle", timeout=15000)
@@ -627,9 +654,10 @@ async def baixar_faturas_pdf(
                     data_ini_busca, data_fim_busca = _range_emissao_das_faturas(faturas)
                     filial_id = _FILIAL_ID.get(sistema, "1")
 
-                    await page.goto(
+                    await _safe_goto(
+                        page,
                         f"{BASE_GW}/consultafatura?acao=iniciar",
-                        wait_until="domcontentloaded", timeout=30000
+                        wait_until="domcontentloaded",
                     )
                     await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
 
@@ -1042,10 +1070,10 @@ async def baixar_ctes_pdf(
 
                     try:
                         # 1. Navega para CT-e — load é mais estável que networkidle no GW
-                        await page.goto(
+                        await _safe_goto(
+                            page,
                             f"{BASE_GW}/CTeControlador?acao=listar&&tipoTransporte=false",
                             wait_until="load",
-                            timeout=60000,
                         )
                         try:
                             await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
