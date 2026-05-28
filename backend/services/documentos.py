@@ -666,48 +666,76 @@ async def baixar_faturas_pdf(
                     if "500" in titulo or "status 500" in titulo.lower():
                         raise Exception("GW retornou 500 na tela de faturas.")
 
-                    await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
-                    await page.fill('input[name="dtemissao1"]', data_ini_busca)
-                    await page.fill('input[name="dtemissao2"]', data_fim_busca)
-                    # Usa value numérico (não label) para evitar erro de texto exato
-                    await page.select_option('select[name="filialId"]', value=filial_id)
-                    await page.select_option('select[name="finalizada"]', label="Todas")
-                    await page.select_option('select[name="limiteResultados"]', value="200")
+                    # ── Helper interno: aplica filtros + Pesquisar + le numeros ──
+                    async def _aplicar_filtros_e_pesquisar(tentativa: int = 1) -> list[str]:
+                        await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
+                        await page.fill('input[name="dtemissao1"]', data_ini_busca)
+                        await page.fill('input[name="dtemissao2"]', data_fim_busca)
+                        await page.select_option('select[name="filialId"]', value=filial_id)
+                        await page.select_option('select[name="finalizada"]', label="Todas")
+                        await page.select_option('select[name="limiteResultados"]', value="200")
 
-                    # Espera explicitamente a RESPOSTA HTTP do Pesquisar.
-                    # Bug antigo: `wait_for_url(acao=consultar)` retornava
-                    # imediatamente em iterações subsequentes, porque a URL
-                    # já continha `acao=consultar` da busca anterior — o código
-                    # então lia a página velha (da filial errada).
-                    try:
-                        async with page.expect_response(
-                            lambda r: "consultafatura" in r.url and "acao=consultar" in r.url,
-                            timeout=30000
-                        ):
-                            await page.click('input[value="Pesquisar"]')
-                        log(f"  URL ok: {page.url[page.url.find('acao='):][:150]}")
-                    except Exception as e_url:
-                        log(f"  AVISO expect_response timeout: {e_url}")
-                        log(f"  URL atual: {page.url}")
-                    # Aguarda os checkboxes ck* aparecerem = resultados renderizados
-                    try:
-                        await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
-                    except Exception:
-                        pass
+                        # Verifica valores aplicados (defesa contra select silenciosamente nao aplicando)
+                        valores = await page.evaluate("""() => {
+                            const g = (n) => (document.querySelector(`[name="${n}"]`) || {}).value || '';
+                            return {
+                                campoDeConsulta: g('campoDeConsulta'),
+                                dtemissao1: g('dtemissao1'),
+                                dtemissao2: g('dtemissao2'),
+                                filialId: g('filialId'),
+                                finalizada: g('finalizada'),
+                                limite: g('limiteResultados'),
+                            };
+                        }""")
+                        log(f"  Filtros aplicados (T{tentativa}): {valores}")
 
-                    await page.wait_for_timeout(300)
-
-                    # Faturas retornadas pelo GW (com retry em caso de navegacao do GW)
-                    na_pagina = []
-                    for tr in await _safe_query_all(page, "tr"):
+                        # Pesquisar (com expect_response da nova busca)
                         try:
-                            texto = await tr.inner_text()
-                            m = re.search(r"(\d{5,6})/\d{4}", texto)
-                            if m:
-                                na_pagina.append(m.group(1))
+                            async with page.expect_response(
+                                lambda r: "consultafatura" in r.url and "acao=consultar" in r.url,
+                                timeout=30000
+                            ):
+                                await page.click('input[value="Pesquisar"]')
+                            log(f"  URL ok (T{tentativa}): {page.url[page.url.find('acao='):][:150]}")
+                        except Exception as e_url:
+                            log(f"  AVISO expect_response timeout (T{tentativa}): {e_url}")
+                        # Aguarda checkboxes (ou aviso "Nenhum registro")
+                        try:
+                            await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
                         except Exception:
                             pass
+                        await page.wait_for_timeout(500)
+
+                        out: list[str] = []
+                        for tr in await _safe_query_all(page, "tr"):
+                            try:
+                                texto = await tr.inner_text()
+                                m = re.search(r"(\d{5,6})/\d{4}", texto)
+                                if m:
+                                    out.append(m.group(1))
+                            except Exception:
+                                pass
+                        return out
+
+                    na_pagina = await _aplicar_filtros_e_pesquisar(tentativa=1)
                     log(f"  📋 GW retornou {len(na_pagina)} fatura(s): {na_pagina[:8]}")
+
+                    # Defesa contra estado sticky do GW: se nenhuma das esperadas aparecer
+                    # (ou menos de 30%), refaz a busca apos navegacao fresh.
+                    esperadas_set = {_normalizar(n) for n in numeros_raw}
+                    achadas = sum(1 for n in na_pagina if _normalizar(n) in esperadas_set)
+                    proporcao = achadas / max(1, len(numeros_raw))
+                    if proporcao < 0.3 and len(numeros_raw) >= 3:
+                        log(f"  ⚠️ Apenas {achadas}/{len(numeros_raw)} esperadas vieram ({proporcao:.0%}). Suspeita de estado sticky — refazendo busca...")
+                        await _safe_goto(
+                            page,
+                            f"{BASE_GW}/consultafatura?acao=iniciar",
+                            wait_until="domcontentloaded",
+                        )
+                        await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
+                        await page.wait_for_timeout(1500)
+                        na_pagina = await _aplicar_filtros_e_pesquisar(tentativa=2)
+                        log(f"  📋 GW retornou {len(na_pagina)} fatura(s) [retry]: {na_pagina[:8]}")
 
                     # ── Seleciona checkboxes via Playwright nativo ────────────────
                     # PASSO 1: leitura — coleta ids e números (sem tocar no DOM)
@@ -1248,14 +1276,61 @@ async def baixar_ctes_pdf(
                             # Estratégia adaptativa:
                             # - Faturas pequenas (<= 50 CT-es): popup geralmente devolve o PDF direto.
                             #   Espera curta (60s); se não vier, cai nos fallbacks.
-                            # - Faturas grandes (> 50 CT-es): GW manda pra fila assíncrona.
-                            #   Pula popup e vai direto pro Meus Relatórios.
+                            # - Faturas grandes (> 50 CT-es): GW manda pra fila assíncrona (5+ min de geração).
+                            #   Adiciona em `status["ctes_pendentes"]` e segue pra próxima — a coleta
+                            #   acontece no final, em paralelo com a digitação nas factories.
                             CTES_LIMITE_FILA = 50
                             if total_ctes > CTES_LIMITE_FILA:
-                                log(f"    📦 {total_ctes} CT-es: pulando popup, indo direto pro Meus Relatórios")
-                                # Pequena pausa pra garantir que o servidor recebeu o pedido
-                                await asyncio.sleep(3)
-                                pdf_bytes = None
+                                log(f"    📦 {total_ctes} CT-es: vai pra fila de coleta final (não bloqueia)")
+                                # Aguarda popup carregar pra capturar a URL final (especifica da fatura).
+                                # Sem isso, popup_cte.url ainda esta em 'about:blank'.
+                                url_interna_pendente = ""
+                                for _ in range(15):  # ate 7.5s
+                                    try:
+                                        u = popup_cte.url
+                                    except Exception:
+                                        u = ""
+                                    if u and "about:blank" not in u:
+                                        url_interna_pendente = u
+                                        if "redireciona_relatorio" in u:
+                                            # Extrai URL interna (listar_cte.jsp?idCte=...) — unica por fatura
+                                            try:
+                                                from urllib.parse import urlparse, parse_qs, urljoin, unquote
+                                                qs = parse_qs(urlparse(u).query)
+                                                inner = qs.get("url", [""])[0]
+                                                if inner:
+                                                    inner = unquote(inner)
+                                                    if not inner.startswith("http"):
+                                                        inner = urljoin(BASE_GW + "/", inner.lstrip("./"))
+                                                    url_interna_pendente = inner
+                                            except Exception:
+                                                pass
+                                        break
+                                    await asyncio.sleep(0.5)
+                                log(f"    URL pendente capturada: {url_interna_pendente[:120]}{'...' if len(url_interna_pendente)>120 else ''}")
+                                # Fecha o popup pra liberar recursos
+                                try:
+                                    await popup_cte.close()
+                                except Exception:
+                                    pass
+                                # Marca como pendente — agora com URL especifica da fatura
+                                status.setdefault("ctes_pendentes", []).append({
+                                    "sistema": sistema,
+                                    "nome_factory": nome_factory,
+                                    "numero": numero,
+                                    "marcador_dt": marcador_relatorio,
+                                    "total_ctes": total_ctes,
+                                    "filial_label": filial_label,
+                                    "url_pendente": url_interna_pendente,  # ← unica por fatura
+                                })
+                                ctes_info.append({
+                                    "numero": numero,
+                                    "ok": False,
+                                    "qtd": total_ctes,
+                                    "motivo": "aguardando geração no GW",
+                                    "pendente": True,
+                                })
+                                continue  # próxima fatura imediatamente
                             else:
                                 # Aguarda o JS do GW gerar e carregar o PDF.
                                 # Poll fino (0.4s) — sai imediatamente quando o PDF chega.
@@ -1373,31 +1448,257 @@ async def baixar_ctes_pdf(
 
                 rd["ctes"] = ctes_info
 
-                if pdfs_desta_factory:
-                    nome_zip = f"CTEs - {nome_factory} - {_hoje_fmt()}.zip"
-                    buf = io.BytesIO()
-                    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                        for nome_pdf, dados_pdf in pdfs_desta_factory:
-                            zf.writestr(nome_pdf, dados_pdf)
-                    zip_bytes = buf.getvalue()
-                    status.setdefault("arquivos", {})[nome_zip] = zip_bytes
-                    log(f"  📦 ZIP: {nome_zip} ({len(pdfs_desta_factory)} CT-e(s))")
-
-                    pasta = status.get("pasta_destino", "")
-                    if pasta:
-                        Path(pasta).mkdir(parents=True, exist_ok=True)
-                        (Path(pasta) / nome_zip).write_bytes(zip_bytes)
-                        log(f"  📁 ZIP salvo em disco: {pasta}\\{nome_zip}")
-
-                    rd["zip"] = {"ok": True, "arquivo": nome_zip, "qtd": len(pdfs_desta_factory)}
-                else:
-                    rd["zip"] = {"ok": False}
+                # Salva PDFs num bucket compartilhado — o ZIP final sera montado por
+                # _finalizar_zips_ctes(status) depois que `coletar_ctes_pendentes` rodar.
+                bucket = status.setdefault("_pdfs_ctes_por_factory", {})
+                bucket.setdefault(sistema, []).extend(pdfs_desta_factory)
+                log(f"  📦 {len(pdfs_desta_factory)} CT-e(s) coletado(s) nesta passada — ZIP montado no final")
 
         except Exception as e:
             log(f"  ❌ Erro geral CTes: {e}")
             log(traceback.format_exc()[-600:])
         finally:
             await browser.close()
+
+
+# ─── COLETA DE PENDENTES (FATURAS GRANDES) ───────────────────────────────────
+
+async def _poll_url_pdf(context: BrowserContext, url: str, log, max_seconds: int = 300, intervalo: int = 15) -> bytes | None:
+    """Polling de uma URL especifica do GW ate ela retornar PDF (geracao assincrona).
+
+    Usado pra fatura grande: ao clicar imprimir, o GW da uma URL (listar_cte.jsp?idCte=...)
+    que VAI virar PDF quando a geracao terminar (alguns minutos depois). Antes disso,
+    retorna HTML/redirect/page de loading.
+
+    Continua tentando ate receber `%PDF` ou exceder max_seconds.
+    """
+    if not url:
+        return None
+    inicio = time.monotonic()
+    tentativa = 0
+    while True:
+        tentativa += 1
+        elapsed = int(time.monotonic() - inicio)
+        if elapsed >= max_seconds:
+            log(f"    Timeout {max_seconds}s pra URL pendente — desistindo")
+            return None
+        try:
+            r = await context.request.get(url, max_redirects=5)
+            body = await r.body()
+            if body and b"%PDF" in body[:10]:
+                log(f"    ✅ PDF retornado pela URL pendente (tentativa {tentativa}, {elapsed}s, {len(body):,} bytes)")
+                return body
+        except Exception as e:
+            log(f"    Tentativa {tentativa} falhou: {str(e)[:120]}")
+        log(f"    Pendente ainda nao pronto ({elapsed}s, max {max_seconds}s) — aguardando {intervalo}s")
+        await asyncio.sleep(intervalo)
+
+
+async def coletar_ctes_pendentes(status: dict, max_seconds_por_fatura: int = 120):
+    """Baixa os PDFs das faturas grandes que foram enfileiradas em
+    `status["ctes_pendentes"]` durante `baixar_ctes_pdf`.
+
+    Estrategia: cada pendente tem uma `url_pendente` UNICA (listar_cte.jsp?idCte=...)
+    capturada do popup no momento do click imprimir. Fazemos polling DIRETO nessa URL
+    ate o GW gerar o PDF — sem ambiguidade de "qual relatorio em Meus Relatorios".
+
+    Roda em paralelo com a digitacao nas factories — assim a espera de geracao
+    dos PDFs grandes (geralmente 3-5 min cada) acontece "de graca".
+
+    Fallback: se a URL pendente nao foi capturada, cai pro `_baixar_cte_de_meus_relatorios`
+    (estrategia antiga, menos confiavel).
+
+    Timeout curto (default 120s por estrategia, ~4min total) porque o usuario
+    prefere "pular rapido e dizer pra baixar manualmente" do que ficar esperando
+    faturas com 100+ CTes que demoram >10min no GW.
+
+    Quando o PDF nao aparece em `max_seconds_por_fatura`:
+    - adiciona em `status["ctes_aguardando_manual"]` pra exibir no resumo final
+    """
+    log = lambda msg: status["logs"].append(msg)
+
+    pendentes = status.get("ctes_pendentes") or []
+    if not pendentes:
+        return
+
+    log("=" * 50)
+    log(f"📡 Coletando {len(pendentes)} fatura(s) grande(s) em paralelo com factories...")
+    log("=" * 50)
+
+    aguardando_manual: list[dict] = []
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(**launch_kwargs(headless=False))
+        context = await browser.new_context(accept_downloads=True)
+        page = await context.new_page()
+
+        try:
+            await _login_gw(page, user_id=status.get("usuario_id"))
+
+            for pend in pendentes:
+                sistema = pend["sistema"]
+                numero = pend["numero"]
+                nome_factory = pend["nome_factory"]
+                marcador_dt = pend["marcador_dt"]
+                total_ctes = pend.get("total_ctes", 0)
+                url_pendente = pend.get("url_pendente", "")
+
+                log(f"⏳ Coletando fatura {numero} ({nome_factory}, {total_ctes} CT-es)...")
+
+                pdf_bytes = None
+                # Estrategia 1: URL especifica capturada do popup (preferida — sem ambiguidade)
+                if url_pendente:
+                    log(f"  Usando URL pendente especifica: {url_pendente[:100]}...")
+                    try:
+                        pdf_bytes = await _poll_url_pdf(
+                            context, url_pendente, log,
+                            max_seconds=max_seconds_por_fatura, intervalo=15,
+                        )
+                    except Exception as e:
+                        log(f"  ❌ Erro polling URL pendente: {e}")
+
+                # Estrategia 2 (fallback): Meus Relatorios — usa marcador_dt (pode pegar errado se
+                # multiplas faturas grandes foram processadas)
+                if not pdf_bytes:
+                    log(f"  URL especifica falhou ou ausente — tentando Meus Relatorios")
+                    try:
+                        pdf_bytes = await _baixar_cte_de_meus_relatorios(
+                            page, context, marcador_dt, log,
+                            max_seconds=max_seconds_por_fatura,
+                        )
+                    except Exception as e:
+                        log(f"  ❌ Erro coletando fatura {numero}: {e}")
+                        pdf_bytes = None
+
+                # Atualiza o ctes_info correspondente em resumo_documentos
+                rd = status.get("resumo_documentos", {}).get(sistema, {})
+                ctes_info = rd.get("ctes", [])
+                achou = False
+                for c in ctes_info:
+                    if str(c.get("numero")) == str(numero) and c.get("pendente"):
+                        achou = True
+                        if pdf_bytes and b"%PDF" in pdf_bytes[:10]:
+                            c["ok"] = True
+                            c["pendente"] = False
+                            c["motivo"] = None
+                            # Adiciona no bucket pra entrar no ZIP final
+                            nome_arquivo = f"CTe - Fatura {numero}.pdf"
+                            bucket = status.setdefault("_pdfs_ctes_por_factory", {})
+                            bucket.setdefault(sistema, []).append((nome_arquivo, pdf_bytes))
+                            log(f"  ✅ CT-e fatura {numero} — {len(pdf_bytes):,} bytes")
+                        else:
+                            c["ok"] = False
+                            c["motivo"] = (
+                                f"Fatura com {total_ctes} CT-es — GW demora >{max_seconds_por_fatura * 2 // 60}min pra gerar. "
+                                f"Baixe manualmente em GW > Meus Relatorios."
+                            )
+                            aguardando_manual.append({
+                                "numero": numero,
+                                "sistema": sistema,
+                                "nome_factory": nome_factory,
+                                "total_ctes": total_ctes,
+                                "instrucao": (
+                                    f"Abra o GW, va em Relatorios > Meus Relatorios, "
+                                    f"procure a linha CT-e mais recente e clique 'Baixar PDF'."
+                                ),
+                            })
+                            log(
+                                f"  ⏭️ Fatura {numero} ({total_ctes} CT-es) PULADA — "
+                                f"GW demora mais que {max_seconds_por_fatura * 2 // 60}min pra gerar. "
+                                f"Baixe em GW > Meus Relatorios."
+                            )
+                        break
+                if not achou:
+                    log(f"  ⚠️ Fatura {numero} sem entrada no resumo_documentos — adicionando")
+                    ctes_info.append({
+                        "numero": numero,
+                        "ok": bool(pdf_bytes and b"%PDF" in pdf_bytes[:10]),
+                        "qtd": total_ctes,
+                        "motivo": None if pdf_bytes else "Baixe manualmente em Meus Relatorios do GW.",
+                    })
+
+        except Exception as e:
+            log(f"❌ Erro geral na coleta de pendentes: {e}")
+            log(traceback.format_exc()[-600:])
+        finally:
+            await browser.close()
+
+    # Expõe pro frontend mostrar aviso de "buscar manualmente"
+    if aguardando_manual:
+        status["ctes_aguardando_manual"] = aguardando_manual
+        log("=" * 50)
+        log(f"⏭️ {len(aguardando_manual)} fatura(s) grande(s) PULADA(S) — baixe manualmente em GW > Meus Relatorios:")
+        for p in aguardando_manual:
+            log(f"   - Fatura {p['numero']} ({p['nome_factory']}, {p['total_ctes']} CT-es)")
+        log("=" * 50)
+
+    # Limpa fila — pendentes processadas
+    status["ctes_pendentes"] = []
+
+
+# ─── MONTAGEM FINAL DOS ZIPs ────────────────────────────────────────────────
+
+def _finalizar_zips_ctes(status: dict):
+    """Monta os ZIPs por factory consumindo `status["_pdfs_ctes_por_factory"]`.
+
+    Chamado APOS `baixar_ctes_pdf` e `coletar_ctes_pendentes` — assim os PDFs
+    das faturas grandes que voltaram da coleta entram no mesmo ZIP da factory.
+    """
+    log = lambda msg: status["logs"].append(msg)
+    bucket = status.get("_pdfs_ctes_por_factory") or {}
+    resumo_docs = status.setdefault("resumo_documentos", {})
+    pasta = status.get("pasta_destino", "")
+
+    for sistema, pdfs in bucket.items():
+        rd = resumo_docs.setdefault(sistema, {"nome": _nome_factory(sistema), "fatura_pdf": None, "ctes": []})
+        if not pdfs:
+            rd["zip"] = {"ok": False}
+            continue
+        nome_factory = rd.get("nome") or _nome_factory(sistema)
+        nome_zip = f"CTEs - {nome_factory} - {_hoje_fmt()}.zip"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for nome_pdf, dados_pdf in pdfs:
+                zf.writestr(nome_pdf, dados_pdf)
+        zip_bytes = buf.getvalue()
+        status.setdefault("arquivos", {})[nome_zip] = zip_bytes
+        log(f"📦 ZIP final: {nome_zip} ({len(pdfs)} CT-e(s))")
+
+        if pasta:
+            try:
+                Path(pasta).mkdir(parents=True, exist_ok=True)
+                (Path(pasta) / nome_zip).write_bytes(zip_bytes)
+                log(f"📁 ZIP salvo em disco: {pasta}\\{nome_zip}")
+            except Exception as e:
+                log(f"⚠️ Erro salvando ZIP em disco: {e}")
+
+        rd["zip"] = {"ok": True, "arquivo": nome_zip, "qtd": len(pdfs)}
+
+
+# ─── ENTRY POINT (avulso — sem factories em paralelo) ──────────────────────
+
+async def salvar_documentos_completo(
+    faturas_por_factory: dict[str, list[dict]],
+    status: dict,
+):
+    """Wrapper que faz tudo sequencialmente — pra ser chamado do endpoint
+    /api/documentos quando o usuario quer só baixar arquivos depois (sem rodar
+    factories em paralelo).
+
+    Sequencia:
+    1. executar_salvamento_documentos (Fatura PDF + CTes pequenos)
+    2. coletar_ctes_pendentes (se houver grandes pendentes)
+    3. _finalizar_zips_ctes (monta ZIPs por factory)
+    """
+    log = lambda msg: status["logs"].append(msg)
+    try:
+        await executar_salvamento_documentos(faturas_por_factory, status)
+        if status.get("ctes_pendentes"):
+            await coletar_ctes_pendentes(status)
+        _finalizar_zips_ctes(status)
+    except Exception as e:
+        log(f"❌ Erro em salvar_documentos_completo: {e}")
+        log(traceback.format_exc()[-600:])
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────

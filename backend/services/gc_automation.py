@@ -43,19 +43,29 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 # ETAPA 1 — GW: gerar arquivo .rem
 # ══════════════════════════════════════════════════════════════════════════════
 
-async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict) -> Path | None:
+async def gerar_remessa_gw(
+    numeros_fatura: list[str],
+    sistema: str,
+    status: dict,
+    data_inicial_br: str | None = None,
+    data_final_br: str | None = None,
+) -> Path | None:
     """
     Acessa GW > Processos > Financeiro > Gerar Arquivo de Remessa
     URL real: /jspexporta_boleto.jsp
-    Filtra por data de emissão = hoje e conta bancária, marca apenas as
-    faturas recebidas e baixa o arquivo .rem.
+    Filtra por data de emissão (range fornecido, ou hoje como default) e conta
+    bancária, marca apenas as faturas recebidas e baixa o arquivo .rem.
+
+    data_inicial_br / data_final_br em DD/MM/AAAA. Se ambos None, usa hoje (BR).
     """
     log = lambda msg: status["logs"].append(msg)
     creds_gw = get_credencial("gw", user_id=status.get("usuario_id"))
     conta    = CONTA_POR_SISTEMA.get(sistema, "")
     hoje     = _hoje()
+    data_ini = data_inicial_br or hoje
+    data_fim = data_final_br or data_ini
 
-    log(f"  GW — gerando remessa para conta '{conta}'...")
+    log(f"  GW — gerando remessa para conta '{conta}' (range {data_ini} → {data_fim})...")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=True))
@@ -91,10 +101,10 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
         except Exception:
             pass
 
-        # Datas já vêm pré-preenchidas com hoje — apenas confirma
+        # Preenche o range escolhido (default hoje-hoje se nao passado)
         try:
-            await page.fill('input[name="dtemissao1"]', hoje)
-            await page.fill('input[name="dtemissao2"]', hoje)
+            await page.fill('input[name="dtemissao1"]', data_ini)
+            await page.fill('input[name="dtemissao2"]', data_fim)
         except Exception:
             pass
 
@@ -130,6 +140,13 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             except Exception:
                 pass
 
+        # Aumenta limite de resultados (se houver o select) — evita perder
+        # faturas por pagination/limite pequeno default.
+        try:
+            await page.select_option('select[name="limiteResultados"]', value="200")
+        except Exception:
+            pass
+
         # ── Pesquisar ─────────────────────────────────────────────────────────
         await page.click('input[name="pesquisar"]')
         try:
@@ -141,6 +158,7 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
         # ── Marca apenas as faturas selecionadas ──────────────────────────────
         # Tabela: col 0 = checkbox, col 1 = Fatura, col 2 = Nosso Número, ...
         marcadas = 0
+        vistas_na_pagina: set[str] = set()  # diagnostic: tudo que apareceu
         linhas = await page.query_selector_all("table tr")
         for linha in linhas:
             celulas = await linha.query_selector_all("td")
@@ -152,6 +170,7 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
                 m = re.match(r'^(\d{5,6})(?:/\d{4})?$', texto)
                 if m:
                     num = m.group(1).zfill(6)
+                    vistas_na_pagina.add(num)
                     if num in numeros_fatura:
                         cb = await linha.query_selector('input[type="checkbox"]')
                         if cb:
@@ -160,7 +179,14 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             except Exception:
                 continue
 
-        log(f"  {marcadas} fatura(s) marcada(s) para remessa")
+        log(f"  {marcadas} fatura(s) marcada(s) para remessa (de {len(numeros_fatura)} esperadas; {len(vistas_na_pagina)} visiveis na tela)")
+
+        # Diagnostico: lista faturas esperadas que NAO apareceram na tela
+        faltando_no_gw = sorted([n for n in numeros_fatura if n not in vistas_na_pagina])
+        if faltando_no_gw:
+            log(f"  ⚠️ {len(faltando_no_gw)} fatura(s) NAO encontrada(s) na remessa: {faltando_no_gw}")
+            log(f"     Causas comuns: filial diferente, conta bancaria diferente de '{conta}', emissao fora do range, ou ja faturada/quitada.")
+            status.setdefault("gc_remessa_faltando", []).extend(faltando_no_gw)
 
         if marcadas == 0:
             log("  Nenhuma fatura encontrada na tela de remessa — abortando")
@@ -339,6 +365,63 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
     """
     log = lambda msg: status["logs"].append(msg)
 
+    # ── Antes da Operação: olha aba 'Rejeitado' pra logar o que o GC nao aceitou.
+    # IMPORTANTE: so le se a aba existe e foi clicada com sucesso, senao gera
+    # falso positivo lendo conteudo de OUTRA aba como se fosse Rejeitado.
+    try:
+        info_aba = await page.evaluate("""() => {
+            // procura li com texto 'Rejeitado' visivel
+            for (const li of document.querySelectorAll('.aba-cabecalho-lista-li')) {
+                if (li.textContent.trim() === 'Rejeitado' && li.offsetParent) {
+                    li.click();
+                    return { existe: true };
+                }
+            }
+            // diagnostic: lista abas disponiveis
+            const abas = [...document.querySelectorAll('.aba-cabecalho-lista-li')]
+                .filter(li => li.offsetParent).map(li => li.textContent.trim());
+            return { existe: false, abas };
+        }""")
+        if not info_aba.get("existe"):
+            log(f"  Aba 'Rejeitado' nao encontrada (abas disponiveis: {info_aba.get('abas', [])}). Pulando leitura.")
+        else:
+            await page.wait_for_timeout(1500)
+            # Confirma que a aba 'Rejeitado' ESTA ATIVA antes de ler
+            aba_ativa = await page.evaluate("""() => {
+                const ativa = document.querySelector('.aba-cabecalho-lista-li.ativo, .aba-cabecalho-lista-li.active, .aba-cabecalho-lista-li.selected');
+                return ativa ? ativa.textContent.trim() : '';
+            }""")
+            if aba_ativa != "Rejeitado":
+                log(f"  Aba ativa apos click NAO eh Rejeitado ('{aba_ativa}'). Pulando leitura.")
+            else:
+                rejeitados = await page.evaluate("""() => {
+                    const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+                    const out = [];
+                    for (const m of modais) {
+                        for (const tr of m.querySelectorAll('tbody tr')) {
+                            if (!tr.offsetParent) continue;
+                            const tds = [...tr.querySelectorAll('td')].map(td => (td.textContent||'').trim());
+                            let doc = '';
+                            let motivo = '';
+                            for (const t of tds) {
+                                if (/^\\d{5,6}$/.test(t) && !doc) { doc = t; continue; }
+                                if (t.length > 5 && /[a-zA-Z]/.test(t) && !motivo) motivo = t;
+                            }
+                            if (doc) out.push({doc, motivo: motivo.substring(0, 120)});
+                        }
+                    }
+                    return out;
+                }""")
+                if rejeitados:
+                    log(f"  ⚠️ GC rejeitou {len(rejeitados)} titulo(s) na importacao:")
+                    for r in rejeitados:
+                        log(f"     {r.get('doc')}: {r.get('motivo') or '(motivo nao identificado na tela)'}")
+                    status.setdefault("gc_rejeitados_importacao", []).extend(rejeitados)
+                else:
+                    log("  ✓ Aba Rejeitado: nenhum titulo rejeitado")
+    except Exception as e:
+        log(f"  Aviso: falha ao ler aba Rejeitado: {e}")
+
     # ── Vai para aba 'Operação' (lista os títulos importados) ─────────────────
     await page.evaluate("""() => {
         for (const li of document.querySelectorAll('.aba-cabecalho-lista-li')) {
@@ -449,8 +532,28 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
 
     log(f"📋 GC {sistema}: {total_qtd} fatura(s) | Total: R$ {total_valor:,.2f}")
 
+    # Deriva range de emissao das faturas selecionadas (DD/MM/AAAA).
+    # Se as faturas tem emissoes em datas diferentes, o range cobre todas.
+    datas_validas: list[str] = []
+    for n in numeros_norm:
+        e = str(faturas_dados.get(n, {}).get("emissao") or "").strip()
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", e):
+            datas_validas.append(e)
+    if datas_validas:
+        def _key(d: str) -> str:
+            dd, mm, yy = d.split("/")
+            return f"{yy}{mm}{dd}"
+        datas_validas.sort(key=_key)
+        data_ini_remessa, data_fim_remessa = datas_validas[0], datas_validas[-1]
+    else:
+        data_ini_remessa = data_fim_remessa = _hoje()
+
     # ── Etapa 1: gerar .rem no GW ────────────────────────────────────────────
-    caminho_rem = await gerar_remessa_gw(numeros_norm, sistema, status)
+    caminho_rem = await gerar_remessa_gw(
+        numeros_norm, sistema, status,
+        data_inicial_br=data_ini_remessa,
+        data_final_br=data_fim_remessa,
+    )
     if not caminho_rem:
         status["erros"].append(f"GC {sistema}: falha ao gerar arquivo de remessa no GW")
         return {}

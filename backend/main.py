@@ -17,7 +17,7 @@ from services.excel_processor import processar_excels
 from services.firma_automation import executar_firma
 from services.fluxasset_automation import executar_fluxasset
 from services.gc_automation import executar_gc
-from services.documentos import executar_salvamento_documentos
+from services.documentos import executar_salvamento_documentos, salvar_documentos_completo
 from config_manager import salvar_credenciais, carregar_credenciais
 from historico_manager import carregar_historico, salvar_operacao
 from factory_manager import carregar_factories_extras, salvar_factory_extra, remover_factory_extra, gerar_id
@@ -297,14 +297,33 @@ def get_status(op_id: str):
     if op_id not in status_operacoes:
         raise HTTPException(status_code=404, detail="Operação não encontrada")
     s = status_operacoes[op_id]
+    # Campos com dados nao-serializaveis ou pesados que NAO devem ir pro frontend.
+    _BLACKLIST = (
+        "faturas_cache",
+        "arquivos",
+        "factories",
+        "_tasks",
+        "_evento_captcha",
+        # Novos (refactor coleta de pendentes): bytes de PDFs + datetime de marcador
+        "_pdfs_ctes_por_factory",   # contem bytes brutos dos PDFs
+        "ctes_pendentes",           # contem datetime (marcador_dt) — convertido abaixo se necessario
+    )
     # Limpa campos não serializáveis dos sub-status de factories
     factories_clean = {}
     for sistema, fs in s.get("factories", {}).items():
         factories_clean[sistema] = {k: v for k, v in fs.items() if k not in ("faturas_cache", "faturas_salvas")}
-    result = {k: v for k, v in s.items() if k not in ("faturas_cache", "arquivos", "factories", "_tasks", "_evento_captcha")}
+    result = {k: v for k, v in s.items() if k not in _BLACKLIST}
     # Converte set para lista (set não é JSON-serializável)
     if isinstance(result.get("faturas_salvas"), set):
         result["faturas_salvas"] = list(result["faturas_salvas"])
+    # Expoe um resumo curto da fila de pendentes (sem o datetime cru)
+    pend = s.get("ctes_pendentes") or []
+    if pend:
+        result["ctes_pendentes_count"] = len(pend)
+        result["ctes_pendentes_resumo"] = [
+            {"sistema": p.get("sistema"), "numero": p.get("numero"), "total_ctes": p.get("total_ctes")}
+            for p in pend
+        ]
     result["factories"] = factories_clean
     return result
 
@@ -324,7 +343,8 @@ async def salvar_documentos(req: DocumentosRequest, background_tasks: Background
 
     op["status"] = "salvando_documentos"
     op["arquivos"] = {}
-    background_tasks.add_task(executar_salvamento_documentos, faturas_por_factory, op)
+    # Usa o wrapper completo — faz primeira passada, coleta pendentes e finaliza ZIPs.
+    background_tasks.add_task(salvar_documentos_completo, faturas_por_factory, op)
     return {"ok": True}
 
 @app.get("/api/download/{op_id}", dependencies=[Depends(get_current_user)])
@@ -441,8 +461,41 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
             fs["erros"].append(str(e))
             fs["logs"].append(f"❌ Erro fatal: {str(e)}")
 
-    # Modo "apenas_documentos": pula a digitação nas factories e vai direto pro
-    # salvamento de documentos (boletos + CT-es).
+    # ── NOVA ORDEM (otimizada) ──────────────────────────────────────────────
+    # ETAPA A: Salvamento de documentos PRIMEIRO (Fatura PDF + CTes pequenos).
+    #          Faturas com >50 CT-es entram em `status["ctes_pendentes"]` sem bloquear.
+    # ETAPA B: Factories (digitacao) EM PARALELO com a coleta dos PDFs grandes
+    #          que estao sendo gerados no GW (5+ min cada).
+    # ETAPA C: Montagem final dos ZIPs (precisa esperar a coleta dos grandes).
+    #
+    # Vantagem: a espera de geracao dos PDFs grandes acontece "de graca",
+    # enquanto a digitacao roda — em vez de bloquear no final.
+    from services.documentos import coletar_ctes_pendentes, _finalizar_zips_ctes
+
+    # ─── ETAPA A: documentos (primeira passada) ─────────────────────────────
+    if status["faturas_por_factory"] and status["status"] != "cancelado":
+        status["status"] = "salvando_documentos"
+        status["logs"].append("📥 Baixando boletos e CTes do GW (antes da digitação)...")
+        task_doc = asyncio.create_task(
+            executar_salvamento_documentos(status["faturas_por_factory"], status)
+        )
+        status["_tasks"] = [task_doc]
+        try:
+            await task_doc
+        except asyncio.CancelledError:
+            status["logs"].append("🛑 Salvamento de documentos interrompido pelo cancelamento")
+        except Exception as e:
+            status["logs"].append(f"❌ Erro no salvamento de documentos: {e}")
+            status["erros"].append(f"Salvamento documentos: {str(e)}")
+
+    if status["status"] == "cancelado":
+        status["fim"] = status.get("fim") or datetime.now().isoformat()
+        salvar_operacao(op_id, status)
+        return
+
+    # ─── ETAPA B: factories (digitacao) + coleta de pendentes em paralelo ───
+    tem_pendentes = bool(status.get("ctes_pendentes"))
+
     if status.get("apenas_documentos"):
         status["logs"].append("📥 Modo 'Apenas baixar arquivos' — pulando digitação nas factories")
         # Marca todas as factories como concluídas com as faturas selecionadas
@@ -454,13 +507,24 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
             fs["logs"].append("⏭️ Digitação pulada (modo 'Apenas baixar arquivos')")
             for sel in fat_lista:
                 fs["faturas_salvas"].add(sel.numero)
-        tasks = []
+        tasks_factories = []
     else:
         # Executa todas as factories em paralelo — guarda tasks para poder cancelar
-        tasks = [asyncio.create_task(_run(sistema, fat_lista)) for sistema, fat_lista in por_factory.items()]
-    status["_tasks"] = tasks
+        status["status"] = "executando"
+        tasks_factories = [
+            asyncio.create_task(_run(sistema, fat_lista))
+            for sistema, fat_lista in por_factory.items()
+        ]
+
+    # Coleta em paralelo: se houver pendentes, dispara junto com factories
+    task_coleta = None
+    if tem_pendentes:
+        task_coleta = asyncio.create_task(coletar_ctes_pendentes(status))
+
+    all_tasks = list(tasks_factories) + ([task_coleta] if task_coleta else [])
+    status["_tasks"] = all_tasks
     try:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*all_tasks, return_exceptions=True)
     except asyncio.CancelledError:
         pass
 
@@ -469,6 +533,12 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
         status["fim"] = status.get("fim") or datetime.now().isoformat()
         salvar_operacao(op_id, status)
         return
+
+    # ─── ETAPA C: montagem final dos ZIPs (com os PDFs grandes ja coletados) ─
+    try:
+        _finalizar_zips_ctes(status)
+    except Exception as e:
+        status["logs"].append(f"⚠️ Erro montando ZIPs finais: {e}")
 
     # Agrega no status global — usa lista para manter JSON-serializável
     faturas_salvas_global: list = []
@@ -496,29 +566,6 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
     status["logs"].append(f"✅ {MSG_FINALIZAR_MANUAL}")
     if tem_erros:
         status["logs"].append(f"⚠️ {len(status['erros'])} fatura(s) com erro — verifique os cards acima")
-
-    # Salvamento de documentos — agora também cancelável.
-    # Registramos como task em _tasks para que /api/cancelar possa interromper.
-    if status["faturas_por_factory"] and status["status"] != "cancelado":
-        status["status"] = "salvando_documentos"
-        status["logs"].append("📥 Baixando boletos e CTes do GW...")
-        task_doc = asyncio.create_task(
-            executar_salvamento_documentos(status["faturas_por_factory"], status)
-        )
-        status["_tasks"].append(task_doc)
-        try:
-            await task_doc
-        except asyncio.CancelledError:
-            status["logs"].append("🛑 Salvamento de documentos interrompido pelo cancelamento")
-        except Exception as e:
-            status["logs"].append(f"❌ Erro no salvamento de documentos: {e}")
-            status["erros"].append(f"Salvamento documentos: {str(e)}")
-
-    # Se cancelado em qualquer momento (antes ou durante salvamento), não sobrescreve status
-    if status["status"] == "cancelado":
-        status["fim"] = status.get("fim") or datetime.now().isoformat()
-        salvar_operacao(op_id, status)
-        return
 
     status["status"] = "concluido" if not tem_erros else "concluido_com_erros"
     status["fim"] = datetime.now().isoformat()
