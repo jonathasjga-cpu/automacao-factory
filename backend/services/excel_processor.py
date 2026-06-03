@@ -554,6 +554,63 @@ def _fmt_data(val) -> str:
     except:
         return str(val)
 
+def _detectar_colunas_automacao(cols_raw: list, debug: list[str]) -> dict:
+    """Mapeia colunas do Excel 'Automacao Operacoes' para nomes internos baseado
+    no TEXTO DO HEADER (case-insensitive). Robusto contra mudancas de ordem
+    feitas no relatorio personalizado do GW.
+
+    Retorna dict {nome_interno: nome_real_da_coluna_no_excel}.
+    """
+    import unicodedata
+    def norm(s: str) -> str:
+        s = unicodedata.normalize("NFD", str(s)).encode("ascii", "ignore").decode().lower()
+        return s.strip()
+
+    mapeamento: dict = {}
+    pendentes_numero_pos = []  # candidatas a 'numero' (numerico simples) — desempata depois
+    for c in cols_raw:
+        n = norm(c)
+        if not n:
+            continue
+        # cliente cnpj — captura "Cliente CNPJ", "CNPJ Cliente", "CNPJ" sozinho
+        if "cnpj" in n or "cpf" in n:
+            if "cliente_cnpj" not in mapeamento:
+                mapeamento["cliente_cnpj"] = c
+        # cliente nome — captura "Cliente Razao Social", "Cliente", "Razao Social", "Nome Cliente"
+        elif n == "cliente" or "razao social" in n or (
+            "cliente" in n and ("razao" in n or "social" in n or "nome" in n)
+        ) or n == "razao":
+            if "cliente_nome" not in mapeamento:
+                mapeamento["cliente_nome"] = c
+        # filial
+        elif "filial" in n:
+            mapeamento["filial"] = c
+        # numero da fatura (mas NAO cnpj, cte, nota, parcela)
+        elif ("numero" in n or n == "no" or n == "nro") and not any(x in n for x in ["cnpj", "cte", "nota", "parcela", "receita"]):
+            # se ainda nao tem numero atribuido, atribui agora
+            if "numero" not in mapeamento:
+                mapeamento["numero"] = c
+            else:
+                pendentes_numero_pos.append(c)
+        # emissao
+        elif "emiss" in n:
+            mapeamento["emissao"] = c
+        # vencimento
+        elif "vencimento" in n or "venc" == n:
+            mapeamento["vencimento"] = c
+        # valor (total receber, valor fatura, etc)
+        elif ("total" in n and "rec" in n) or "valor" in n:
+            mapeamento["valor"] = c
+        # situacao / status
+        elif "situa" in n or "status" in n:
+            mapeamento["situacao"] = c
+
+    debug.append(f"mapeamento header->interno: {mapeamento}")
+    if pendentes_numero_pos:
+        debug.append(f"colunas com 'numero' descartadas: {pendentes_numero_pos}")
+    return mapeamento
+
+
 def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     """Cruza os dois Excels e retorna lista de faturas prontas"""
     _debug_auto: list[str] = []
@@ -563,13 +620,24 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     _debug_auto.append(f"path1: {path1.name} | shape: {df1_raw.shape} | cols: {list(df1_raw.columns)[:8]}")
 
     df1 = df1_raw.copy()
-    df1.columns = [
-        "numero", "emissao", "vencimento", "filial",
-        "valor", "cliente_nome", "cliente_cnpj", "situacao"
-    ][:len(df1.columns)] + list(df1.columns[8:]) if len(df1.columns) > 8 else [
-        "numero", "emissao", "vencimento", "filial",
-        "valor", "cliente_nome", "cliente_cnpj", "situacao"
-    ][:len(df1.columns)]
+    # Detecta colunas pelo NOME do header (nao por posicao) — robusto contra reordenacao
+    # no relatorio personalizado do GW. Fallback: ordem antiga (numero, emissao, vencimento, ...).
+    mapa = _detectar_colunas_automacao(list(df1.columns), _debug_auto)
+    if mapa and "numero" in mapa and "valor" in mapa:
+        # Renomeia colunas detectadas pra nomes internos esperados pelo resto do codigo
+        inverso = {real: interno for interno, real in mapa.items()}
+        df1 = df1.rename(columns=inverso)
+        _debug_auto.append(f"colunas renomeadas via mapeamento por header: {list(df1.columns)[:8]}")
+    else:
+        # Fallback: assume ordem antiga
+        _debug_auto.append("AVISO: header nao reconhecido, aplicando ordem posicional antiga")
+        df1.columns = [
+            "numero", "emissao", "vencimento", "filial",
+            "valor", "cliente_nome", "cliente_cnpj", "situacao"
+        ][:len(df1.columns)] + list(df1.columns[8:]) if len(df1.columns) > 8 else [
+            "numero", "emissao", "vencimento", "filial",
+            "valor", "cliente_nome", "cliente_cnpj", "situacao"
+        ][:len(df1.columns)]
 
     _debug_auto.append(f"linhas brutas (apos skiprows): {len(df1)}")
     if len(df1) > 0:
