@@ -598,9 +598,10 @@ def _detectar_colunas_automacao(cols_raw: list, debug: list[str]) -> dict:
         # vencimento
         elif "vencimento" in n or "venc" == n:
             mapeamento["vencimento"] = c
-        # valor (total receber, valor fatura, etc)
-        elif ("total" in n and "rec" in n) or "valor" in n:
-            mapeamento["valor"] = c
+        # valor (Total, Total Receber, Valor, Valor Fatura, etc)
+        elif "valor" in n or "total" in n or n in ("pago", "receber"):
+            if "valor" not in mapeamento:
+                mapeamento["valor"] = c
         # situacao / status
         elif "situa" in n or "status" in n:
             mapeamento["situacao"] = c
