@@ -167,35 +167,54 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             const nome = norm({repr(nome_lower)});
             const nomeFirst = norm({repr(nome_first)});
 
-            // Estratégia 1: td cujo texto contém o nome — verifica irmãos anterior e posterior
-            for (const td of document.querySelectorAll('td')) {{
-                const txt = norm(td.textContent);
-                if (txt.includes(nome) || (nomeFirst.length >= 5 && txt.includes(nomeFirst))) {{
-                    const radio = td.querySelector('input[type="radio"]')
-                               || td.previousElementSibling?.querySelector('input[type="radio"]')
-                               || td.nextElementSibling?.querySelector('input[type="radio"]');
-                    if (radio) {{ radio.click(); return 'td:' + td.textContent.trim().substring(0,60); }}
-                }}
-            }}
-            // Estratégia 2: radio cujo tr pai contém o nome
+            // ── Lista TODOS os td/tr que tem radio + nome do relatorio (pra diagnostico) ──
+            const candidatos = [];  // [{{level, txt, radio_elem, where}}, ...]
+            // level: 1=match exato, 2=contem nome completo, 3=contem primeira palavra
+            // Procura em TR (linha inteira), nao so TD — mais confiavel
             for (const r of document.querySelectorAll('input[type="radio"]')) {{
                 const row = r.closest('tr') || r.parentElement;
-                if (row) {{
-                    const rowTxt = norm(row.textContent);
-                    if (rowTxt.includes(nome) || (nomeFirst.length >= 5 && rowTxt.includes(nomeFirst))) {{
-                        r.click(); return 'tr:' + row.textContent.trim().substring(0,60);
-                    }}
+                if (!row) continue;
+                const rowTxt = norm(row.textContent);
+                let level = 0;
+                if (rowTxt === nome) level = 1;
+                else if (rowTxt.includes(nome)) level = 2;
+                else if (nomeFirst.length >= 5 && rowTxt.includes(nomeFirst)) level = 3;
+                if (level > 0) {{
+                    candidatos.push({{
+                        level, radio: r,
+                        txt: row.textContent.trim().substring(0, 80),
+                    }});
                 }}
             }}
-            // Diagnóstico: lista todos os textos de tds e radios disponíveis
-            const tds = [...document.querySelectorAll('td')].map(t => t.textContent.trim()).filter(t => t.length > 2);
-            const radios = document.querySelectorAll('input[type="radio"]').length;
-            return 'NAO_ENCONTRADO. radios=' + radios + ' Tds: ' + tds.slice(0,15).join(' | ');
+
+            // Ordena por level (1 = melhor match) e pega o primeiro
+            candidatos.sort((a, b) => a.level - b.level);
+            const todos_txts = candidatos.map(c => `L${{c.level}}: ${{c.txt}}`);
+
+            if (candidatos.length === 0) {{
+                const radios = document.querySelectorAll('input[type="radio"]').length;
+                const tds = [...document.querySelectorAll('td')].map(t => t.textContent.trim()).filter(t => t.length > 2);
+                return 'NAO_ENCONTRADO. radios=' + radios + ' Tds: ' + tds.slice(0, 20).join(' | ');
+            }}
+
+            // Aviso de ambiguidade — se ha mais de 1 candidato no mesmo level
+            const melhor = candidatos[0];
+            const ambiguos = candidatos.filter(c => c.level === melhor.level);
+            const aviso = ambiguos.length > 1
+                ? ` ⚠️ AMBIGUIDADE: ${{ambiguos.length}} candidatos no mesmo level=${{melhor.level}}: ${{ambiguos.map(c => c.txt).join(' /// ')}}`
+                : '';
+
+            // Clica no melhor
+            melhor.radio.click();
+            return `OK L${{melhor.level}}: ${{melhor.txt}} | total_candidatos=${{candidatos.length}}${{aviso}} | todos: ${{todos_txts.slice(0, 5).join(' | ')}}`;
         }}
     """)
 
-    # Log do resultado para diagnóstico
-    # (selecionado contém o resultado do radio_select para diagnóstico inline)
+    # Log do resultado para diagnóstico (ajuda identificar relatorios duplicados/ambiguos no GW)
+    try:
+        _prog_log(f"Radio selecionado: {str(selecionado)[:300]}")
+    except Exception:
+        pass
 
     # Lança exceção se o radio não foi encontrado
     if isinstance(selecionado, str) and selecionado.startswith('NAO_ENCONTRADO'):
