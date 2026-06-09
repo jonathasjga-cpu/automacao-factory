@@ -167,46 +167,68 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             const nome = norm({repr(nome_lower)});
             const nomeFirst = norm({repr(nome_first)});
 
-            // ── Lista TODOS os td/tr que tem radio + nome do relatorio (pra diagnostico) ──
-            const candidatos = [];  // [{{level, txt, radio_elem, where}}, ...]
-            // level: 1=match exato, 2=contem nome completo, 3=contem primeira palavra
-            // Procura em TR (linha inteira), nao so TD — mais confiavel
+            // Estrategia: pra cada radio, capturar SO o texto associado a ele
+            // (nao a linha inteira do <tr>, porque o GW usa layout 2-colunas e
+            // a <tr> pai engloba 2 nomes). Tentamos varias fontes em ordem de
+            // especificidade do mais especifico ao mais amplo:
+            //   1. label[for=radio.id] (se houver)
+            //   2. proximo TextNode irmao do radio
+            //   3. <td> pai direto do radio
+            //   4. parentElement
+            function nomeAssociadoAoRadio(r) {{
+                // 1. label[for]
+                if (r.id) {{
+                    const lab = document.querySelector(`label[for="${{r.id}}"]`);
+                    if (lab) return (lab.textContent || '').trim();
+                }}
+                // 2. proximo nó (TextNode ou Element irmao) com texto util
+                let s = r.nextSibling;
+                let acc = '';
+                while (s && acc.length < 120) {{
+                    const t = (s.textContent || (s.nodeValue || '')).trim();
+                    if (t) acc += ' ' + t;
+                    // para se encontrar outro input radio (proxima opcao)
+                    if (s.nodeType === 1 && s.tagName === 'INPUT' && s.type === 'radio') break;
+                    s = s.nextSibling;
+                }}
+                if (acc.trim()) return acc.trim();
+                // 3. TD pai direto (so o td imediato, nao o tr inteiro)
+                const td = r.closest('td');
+                if (td) return (td.textContent || '').trim();
+                // 4. parentElement
+                if (r.parentElement) return (r.parentElement.textContent || '').trim();
+                return '';
+            }}
+
+            const candidatos = [];  // {{level, txt, radio}}
+            const todos_radios = [];  // diagnostic: todos os radios + nome capturado
             for (const r of document.querySelectorAll('input[type="radio"]')) {{
-                const row = r.closest('tr') || r.parentElement;
-                if (!row) continue;
-                const rowTxt = norm(row.textContent);
+                const txtRaw = nomeAssociadoAoRadio(r);
+                const txt = norm(txtRaw);
+                todos_radios.push(txtRaw.substring(0, 50));
                 let level = 0;
-                if (rowTxt === nome) level = 1;
-                else if (rowTxt.includes(nome)) level = 2;
-                else if (nomeFirst.length >= 5 && rowTxt.includes(nomeFirst)) level = 3;
+                if (txt === nome) level = 1;
+                else if (txt.includes(nome)) level = 2;
+                else if (nomeFirst.length >= 5 && txt.includes(nomeFirst)) level = 3;
                 if (level > 0) {{
-                    candidatos.push({{
-                        level, radio: r,
-                        txt: row.textContent.trim().substring(0, 80),
-                    }});
+                    candidatos.push({{ level, radio: r, txt: txtRaw.substring(0, 80) }});
                 }}
             }}
 
-            // Ordena por level (1 = melhor match) e pega o primeiro
             candidatos.sort((a, b) => a.level - b.level);
-            const todos_txts = candidatos.map(c => `L${{c.level}}: ${{c.txt}}`);
 
             if (candidatos.length === 0) {{
-                const radios = document.querySelectorAll('input[type="radio"]').length;
-                const tds = [...document.querySelectorAll('td')].map(t => t.textContent.trim()).filter(t => t.length > 2);
-                return 'NAO_ENCONTRADO. radios=' + radios + ' Tds: ' + tds.slice(0, 20).join(' | ');
+                return 'NAO_ENCONTRADO. radios_disponiveis: ' + todos_radios.slice(0, 30).join(' | ');
             }}
 
-            // Aviso de ambiguidade — se ha mais de 1 candidato no mesmo level
             const melhor = candidatos[0];
             const ambiguos = candidatos.filter(c => c.level === melhor.level);
             const aviso = ambiguos.length > 1
                 ? ` ⚠️ AMBIGUIDADE: ${{ambiguos.length}} candidatos no mesmo level=${{melhor.level}}: ${{ambiguos.map(c => c.txt).join(' /// ')}}`
                 : '';
 
-            // Clica no melhor
             melhor.radio.click();
-            return `OK L${{melhor.level}}: ${{melhor.txt}} | total_candidatos=${{candidatos.length}}${{aviso}} | todos: ${{todos_txts.slice(0, 5).join(' | ')}}`;
+            return `OK L${{melhor.level}}: ${{melhor.txt}} | total_cand=${{candidatos.length}} | total_radios=${{todos_radios.length}}${{aviso}}`;
         }}
     """)
 
