@@ -10,7 +10,8 @@ from playwright.async_api import async_playwright, Page, BrowserContext
 from browser_config import launch_kwargs
 from config_manager import get_credencial
 
-BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
+import os as _os_gw
+BASE_GW = _os_gw.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
 
 # ─── UTILS ───────────────────────────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ Automação GC Recursos — fluxo completo:
   igual ao que ocorre na Firma e FluxAsset.
 """
 
+import os
 import re
 import tempfile
 from datetime import datetime
@@ -19,7 +20,7 @@ from config_manager import get_credencial
 
 # ─── URLs ──────────────────────────────────────────────────────────────────────
 
-BASE_GW = "https://webtrans.saas.gwsistemas.com.br"
+BASE_GW = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
 GC_URL  = "http://gcrecursos.dyndns.org:9000/FactaConsult"
 
 # ─── Conta bancária por sistema ────────────────────────────────────────────────

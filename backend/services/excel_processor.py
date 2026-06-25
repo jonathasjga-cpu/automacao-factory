@@ -441,7 +441,7 @@ async def baixar_relatorios_gw(
     """
     from _tz import now_br
     creds = get_credencial("gw", user_id=user_id)
-    base = "https://webtrans.saas.gwsistemas.com.br"
+    base = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
     hoje = now_br().strftime("%d/%m/%Y")
     data_ini = data_inicial_br or hoje
     data_fim = data_final_br or data_ini
@@ -555,7 +555,7 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
             await page.wait_for_timeout(8000)  # aguarda o GW processar o relatÃ³rio
             # Recarrega a lista de relatÃ³rios para pegar o link de download atualizado
             await page.goto(
-                f"https://webtrans.saas.gwsistemas.com.br/RelatorioControlador?acao=abrirTelaMeusRelatorios",
+                f"{os.getenv('GW_BASE_URL', 'https://webtrans.saas2.gwsistemas.com.br')}/RelatorioControlador?acao=abrirTelaMeusRelatorios",
                 wait_until="load", timeout=60000
             )
             await page.wait_for_timeout(2000)
