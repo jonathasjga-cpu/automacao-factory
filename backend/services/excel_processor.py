@@ -132,10 +132,36 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     await page.goto(url_rel, wait_until="load", timeout=60000)
     await page.wait_for_timeout(1500)
 
-    # Se GW retornou 403, a sessão expirou — relança erro claro
+    # Se GW retornou 403, a sessão pode ter expirado — tenta refazer login uma vez
     titulo = await page.title()
     if "403" in titulo or "403" in page.url:
-        raise Exception("GW retornou 403 (sessão expirada). Tente novamente.")
+        _prog_log("⚠️ GW retornou 403 — refazendo login e tentando de novo...")
+        try:
+            # Re-login (mesmo fluxo do baixar_relatorios_gw)
+            creds = get_credencial("gw")
+            await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_selector('#login', timeout=15000)
+            await page.fill('#login', creds["usuario"])
+            await page.fill('#senha', creds["senha"])
+            await page.click('.button-login')
+            await page.wait_for_load_state("load", timeout=60000)
+            await page.wait_for_timeout(3000)
+            # Volta pra home pra fechar sessao corretamente
+            await page.goto(f"{base}/home", wait_until="load", timeout=60000)
+            await page.wait_for_timeout(2000)
+            # Tenta de novo a tela do relatorio
+            await page.goto(url_rel, wait_until="load", timeout=60000)
+            await page.wait_for_timeout(1500)
+            titulo2 = await page.title()
+            if "403" in titulo2 or "403" in page.url:
+                raise Exception(
+                    "GW retornou 403 mesmo apos re-login. Possiveis causas: "
+                    "credenciais sem permissao no modulo webtrans, rate-limit do GW, "
+                    "ou IP do servidor bloqueado. Tente em alguns minutos."
+                )
+            _prog_log("✓ Re-login OK, prosseguindo...")
+        except Exception as e:
+            raise Exception(f"GW retornou 403 (sessão expirada). Re-login falhou: {e}")
 
     # Clica na aba "Relatórios Personalizados"
     await page.evaluate("""
