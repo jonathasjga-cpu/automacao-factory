@@ -89,15 +89,17 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
         # Tipo de busca: Data de Emissão
         try:
             await page.select_option('select[name="campoDeConsulta"]', label="Data de Emissão")
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
         # Datas já vêm pré-preenchidas com hoje — apenas confirma
         try:
             await page.fill('input[name="dtemissao1"]', hoje)
             await page.fill('input[name="dtemissao2"]', hoje)
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
         # Conta bancária — MATCH EXATO pelo início do texto ("3196-8 / ...").
         # Crítico: `.includes('3196-8')` dava match também em "03196-8" (SP).
@@ -128,8 +130,9 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             try:
                 # Fallback: tenta sem acento caso o DOM varie
                 await page.select_option('select[name="tipoGerado"]', label="gerados / nao gerados")
-            except Exception:
-                pass
+            except Exception as _e:
+                try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
+                except Exception: pass  # noqa
 
         # ── Pesquisar ─────────────────────────────────────────────────────────
         await page.click('input[name="pesquisar"]')
@@ -398,8 +401,9 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
                 continue
             try:
                 await campo.fill("")
-            except Exception:
-                pass
+            except Exception as _e:
+                try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
+                except Exception: pass  # noqa
             await campo.fill(doc)
 
             # Clica Salvar (botão visível do formulário de edição)

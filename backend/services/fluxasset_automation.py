@@ -355,8 +355,9 @@ async def cadastrar_sacado_se_necessario(page: Page, cnpj_limpo: str, nome_fatur
     # E-mail
     try:
         await page.fill('#e_mail', email_sacado)
-    except Exception:
-        pass
+    except Exception as _e:
+        try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
+        except Exception: pass  # noqa
 
     log(f"  [INFO] Popup preenchido — salvando cadastro de {nome_usar}")
 
@@ -396,8 +397,9 @@ async def cadastrar_sacado_se_necessario(page: Page, cnpj_limpo: str, nome_fatur
     if cnpj_invalido:
         try:
             await page.locator('button:has-text("Ok")').first.click()
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
         raise Exception(
             f"CNPJ {cnpj_limpo} rejeitado pela FluxAsset como invalido — verifique os digitos verificadores"
         )
@@ -405,8 +407,9 @@ async def cadastrar_sacado_se_necessario(page: Page, cnpj_limpo: str, nome_fatur
     # Confirmação "Confirma salvar?"
     try:
         await page.locator('button:has-text("Sim")').first.click()
-    except Exception:
-        pass
+    except Exception as _e:
+        try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+        except Exception: pass  # noqa
 
     # Aguarda popup fechar
     try:
@@ -594,8 +597,9 @@ async def preencher_titulo_fluxasset(page: Page, fatura: dict, status: dict):
                     break
                 except Exception as e:
                     log(f"  [WARN] Falhou click 'Sim' no titulo {fatura['numero']}: {e}")
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [evaluate] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
     # Aguarda o servidor confirmar o salvamento
     try:
@@ -782,8 +786,9 @@ async def _ativar_aba_digitacao(page: Page):
         if await loc.count() > 0:
             await loc.first.click(timeout=3000)
             return
-    except Exception:
-        pass
+    except Exception as _e:
+        try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+        except Exception: pass  # noqa
     # Fallback JS
     try:
         await page.evaluate("""
@@ -793,8 +798,9 @@ async def _ativar_aba_digitacao(page: Page):
                 if (tab) tab.closest('li').click();
             }
         """)
-    except Exception:
-        pass
+    except Exception as _e:
+        try: log(f"  ⚠️  [evaluate] falhou silenciosamente: {_e}")
+        except Exception: pass  # noqa
     await page.wait_for_timeout(500)
 
 
@@ -899,8 +905,9 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
         # Fecha modal e recarrega para ver operação criada
         try:
             await page.keyboard.press("Escape")
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [press] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
         await page.reload()
         await page.wait_for_timeout(1500)
 

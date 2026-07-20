@@ -214,8 +214,9 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         # E-mail
         try:
             await page.fill('#e_mail', email_sacado)
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
         log(f"  [INFO] Popup preenchido — salvando cadastro de {nome_usar}")
 
@@ -255,8 +256,9 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         if cnpj_invalido:
             try:
                 await page.locator('button:has-text("Ok")').first.click()
-            except Exception:
-                pass
+            except Exception as _e:
+                try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+                except Exception: pass  # noqa
             raise Exception(
                 f"CNPJ {cnpj_limpo} rejeitado pela Firma como invalido — verifique os digitos verificadores"
             )
@@ -264,8 +266,9 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
         # Confirmação "Confirma salvar?"
         try:
             await page.locator('button:has-text("Sim")').first.click()
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
         try:
             await (
@@ -393,8 +396,9 @@ async def preencher_titulo(page: Page, fatura: dict, status: dict):
                     break
                 except Exception as e:
                     log(f"  [WARN] Falhou click 'Sim' no titulo {fatura['numero']}: {e}")
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [evaluate] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
     if not confirma_aceito:
         # Pode ser que o servidor salve sem confirmar (não apareceu o popup) — ok.
         # Se aparecer depois e não tratado, gera divergência detectada no _verificar_valor_operacao.
@@ -677,8 +681,9 @@ async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
 
         try:
             await page.keyboard.press("Escape")
-        except Exception:
-            pass
+        except Exception as _e:
+            try: log(f"  ⚠️  [press] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
         await page.reload()
         try:
             await page.wait_for_load_state("networkidle", timeout=10000)

@@ -415,8 +415,9 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
                 if not hasattr(context, '_last_download'):
                     context._last_download = {}
                 context._last_download[nome_relatorio] = dest
-            except Exception:
-                pass  # fallback para Meus Relatórios em _aguardar_e_baixar
+            except Exception as _e:
+                try: log(f"  ⚠️  [expect_download] falhou silenciosamente: {_e}")
+                except Exception: pass  # noqa
             try:
                 await popup.close()
             except Exception:

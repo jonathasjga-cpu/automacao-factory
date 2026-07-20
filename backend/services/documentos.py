@@ -695,8 +695,9 @@ async def baixar_faturas_pdf(
                             loc = page.locator(f'#{cb_id}')
                             if await loc.is_checked():
                                 await loc.uncheck()
-                        except Exception:
-                            pass
+                        except Exception as _e:
+                            try: log(f"  ⚠️  [locator] falhou silenciosamente: {_e}")
+                            except Exception: pass  # noqa
 
                     # Passo 2: marca os que pertencem a esta factory (referência fresca)
                     marcadas = 0
