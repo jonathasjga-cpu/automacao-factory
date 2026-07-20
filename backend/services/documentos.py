@@ -153,7 +153,8 @@ async def _login_gw(page: Page, user_id: int | None = None):
         await page.wait_for_load_state("networkidle", timeout=15000)
     except Exception:
         pass
-    await page.wait_for_timeout(1500)
+    # Reduzido de 1500 pra 300 — networkidle acima ja aguarda o essencial
+    await page.wait_for_timeout(300)
 
     # Reverifica após o /home (alguns redirecionamentos só acontecem nessa etapa)
     await _diagnosticar_pos_login(page)

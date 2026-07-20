@@ -73,7 +73,8 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
         except Exception:
             pass
-        await page.wait_for_timeout(2000)
+        # Reduzido de 2000 pra 500 — wait_for_url acima ja eh o criterio de sucesso do login
+        await page.wait_for_timeout(500)
         log(f"  GW — login OK")
 
         # ── Navega para Gerar Arquivo de Remessa ──────────────────────────────
@@ -83,7 +84,8 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             await page.wait_for_load_state("networkidle", timeout=10000)
         except Exception:
             pass
-        await page.wait_for_timeout(1000)
+        # Reduzido de 1000 pra 300 — networkidle+load ja cobrem
+        await page.wait_for_timeout(300)
 
         # ── Preenche filtros ──────────────────────────────────────────────────
         # Tipo de busca: Data de Emissão
@@ -140,7 +142,8 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             await page.wait_for_load_state("load", timeout=20000)
         except Exception:
             pass
-        await page.wait_for_timeout(1500)
+        # Reduzido de 1500 pra 500 — load acima ja aguardou o essencial
+        await page.wait_for_timeout(500)
 
         # ── Marca apenas as faturas selecionadas ──────────────────────────────
         # Tabela: col 0 = checkbox, col 1 = Fatura, col 2 = Nosso Número, ...
