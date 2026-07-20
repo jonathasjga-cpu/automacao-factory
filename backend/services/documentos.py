@@ -103,6 +103,25 @@ def _salvar_arquivo_seguro(status: dict, nome: str, dados: bytes, log) -> None:
             try: log(f"  ⚠️ Nao consegui salvar backup automatico: {e}")
             except Exception: pass
 
+async def _safe_goto(page: Page, url: str, *, wait_until: str = "load", timeout: int = 60000, tentativas: int = 3, log=None) -> None:
+    """page.goto com retry para timeouts transitorios do GW (rede intermitente).
+    Cada tentativa espera timeout ms; entre tentativas espera 2s.
+    """
+    ultimo_erro = None
+    for tentativa in range(1, tentativas + 1):
+        try:
+            await page.goto(url, wait_until=wait_until, timeout=timeout)
+            return
+        except Exception as e:
+            ultimo_erro = e
+            if log:
+                try: log(f"  ⚠️ goto '{url[:80]}...' falhou (tentativa {tentativa}/{tentativas}): {str(e)[:100]}")
+                except Exception: pass
+            if tentativa < tentativas:
+                await asyncio.sleep(2)
+    raise ultimo_erro if ultimo_erro else Exception("goto falhou")
+
+
 _FILIAL_ID = {
     "firma_matriz": "1", "firma_sp": "2",
     "fluxasset_matriz": "1", "fluxasset_sp": "2",
@@ -622,34 +641,61 @@ async def baixar_faturas_pdf(
                 nome_factory = _nome_factory(sistema)
                 numeros_raw = {f["numero"].split("/")[0].strip() for f in faturas}
                 numeros_norm = {_normalizar(n) for n in numeros_raw}
-                filial_id = _FILIAL_ID.get(sistema, "1")
                 rd = resumo_docs.setdefault(sistema, {"nome": nome_factory, "fatura_pdf": None, "ctes": []})
 
                 log(f"📄 Fatura PDF — {nome_factory} ({len(numeros_raw)} fatura(s))...")
                 log(f"  🔎 Faturas: {sorted(numeros_raw)}")
 
+                # Detecta filiais reais das faturas — se houver "outras" (nem MATRIZ nem SP),
+                # desliga o filtro de filial no GW e filtra localmente pelos numeros.
+                # Isso evita "fatura nao retornou na busca" quando o usuario atribuiu a factory
+                # errada (ex: gc_matriz mas fatura esta em Filial CE).
+                filiais_reais = {str(f.get("filial") or "").strip().upper() for f in faturas if str(f.get("filial") or "").strip()}
+                filiais_conhecidas = {x for x in filiais_reais if x == "MATRIZ" or "SP" in x}
+                tem_filial_outra = bool(filiais_reais and (filiais_reais - filiais_conhecidas))
+                if tem_filial_outra:
+                    log(f"  ℹ️  Filiais detectadas: {sorted(filiais_reais)} — busca SEM filtro de filial (filtragem local por numero).")
+                    filial_id = None
+                else:
+                    filial_id = _FILIAL_ID.get(sistema, "1")
+
                 try:
                     # Submete o formulário para garantir que o GW atualize a sessão corretamente.
                     # Navegação direta para acao=consultar é ignorada — GW usa estado da sessão.
                     data_ini_busca, data_fim_busca = _range_emissao_das_faturas(faturas)
-                    filial_id = _FILIAL_ID.get(sistema, "1")
 
-                    await page.goto(
+                    await _safe_goto(
+                        page,
                         f"{BASE_GW}/consultafatura?acao=iniciar",
-                        wait_until="domcontentloaded", timeout=30000
+                        wait_until="domcontentloaded", timeout=30000, log=log,
                     )
                     await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
 
                     titulo = await page.title()
-                    log(f"  Pagina: {titulo} | filialId={filial_id} | range={data_ini_busca} → {data_fim_busca}")
+                    log(f"  Pagina: {titulo} | filialId={filial_id or 'Todas'} | range={data_ini_busca} → {data_fim_busca}")
                     if "500" in titulo or "status 500" in titulo.lower():
                         raise Exception("GW retornou 500 na tela de faturas.")
 
                     await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
                     await page.fill('input[name="dtemissao1"]', data_ini_busca)
                     await page.fill('input[name="dtemissao2"]', data_fim_busca)
-                    # Usa value numérico (não label) para evitar erro de texto exato
-                    await page.select_option('select[name="filialId"]', value=filial_id)
+                    # Filial: usa value numerico quando conhecido; senao seleciona "Todas"
+                    # (option com texto "Todas" ou selectedIndex=0), pra pegar faturas
+                    # de filiais fora do mapeamento MATRIZ/SP.
+                    if filial_id:
+                        await page.select_option('select[name="filialId"]', value=filial_id)
+                    else:
+                        try:
+                            await page.select_option('select[name="filialId"]', label="Todas")
+                        except Exception:
+                            # Fallback via JS: acha option "todas" no texto ou usa selectedIndex=0
+                            await page.evaluate("""() => {
+                                const sel = document.querySelector('select[name="filialId"]');
+                                if (!sel) return;
+                                const todas = [...sel.options].find(o => /todas/i.test(o.text));
+                                sel.value = todas ? todas.value : (sel.options[0] && sel.options[0].value) || '';
+                                sel.dispatchEvent(new Event('change', {bubbles:true}));
+                            }""")
                     await page.select_option('select[name="finalizada"]', label="Todas")
                     await page.select_option('select[name="limiteResultados"]', value="200")
 
@@ -1048,11 +1094,14 @@ async def baixar_ctes_pdf(
                     log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
 
                     try:
-                        # 1. Navega para CT-e — load é mais estável que networkidle no GW
-                        await page.goto(
+                        # 1. Navega para CT-e — load é mais estável que networkidle no GW.
+                        # _safe_goto faz retry em timeouts transitorios do GW (rede/carga do servidor).
+                        await _safe_goto(
+                            page,
                             f"{BASE_GW}/CTeControlador?acao=listar&&tipoTransporte=false",
                             wait_until="load",
                             timeout=60000,
+                            log=log,
                         )
                         try:
                             await page.locator("#pesquisar").wait_for(state="visible", timeout=30000)
