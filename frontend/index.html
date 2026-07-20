@@ -179,20 +179,20 @@
 
   /* ─── TOOLBAR ────────────────────────────────────────── */
   /* ── Modal de periodo ── */
+  /* IMPORTANTE: NAO usar backdrop-filter: blur() aqui.
+     Blur causa freeze de 30+s do renderer em Chrome/Windows quando combinado
+     com display:flex + animation. Trocamos por overlay preto opaco simples.
+     Testado: sem blur, modal abre instantaneo. */
   .modal-overlay {
     position: fixed; inset: 0;
-    background: rgba(7, 12, 21, 0.7);
-    backdrop-filter: blur(3px);
+    background: rgba(7, 12, 21, 0.85);
     z-index: 9000;
     display: none;
     align-items: center;
     justify-content: center;
     padding: 16px;
-    animation: modalFadeIn .15s ease both;
   }
   .modal-overlay.is-open { display: flex; }
-  @keyframes modalFadeIn { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes modalSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   .modal-card {
     background: var(--surface);
     border: 1px solid var(--border2);
@@ -201,7 +201,6 @@
     width: 100%;
     max-width: 380px;
     overflow: hidden;
-    animation: modalSlideIn .2s ease both;
   }
   .modal-header {
     display: flex;
@@ -359,6 +358,8 @@
 
   .badge-matriz  { background: var(--blue-s);   color: var(--accent); }
   .badge-sp      { background: #EDE9FE;          color: #7C3AED; }
+  /* Fallback pra filiais diferentes de SP/Matriz (CE, PE, etc). */
+  .badge-filial-outra { background: rgba(148,163,184,0.15); color: #94A3B8; }
   .badge-normal  { background: var(--green-s);   color: var(--green); }
   .badge-descontada { background: var(--yellow-s); color: var(--yellow); }
 
@@ -1646,7 +1647,7 @@ function renderFaturas() {
     });
   }
 
-  badge.textContent = `${faturas.length} fatura(s)${filtroFilial ? ` — ${faturasFiltradas.length} filtrada(s)` : ''}`;
+  badge.textContent = `${faturas.length} fatura(s)${filtroFilial ? ` — ${faturasFiltradas.length} visível(is)` : ''}`;
 
   if (!faturasFiltradas.length) {
     container.innerHTML = '<div class="empty-state"><span class="icon">🔍</span><h3>Nenhuma fatura para essa filial</h3></div>';
@@ -1655,9 +1656,14 @@ function renderFaturas() {
 
   const rows = faturasFiltradas.map((f, i) => {
     const i_real = faturas.indexOf(f);
-    const filialBadge = f.filial?.includes('SP')
-      ? `<span class="badge badge-sp">Filial SP</span>`
-      : `<span class="badge badge-matriz">Matriz</span>`;
+    // Badge de filial mostra o NOME REAL da filial (nao mais binario SP/Matriz).
+    // Cores: SP=roxo, MATRIZ=azul, outras=cinza generica.
+    const filialRaw = String(f.filial || '').trim();
+    const filialClasse = filialRaw.toUpperCase().includes('SP')
+      ? 'badge-sp'
+      : (filialRaw.toUpperCase().includes('MATRIZ') ? 'badge-matriz' : 'badge-filial-outra');
+    const filialTexto = filialRaw || '—';
+    const filialBadge = `<span class="badge ${filialClasse}">${filialTexto}</span>`;
 
     const sitBadge = f.situacao === 'Normal'
       ? `<span class="badge badge-normal">Normal</span>`
@@ -1746,7 +1752,7 @@ function atualizarContador() {
   const selecionadas = document.querySelectorAll('[id^="chk-"]:checked').length;
   const filtro = document.getElementById('filtro-filial')?.value || '';
   const visiveis = document.querySelectorAll('[id^="chk-"]').length;
-  const label = filtro ? `${faturas.length} fatura(s) — ${visiveis} filtrada(s)` : `${faturas.length} fatura(s)`;
+  const label = filtro ? `${faturas.length} fatura(s) — ${visiveis} visível(is)` : `${faturas.length} fatura(s)`;
   document.getElementById('count-badge').textContent =
     selecionadas > 0 ? `${label} — ${selecionadas} selecionada(s)` : label;
   const btnExcluir = document.getElementById('btn-excluir');
