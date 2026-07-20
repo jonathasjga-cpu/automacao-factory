@@ -65,6 +65,44 @@ def _normalizar(num: str) -> str:
     """Remove zeros à esquerda: '005028' → '5028'"""
     return str(num).lstrip("0") or "0"
 
+
+def _salvar_arquivo_seguro(status: dict, nome: str, dados: bytes, log) -> None:
+    """Salva o arquivo em 3 lugares (redundancia contra crash mid-flow):
+    1. status["arquivos"][nome] — memoria (usado pelo /api/download)
+    2. status["pasta_destino"]/nome — pasta escolhida pelo usuario (se definida)
+    3. ~/.automacao_factory/arquivos_recentes/{op_id}/nome — backup automatico
+
+    Se qualquer um falhar, os outros continuam. Assim se der crash no meio da
+    operacao, os PDFs ja baixados NAO se perdem.
+    """
+    if not dados:
+        return
+
+    # 1. Memoria
+    status.setdefault("arquivos", {})[nome] = dados
+
+    # 2. Pasta destino do usuario
+    pasta = status.get("pasta_destino", "")
+    if pasta:
+        try:
+            Path(pasta).mkdir(parents=True, exist_ok=True)
+            (Path(pasta) / nome).write_bytes(dados)
+        except Exception as e:
+            try: log(f"  ⚠️ Nao consegui salvar em pasta_destino: {e}")
+            except Exception: pass
+
+    # 3. Backup automatico em arquivos_recentes/{op_id}/
+    op_id = status.get("op_id") or status.get("id") or ""
+    if op_id:
+        try:
+            from arquivos_recentes import ROOT as BKP_ROOT
+            pasta_bkp = BKP_ROOT / str(op_id)
+            pasta_bkp.mkdir(parents=True, exist_ok=True)
+            (pasta_bkp / nome).write_bytes(dados)
+        except Exception as e:
+            try: log(f"  ⚠️ Nao consegui salvar backup automatico: {e}")
+            except Exception: pass
+
 _FILIAL_ID = {
     "firma_matriz": "1", "firma_sp": "2",
     "fluxasset_matriz": "1", "fluxasset_sp": "2",
@@ -917,27 +955,18 @@ async def baixar_faturas_pdf(
                         continue
 
                     # ── Salva o PDF AGRUPADO (todas as faturas em um arquivo) ──
+                    # IMPORTANTE: salva IMEDIATAMENTE em memoria + pasta + backup.
+                    # Se algo travar depois (separacao, CT-es), o PDF ja esta seguro.
                     nome_arquivo = f"Fatura - {nome_factory} - {_hoje_fmt()}.pdf"
-                    status.setdefault("arquivos", {})[nome_arquivo] = pdf_bytes
-                    pasta = status.get("pasta_destino", "")
-                    if pasta:
-                        Path(pasta).mkdir(parents=True, exist_ok=True)
-                        (Path(pasta) / nome_arquivo).write_bytes(pdf_bytes)
-                        log(f"  ✅ Salvo em disco: {pasta}\\{nome_arquivo}")
-                    else:
-                        log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
+                    _salvar_arquivo_seguro(status, nome_arquivo, pdf_bytes, log)
+                    log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
 
                     # ── Separa o PDF agrupado em PDFs INDIVIDUAIS por fatura ──
                     pdfs_individuais = _separar_pdf_por_fatura(pdf_bytes, nums_marcados, log)
                     individuais_salvos: list[str] = []
                     for num, pdf_ind in pdfs_individuais.items():
                         nome_ind = f"Fatura - {num}.pdf"
-                        status.setdefault("arquivos", {})[nome_ind] = pdf_ind
-                        if pasta:
-                            try:
-                                (Path(pasta) / nome_ind).write_bytes(pdf_ind)
-                            except Exception as e:
-                                log(f"  ⚠️ Erro salvando {nome_ind} em disco: {e}")
+                        _salvar_arquivo_seguro(status, nome_ind, pdf_ind, log)
                         individuais_salvos.append(nome_ind)
                     if individuais_salvos:
                         log(f"  ✅ {len(individuais_salvos)} PDF(s) individual(is) salvos: {individuais_salvos[:3]}{' ...' if len(individuais_salvos) > 3 else ''}")
@@ -1330,14 +1359,9 @@ async def baixar_ctes_pdf(
                         for nome_pdf, dados_pdf in pdfs_desta_factory:
                             zf.writestr(nome_pdf, dados_pdf)
                     zip_bytes = buf.getvalue()
-                    status.setdefault("arquivos", {})[nome_zip] = zip_bytes
+                    # Salva em memoria + pasta destino + backup automatico (redundancia)
+                    _salvar_arquivo_seguro(status, nome_zip, zip_bytes, log)
                     log(f"  📦 ZIP: {nome_zip} ({len(pdfs_desta_factory)} CT-e(s))")
-
-                    pasta = status.get("pasta_destino", "")
-                    if pasta:
-                        Path(pasta).mkdir(parents=True, exist_ok=True)
-                        (Path(pasta) / nome_zip).write_bytes(zip_bytes)
-                        log(f"  📁 ZIP salvo em disco: {pasta}\\{nome_zip}")
 
                     rd["zip"] = {"ok": True, "arquivo": nome_zip, "qtd": len(pdfs_desta_factory)}
                 else:

@@ -249,6 +249,7 @@ async def executar(req: ExecutarRequest, background_tasks: BackgroundTasks,
             faturas_por_factory.setdefault(f.factory, []).append(fatura_completa)
 
     status_operacoes[op_id] = {
+        "op_id": op_id,  # usado por _salvar_arquivo_seguro pra backup automatico em disco
         "status": "iniciando",
         "total": len([f for f in req.faturas if f.factory != "ignorar"]),
         "concluidas": 0,
