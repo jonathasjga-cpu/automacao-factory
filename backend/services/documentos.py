@@ -1006,7 +1006,15 @@ async def baixar_ctes_pdf(
                     numero_busca = numero.split("/")[0].strip().zfill(6)
                     emissao = fatura.get("emissao", "")
                     ano_busca = emissao.split("/")[-1] if emissao and "/" in emissao else _ano_atual()
-                    filial_label = "MATRIZ" if "matriz" in sistema else "Filial SP"
+                    # Filial: preferimos o valor REAL da fatura (vindo do Excel/API do GW).
+                    # Se nao vier, cai no mapeamento _FILIAL_CTE por sistema como fallback.
+                    # Cuidado: hardcode "SP se nao matriz" era bug — quebrava pra Filial CE/PE.
+                    filial_real = str(fatura.get("filial") or "").strip()
+                    if filial_real:
+                        # Ex: "MATRIZ", "Filial SP", "Filial CE" — usar como veio no cadastro
+                        filial_label = filial_real
+                    else:
+                        filial_label = _FILIAL_CTE.get(sistema, "MATRIZ")
 
                     log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
 

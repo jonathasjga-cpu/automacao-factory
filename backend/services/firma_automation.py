@@ -81,18 +81,31 @@ async def buscar_dados_cnpj(cnpj: str) -> dict:
     return {}
 
 async def fazer_login_firma(page: Page, sistema: str):
+    """Login com retry (ate 3 tentativas) — cobre blip de rede ou timeout do servidor Firma."""
     creds = get_credencial(sistema)
-    await page.goto(f"{FIRMA_URL}/login")
-    await page.wait_for_load_state("networkidle")
-    await page.fill('input[placeholder*="uario"], input[name*="user"], input[type="text"]', creds["usuario"])
-    await page.fill('input[type="password"]', creds["senha"])
-    await page.click('button:has-text("Entrar"), button[type="submit"]')
-    # Aguarda redirect para fora do login — sai tão logo a URL muda
-    try:
-        await page.wait_for_url(lambda url: "login" not in url.lower(), timeout=15000)
-    except Exception:
-        pass
-    await page.wait_for_load_state("networkidle", timeout=10000)
+    last_exc = None
+    for tentativa in range(1, 4):
+        try:
+            await page.goto(f"{FIRMA_URL}/login", timeout=60000)
+            await page.wait_for_load_state("networkidle", timeout=20000)
+            await page.fill('input[placeholder*="uario"], input[name*="user"], input[type="text"]', creds["usuario"])
+            await page.fill('input[type="password"]', creds["senha"])
+            await page.click('button:has-text("Entrar"), button[type="submit"]')
+            # Aguarda redirect para fora do login — sai tão logo a URL muda
+            try:
+                await page.wait_for_url(lambda url: "login" not in url.lower(), timeout=15000)
+            except Exception:
+                pass
+            # Verifica que saiu da tela de login
+            if "login" in page.url.lower():
+                raise Exception(f"Login Firma falhou (URL ainda contem 'login'): {page.url}")
+            await page.wait_for_load_state("networkidle", timeout=10000)
+            return  # sucesso
+        except Exception as e:
+            last_exc = e
+            if tentativa < 3:
+                await page.wait_for_timeout(2000 * tentativa)  # backoff 2s, 4s
+    raise Exception(f"Login Firma falhou apos 3 tentativas: {last_exc}")
 
 async def navegar_para_digitacao(page: Page):
     await page.evaluate(
@@ -110,12 +123,18 @@ async def aguardar_lookup_sacado(page: Page, cnpj_limpo: str) -> bool:
 
     IMPORTANTE: não confiar em #saca_id.value porque nós mesmos acabamos
     de preencher esse campo — ele sempre teria o valor que digitamos.
+
+    Timeout total = 500ms (min) + 20*100ms (poll) = 2.5s. Se o servidor da
+    Firma demorar mais que isso, provavelmente esta com problema — cai no
+    fallback e o proximo CNPJ tenta de novo.
     """
     # Aguarda mínimo para o servidor processar (sem esse wait, a checagem
-    # do saca_id retornava True imediatamente antes do popup abrir)
-    await page.wait_for_timeout(800)
+    # do saca_id retornava True imediatamente antes do popup abrir).
+    # Reduzido de 800ms → 500ms — margem suficiente pro post-response.
+    await page.wait_for_timeout(500)
 
-    for _ in range(45):
+    # Reduzido de 45 iteracoes (4.5s) para 20 (2s) — servidor responde <1s no caso feliz.
+    for _ in range(20):
         await page.wait_for_timeout(100)
 
         # Popup aberto = sacado não cadastrado
