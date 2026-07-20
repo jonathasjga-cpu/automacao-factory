@@ -857,8 +857,7 @@
       <button class="btn btn-ghost" onclick="selecionarTodas()">Selecionar Todas</button>
       <select id="filtro-filial" onchange="renderFaturas()" style="height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;width:auto;flex-shrink:0;">
         <option value="">Todas as filiais</option>
-        <option value="matriz">Matriz</option>
-        <option value="sp">Filial SP</option>
+        <!-- opcoes de filial sao populadas dinamicamente por _populaFiltroFiliais() -->
       </select>
       <button class="btn btn-danger" id="btn-excluir" onclick="excluirSelecionadas()" disabled>
         <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
@@ -1556,6 +1555,45 @@ async function carregarFaturas(dataInicial, dataFinal) {
   }
 }
 
+// Normaliza nome de filial: sem acento, sem espacos extras, lowercase.
+// Ex: "  Filial SP  " -> "filial sp", "MATRIZ" -> "matriz", "Filial CE" -> "filial ce"
+function _normFilial(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Popula o dropdown #filtro-filial com todas as filiais unicas encontradas
+// nas faturas carregadas. Preserva a selecao atual se ainda for valida.
+function _populaFiltroFiliais() {
+  const sel = document.getElementById('filtro-filial');
+  if (!sel) return;
+  const atual = sel.value;
+  // Coleta filiais unicas (mantendo o texto original pra display)
+  const map = new Map();  // norm -> { display, count }
+  for (const f of (faturas || [])) {
+    const raw = String(f.filial || '').trim();
+    if (!raw) continue;
+    const n = _normFilial(raw);
+    if (!map.has(n)) map.set(n, { display: raw, count: 0 });
+    map.get(n).count++;
+  }
+  // Ordena alfabeticamente pelo display
+  const ordenadas = [...map.entries()].sort((a, b) => a[1].display.localeCompare(b[1].display, 'pt-BR'));
+  // Reconstroi options (mantendo a primeira "Todas as filiais")
+  const options = ['<option value="">Todas as filiais</option>'];
+  for (const [norm, info] of ordenadas) {
+    options.push(`<option value="${norm}">${info.display} (${info.count})</option>`);
+  }
+  sel.innerHTML = options.join('');
+  // Restaura selecao anterior se ainda existir
+  if (atual && [...sel.options].some(o => o.value === atual)) {
+    sel.value = atual;
+  }
+}
+
 function renderFaturas() {
   const container = document.getElementById('faturas-container');
   const badge     = document.getElementById('count-badge');
@@ -1572,13 +1610,15 @@ function renderFaturas() {
     return;
   }
 
+  // Popula o dropdown de filiais com as que aparecem nas faturas carregadas.
+  // Preserva a selecao atual do usuario (se ela ainda existir nas faturas).
+  _populaFiltroFiliais();
+
   const filtroFilial = document.getElementById('filtro-filial')?.value || '';
+  const filtroFilialNorm = _normFilial(filtroFilial);
   const faturasFiltradas = faturas.filter((f, i) => {
     if (!filtroFilial) return true;
-    const isSP = f.filial?.includes('SP');
-    if (filtroFilial === 'sp') return isSP;
-    if (filtroFilial === 'matriz') return !isSP;
-    return true;
+    return _normFilial(f.filial) === filtroFilialNorm;
   });
 
   // Ordenação por coluna clicada
@@ -1735,13 +1775,10 @@ async function cancelarAutomacao() {
 
 function _coletarSelecionadas() {
   const filtroFilial = document.getElementById('filtro-filial')?.value || '';
+  const filtroFilialNorm = _normFilial(filtroFilial);
   const selecionadas = [];
   faturas.forEach((f, i) => {
-    if (filtroFilial) {
-      const isSP = f.filial?.includes('SP');
-      if (filtroFilial === 'sp' && !isSP) return;
-      if (filtroFilial === 'matriz' && isSP) return;
-    }
+    if (filtroFilial && _normFilial(f.filial) !== filtroFilialNorm) return;
     const chk    = document.getElementById(`chk-${i}`);
     const factory = document.getElementById(`factory-${i}`);
     if (chk?.checked) selecionadas.push({ numero: f.numero, factory: factory?.value || f.factory_sugerida || 'ignorar' });
