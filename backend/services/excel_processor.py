@@ -569,47 +569,103 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
                     break
             break
 
-    # Captura URL do S3 via route interception e baixa com httpx
-    links = await linha_alvo.query_selector_all("a")
-    for link in links:
-        link_txt = await link.inner_text()
-        if "excel" in link_txt.lower() or "baixar" in link_txt.lower():
-            s3_url_holder = {}
-            dl_ready = asyncio.Event()
+    # Captura URL do S3 via route interception e baixa com httpx.
+    # Busca botao "Baixar Excel" tentando varias heuristicas: o GW altera o
+    # layout de tempos em tempos — as vezes eh <a> com texto, as vezes eh so
+    # icone com title/alt/aria-label. Coletamos <a> e <button> e testamos:
+    # 1) texto visivel   2) title/alt/aria-label   3) href/onclick   4) imagem interna
+    candidatos = await linha_alvo.query_selector_all("a, button")
+    link_alvo = None
+    for el in candidatos:
+        try:
+            txt = (await el.inner_text() or "").lower()
+        except Exception:
+            txt = ""
+        try:
+            outer = (await el.evaluate("e => e.outerHTML")) or ""
+        except Exception:
+            outer = ""
+        outer_l = outer.lower()
 
-            async def route_handler(route, request=None):
-                u = route.request.url
-                if ("s3.amazonaws.com" in u or "s3.us-east" in u) and not dl_ready.is_set():
-                    s3_url_holder["url"] = u
-                    dl_ready.set()
-                try:
-                    await route.continue_()
-                except Exception:
-                    pass
+        # 1) Texto visivel
+        if "excel" in txt or "baixar" in txt or "download" in txt:
+            link_alvo = el
+            break
+        # 2/3/4) title / alt / aria-label / href / img src / onclick
+        if any(k in outer_l for k in ("excel", "xlsx", "baixar", "download", "arquivo=")):
+            link_alvo = el
+            break
 
-            await context.route("**/*", route_handler)
-            await link.click()
-            try:
-                await asyncio.wait_for(dl_ready.wait(), timeout=30)
-            finally:
-                await context.unroute("**/*", route_handler)
+    if not link_alvo:
+        # Debug: dump da linha inteira pra ajudar diagnostico
+        try:
+            html_linha = await linha_alvo.evaluate("e => e.outerHTML")
+        except Exception:
+            html_linha = "(nao capturado)"
+        raise Exception(
+            f"Botao 'Baixar Excel' nao encontrado para o relatorio '{nome}'. "
+            f"Layout do GW pode ter mudado. HTML da linha: {html_linha[:800]}"
+        )
 
-            if "url" in s3_url_holder:
-                async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
-                    resp = await client.get(s3_url_holder["url"])
-                caminho.write_bytes(resp.content)
+    s3_url_holder = {}
+    dl_ready = asyncio.Event()
 
-                if _is_valid_excel(caminho):
-                    return caminho
-                else:
-                    caminho.unlink(missing_ok=True)
-                    raise Exception(
-                        f"Download do relatÃ³rio '{nome}' retornou arquivo invÃ¡lido. "
-                        f"Acesse o GW, clique em 'Gerar' no relatÃ³rio '{nome}' e tente importar novamente."
-                    )
-            raise Exception(f"URL S3 nÃ£o capturada para '{nome}'")
+    async def route_handler(route, request=None):
+        u = route.request.url
+        if ("s3.amazonaws.com" in u or "s3.us-east" in u) and not dl_ready.is_set():
+            s3_url_holder["url"] = u
+            dl_ready.set()
+        try:
+            await route.continue_()
+        except Exception:
+            pass
 
-    raise Exception(f"BotÃ£o 'Baixar Excel' nÃ£o encontrado para o relatÃ³rio '{nome}'.")
+    await context.route("**/*", route_handler)
+    # Fallback tambem via evento de download nativo do Playwright caso o
+    # botao dispare download direto (sem passar por S3 redirect).
+    dl_event = None
+    try:
+        async with page.expect_download(timeout=1) as _ignore:
+            pass
+    except Exception:
+        pass
+    try:
+        async with page.expect_download(timeout=30_000) as dl_info:
+            await link_alvo.click()
+        dl_event = await dl_info.value
+    except Exception:
+        # Se nao virou download direto, mantemos o click e esperamos rota S3
+        try:
+            await link_alvo.click()
+        except Exception:
+            pass
+    try:
+        await asyncio.wait_for(dl_ready.wait(), timeout=30)
+    except Exception:
+        pass
+    finally:
+        try:
+            await context.unroute("**/*", route_handler)
+        except Exception:
+            pass
+
+    if "url" in s3_url_holder:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client:
+            resp = await client.get(s3_url_holder["url"])
+        caminho.write_bytes(resp.content)
+    elif dl_event is not None:
+        await dl_event.save_as(str(caminho))
+    else:
+        raise Exception(f"URL S3 nao capturada e download nativo nao disparou para '{nome}'")
+
+    if _is_valid_excel(caminho):
+        return caminho
+    else:
+        caminho.unlink(missing_ok=True)
+        raise Exception(
+            f"Download do relatorio '{nome}' retornou arquivo invalido. "
+            f"Acesse o GW, clique em 'Gerar' no relatorio '{nome}' e tente importar novamente."
+        )
 
 def _fmt_data(val) -> str:
     """Formata data para DD/MM/AAAA â€" aceita Timestamp ou serial Excel"""
