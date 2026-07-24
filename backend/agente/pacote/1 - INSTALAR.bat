@@ -34,7 +34,14 @@ echo       NAO clique dentro desta janela enquanto instala (o Windows pausa o pr
 "%PYEXE%" -m pip install --upgrade playwright pandas openpyxl httpx certifi
 if errorlevel 1 (
   echo.
-  echo [X] Falha ao instalar as dependencias. Verifique a internet e rode de novo.
+  echo [X] Falha ao instalar as dependencias.
+  echo     Causas possiveis:
+  echo       1. Sem internet — verifique conexao.
+  echo       2. O "python" no PATH e o stub da Microsoft Store (nao instala nada).
+  echo          Vá em: Configuracoes ^> Aplicativos ^> Configuracoes avancadas de app
+  echo                 ^> Aliases de execucao do aplicativo, e DESLIGUE python.exe e python3.exe.
+  echo          Depois rode este .bat de novo.
+  echo       3. Antivirus bloqueando o pip.
   pause & exit /b
 )
 echo.
@@ -56,9 +63,17 @@ pause
 exit /b
 
 :detectpy
-rem procura um Python REAL (evita o "py" da Store que abre assistente e trava)
+rem Procura um Python REAL. Evita o stub da Microsoft Store — ele existe
+rem no PATH mas quando chamado imprime "Python no foi encontrado" e nao
+rem instala nada. Detectamos isso rodando `python -c "print(1)"` e vendo
+rem se realmente executa.
 set "PYEXE="
-where python >nul 2>&1 && set "PYEXE=python"
+where python >nul 2>&1
+if %errorlevel%==0 (
+  python -c "import sys; sys.exit(0)" >nul 2>&1
+  if not errorlevel 1 set "PYEXE=python"
+)
 if not defined PYEXE ( for /d %%D in ("%LocalAppData%\Programs\Python\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
 if not defined PYEXE ( for /d %%D in ("C:\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
+if not defined PYEXE ( for /d %%D in ("%ProgramFiles%\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
 exit /b
