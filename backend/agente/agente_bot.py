@@ -88,6 +88,8 @@ def _erro_indica_chrome_travado(erro: str | None, resultado: dict | None) -> boo
     padroes = [
         "connect_over_cdp: timeout",
         "connect_over_cdp: read econnreset",
+        "connect_over_cdp: connect econnrefused",  # Chrome fechado
+        "econnrefused",
         "nao foi possivel conectar ao chrome",
         "target page, context or browser has been closed",
         "browsertype.connect_over_cdp: timeout",
