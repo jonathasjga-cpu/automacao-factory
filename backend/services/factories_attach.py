@@ -39,9 +39,18 @@ def _sistema_para_url(sistema: str) -> str:
 
 
 async def _login_gw_se_precisar(page, base_gw: str, status: dict) -> None:
-    """Loga no GW se a aba estiver em /login. Usa credenciais do config_manager."""
+    """Loga no GW se a aba estiver em /login OU se responder 401 (sessao expirada)."""
     url_atual = (page.url or "").lower()
-    if "login" not in url_atual:
+    precisa_login = "login" in url_atual
+    # Se URL parece OK, verifica se a pagina tem 401 no title/body (sessao expirou)
+    if not precisa_login:
+        try:
+            titulo = (await page.title() or "").lower()
+            if "401" in titulo or "not authorized" in titulo or "acesso negado" in titulo:
+                precisa_login = True
+        except Exception:
+            pass
+    if not precisa_login:
         return
     log = lambda msg: status.setdefault("logs", []).append(msg)
     try:

@@ -44,7 +44,15 @@ async def _garantir_logado(page, report=None, base_gw: str = BASE_GW_DEFAULT, st
     except Exception:
         pass
     url = (page.url or "").lower()
-    if "login" in url:
+    precisa_login = "login" in url
+    if not precisa_login:
+        try:
+            titulo = (await page.title() or "").lower()
+            if "401" in titulo or "not authorized" in titulo or "acesso negado" in titulo:
+                precisa_login = True
+        except Exception:
+            pass
+    if precisa_login:
         # Tenta login automatico usando credenciais salvas
         try:
             from config_manager import get_credencial
