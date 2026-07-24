@@ -26,6 +26,9 @@ from auth import get_current_user, require_admin
 from routers_auth import router as auth_router
 from arquivos_recentes import salvar_pacote, listar_pacotes, ler_pacote, limpar_todos
 from fastapi import Depends
+from agente.routers import router as agente_router
+from agente.download import router as agente_download_router
+from agente.token import is_agente_ativo
 
 MSG_FINALIZAR_MANUAL = (
     "Ótimo! Todos os títulos foram digitados com sucesso. "
@@ -47,6 +50,12 @@ init_db()
 
 # Monta rotas de autenticação e usuários (rotas públicas: /api/auth/login)
 app.include_router(auth_router)
+
+# Rotas do Agente Local (fila, ping, resultado, download do zip).
+# Sempre montadas — inofensivas quando AGENTE_ATIVO=0; o frontend so as usa
+# quando a flag esta ligada (via /api/config).
+app.include_router(agente_router)
+app.include_router(agente_download_router)
 
 status_operacoes: dict = {}
 
@@ -81,6 +90,14 @@ class FactoryExtraRequest(BaseModel):
     senha: Optional[str] = ""
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/api/config", dependencies=[Depends(get_current_user)])
+def get_config():
+    """Config publica pro frontend — indica se features opcionais estao ligadas."""
+    return {
+        "agente_ativo": is_agente_ativo(),
+    }
+
 
 @app.get("/api/selecionar-pasta", dependencies=[Depends(get_current_user)])
 def selecionar_pasta():

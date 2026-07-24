@@ -801,6 +801,10 @@
     AutoFactory
   </div>
   <div id="user-box" style="margin-left:auto;display:none;align-items:center;gap:10px;color:var(--text2);font-size:13px">
+    <div id="agente-badge" style="display:none;align-items:center;gap:6px;padding:5px 10px;border-radius:999px;border:1px solid var(--border2);background:var(--surface2);cursor:pointer;font-size:12px;user-select:none" onclick="abrirModalAgente()" title="Agente Local — clique para gerenciar">
+      <span id="agente-dot" style="width:8px;height:8px;border-radius:999px;background:#64748B;box-shadow:0 0 0 3px rgba(100,116,139,.15)"></span>
+      <span id="agente-txt">Agente</span>
+    </div>
     <span id="user-label"></span>
     <button class="btn btn-ghost" style="font-size:12px;padding:6px 12px" onclick="fazerLogout()">Sair</button>
   </div>
@@ -1106,11 +1110,120 @@ async function _bootstrapAuth() {
     _authUser = u;
     localStorage.setItem('auth_user', JSON.stringify(u));
     esconderLogin();
+    _bootstrapAgente();  // após login, checa se modo agente está ativo
   } catch (_) {
     fazerLogout();
   }
 }
 document.addEventListener('DOMContentLoaded', _bootstrapAuth);
+
+// ─── AGENTE LOCAL (modo opcional, atrás da flag AGENTE_ATIVO) ─────
+window.AGENTE_ATIVO = false;
+window.AGENTE_ONLINE = false;
+let _agentePollId = null;
+
+async function _bootstrapAgente() {
+  try {
+    const r = await fetch(`${API}/config`);
+    if (!r.ok) return;
+    const cfg = await r.json();
+    window.AGENTE_ATIVO = !!cfg.agente_ativo;
+    if (window.AGENTE_ATIVO) {
+      document.getElementById('agente-badge').style.display = 'inline-flex';
+      _pingAgente();
+      if (_agentePollId) clearInterval(_agentePollId);
+      _agentePollId = setInterval(_pingAgente, 10000);
+    }
+  } catch (_) { /* ignora */ }
+}
+
+async function _pingAgente() {
+  try {
+    const r = await fetch(`${API}/agente/online`);
+    if (!r.ok) throw 0;
+    const j = await r.json();
+    window.AGENTE_ONLINE = !!j.online;
+  } catch (_) {
+    window.AGENTE_ONLINE = false;
+  }
+  const dot = document.getElementById('agente-dot');
+  const txt = document.getElementById('agente-txt');
+  if (window.AGENTE_ONLINE) {
+    dot.style.background = 'var(--green, #10B981)';
+    dot.style.boxShadow = '0 0 0 3px rgba(16,185,129,.18)';
+    txt.textContent = 'Agente online';
+  } else {
+    dot.style.background = '#64748B';
+    dot.style.boxShadow = '0 0 0 3px rgba(100,116,139,.15)';
+    txt.textContent = 'Agente offline';
+  }
+}
+
+async function abrirModalAgente() {
+  const online = window.AGENTE_ONLINE ? 'online' : 'offline';
+  const msg = `Agente Local está ${online}.\n\n` +
+    `Baixar o pacote do agente para instalar em uma máquina?\n` +
+    `(gera .zip com config e credenciais já embutidas)`;
+  if (!confirm(msg)) return;
+  try {
+    // /agente/download exige Authorization — chamamos com token manualmente
+    const resp = await _origFetch(`/agente/download`, {
+      headers: { 'Authorization': `Bearer ${_authToken}` }
+    });
+    if (!resp.ok) {
+      alert(`Falha ao baixar pacote (HTTP ${resp.status}).`);
+      return;
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'AutoFactory-Agente.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    alert('Erro ao baixar pacote: ' + e.message);
+  }
+}
+
+// Enfileira ordem de "carregar faturas" no agente e faz polling ate concluir.
+// Retorna a lista de faturas (mesmo formato de /api/faturas).
+async function _carregarFaturasViaAgente(dataInicial, dataFinal) {
+  const enfileir = await fetch(`${API}/agente/enfileirar-faturas`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ data_inicial: dataInicial, data_final: dataFinal }),
+  });
+  if (!enfileir.ok) {
+    const j = await enfileir.json().catch(() => ({}));
+    throw new Error(j.detail || `HTTP ${enfileir.status}`);
+  }
+  const { ordem_id } = await enfileir.json();
+
+  // Poll a cada 2s ate concluida/erro (max 10 min)
+  const inicio = Date.now();
+  while (Date.now() - inicio < 10 * 60 * 1000) {
+    await new Promise(r => setTimeout(r, 2000));
+    const st = await fetch(`${API}/agente/ordem/${ordem_id}`);
+    if (!st.ok) throw new Error(`HTTP ${st.status} ao consultar ordem`);
+    const o = await st.json();
+    // Atualiza progresso visivel (reusa _prog_log-like)
+    if (o.progresso && o.progresso.desc) {
+      const box = document.getElementById('progresso-carregar');
+      if (box) box.textContent = `[agente] ${o.progresso.feito}/${o.progresso.total} ${o.progresso.desc}`;
+    }
+    if (o.status === 'concluida') {
+      const faturas = (o.resultado && o.resultado.faturas) || [];
+      return faturas;
+    }
+    if (o.status === 'erro') {
+      throw new Error(o.erro || 'Agente reportou erro sem mensagem');
+    }
+  }
+  throw new Error('Timeout aguardando resposta do agente (10 min).');
+}
 
 // ─── USUÁRIOS (CRUD — só admin) ──────────────────────────
 async function carregarUsuarios() {
@@ -1523,22 +1636,38 @@ async function carregarFaturas(dataInicial, dataFinal) {
 
   try {
     let data = null;
-    try {
-      const qs = new URLSearchParams({ data_inicial: dataInicial, data_final: dataFinal }).toString();
-      const resp = await fetch(`${API}/faturas?${qs}`);
-      if (resp.ok) {
-        data = await resp.json();
-      } else {
-        let detail = `HTTP ${resp.status}`;
-        try { const j = await resp.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
-        throw new Error(detail);
+    // Modo Agente: enfileira ordem em vez de bater no /api/faturas do backend.
+    if (window.AGENTE_ATIVO) {
+      // Para o poll de progresso do backend (nao roda nesse modo) —
+      // o agente atualiza #progresso-carregar direto via _carregarFaturasViaAgente.
+      _pararPollingCarregar();
+      await _pingAgente();  // reforca leitura antes de decidir
+      if (!window.AGENTE_ONLINE) {
+        btn.disabled = false;
+        btn.innerHTML = labelOriginal;
+        alert('Agente Local offline.\n\nAbra o pacote do agente e execute:\n1. "1 - INSTALAR.bat" (uma vez)\n2. "2 - ABRIR CHROME.bat" (logue no GW)\n3. "3 - INICIAR AGENTE.bat"\n\nEnquanto o agente estiver offline, o painel nao consegue carregar faturas neste modo.');
+        return;
       }
-    } catch (netErr) {
-      // Timeout do proxy ou erro de rede. Tenta recuperar via cache.
-      console.warn('/api/faturas falhou, aguardando progresso + cache:', netErr.message);
-      const cacheFats = await _tentarRecuperarViaCache();
-      if (!cacheFats) throw netErr;
-      data = { faturas: cacheFats };
+      const fats = await _carregarFaturasViaAgente(dataInicial, dataFinal);
+      data = { faturas: fats };
+    } else {
+      try {
+        const qs = new URLSearchParams({ data_inicial: dataInicial, data_final: dataFinal }).toString();
+        const resp = await fetch(`${API}/faturas?${qs}`);
+        if (resp.ok) {
+          data = await resp.json();
+        } else {
+          let detail = `HTTP ${resp.status}`;
+          try { const j = await resp.json(); if (j && j.detail) detail = j.detail; } catch(_) {}
+          throw new Error(detail);
+        }
+      } catch (netErr) {
+        // Timeout do proxy ou erro de rede. Tenta recuperar via cache.
+        console.warn('/api/faturas falhou, aguardando progresso + cache:', netErr.message);
+        const cacheFats = await _tentarRecuperarViaCache();
+        if (!cacheFats) throw netErr;
+        data = { faturas: cacheFats };
+      }
     }
     _pararPollingCarregar();
     faturas = data.faturas || [];
