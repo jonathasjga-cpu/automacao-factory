@@ -10,7 +10,10 @@ from typing import Optional
 # Estado global (processo unico — backend precisa rodar com 1 worker)
 _ordens: dict = {}          # {ordem_id: dict}
 _ultimo_ping: dict = {"ts": 0.0}
-LATENCIA_ONLINE_MS = 25_000  # 25s sem ping = agente offline
+LATENCIA_ONLINE_MS = 60_000  # 60s sem ping = agente offline
+# Aumentado de 25s pra 60s: Railway tem timeouts intermitentes de 15-30s.
+# O agente polla a cada 5s; 60s tolera 2-3 falhas seguidas antes de marcar
+# offline, o que evita o badge falso-negativo.
 
 
 def _agora() -> float:

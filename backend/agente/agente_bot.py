@@ -44,26 +44,38 @@ def _ssl_context() -> ssl.SSLContext:
 CTX = _ssl_context()
 
 
-def _http(method: str, url: str, token: str, body: dict | None = None, timeout: int = 30) -> dict:
+def _http(method: str, url: str, token: str, body: dict | None = None,
+          timeout: int = 30, tentativas: int = 3) -> dict:
+    """HTTP com retry em timeouts/502/503/504. Rede intermitente do Railway
+    (~2-3 timeouts por hora) nao pode virar 'agente offline' cada vez."""
     data = None
     headers = {"Authorization": f"Bearer {token}"}
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
-    req = urlreq.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urlreq.urlopen(req, context=CTX, timeout=timeout) as resp:
-            raw = resp.read()
-            return json.loads(raw.decode("utf-8")) if raw else {}
-    except urlerr.HTTPError as e:
-        raw = b""
+    ultimo_erro: dict = {}
+    for tent in range(1, tentativas + 1):
+        req = urlreq.Request(url, data=data, method=method, headers=headers)
         try:
-            raw = e.read()
-        except Exception:
-            pass
-        return {"_erro_http": e.code, "_body": raw.decode("utf-8", "replace")}
-    except Exception as e:
-        return {"_erro": str(e)}
+            with urlreq.urlopen(req, context=CTX, timeout=timeout) as resp:
+                raw = resp.read()
+                return json.loads(raw.decode("utf-8")) if raw else {}
+        except urlerr.HTTPError as e:
+            raw = b""
+            try: raw = e.read()
+            except Exception: pass
+            body_txt = raw.decode("utf-8", "replace")
+            ultimo_erro = {"_erro_http": e.code, "_body": body_txt}
+            # 5xx merece retry; 4xx nao (token errado, ordem inexistente etc)
+            if e.code < 500 or tent == tentativas:
+                return ultimo_erro
+            time.sleep(2 * tent)
+        except Exception as e:
+            ultimo_erro = {"_erro": str(e)}
+            if tent == tentativas:
+                return ultimo_erro
+            time.sleep(2 * tent)
+    return ultimo_erro
 
 
 def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, str | None]:
