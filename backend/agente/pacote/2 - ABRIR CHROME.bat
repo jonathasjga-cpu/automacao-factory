@@ -1,7 +1,19 @@
 @echo off
 chcp 65001 >nul
 setlocal
+rem =================================================
+rem Se voce quiser usar um Chrome portable (recomendado: 149)
+rem pra evitar bug de trava do Chrome 150 com CDP, extraia o
+rem Chrome portable dentro da pasta do agente e ele sera
+rem detectado automaticamente:
+rem   %~dp0chrome_portable\chrome.exe
+rem
+rem Onde baixar Chrome 149 portable:
+rem   https://portableapps.com/apps/internet/google_chrome_portable
+rem   ou https://www.google.com/chrome/older-versions/
+rem =================================================
 set "CHROME="
+if exist "%~dp0chrome_portable\chrome.exe" set "CHROME=%~dp0chrome_portable\chrome.exe"
 for %%P in (
   "C:\Program Files\Google\Chrome\Application\chrome.exe"
   "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"

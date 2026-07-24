@@ -245,6 +245,19 @@ def main():
             ordem = r["ordem"]
             print(f"[AGENTE] ordem {ordem['id']} tipo={ordem.get('tipo')}")
             resultado, erro = rodar_motor(ordem, panel, token)
+
+            # Auto-recovery: se o erro indica Chrome travado, mata+reabre
+            # o Chrome e re-executa a ordem UMA vez.
+            if _erro_indica_chrome_travado(erro, resultado):
+                _http("POST", f"{panel}/api/agente/progresso/{ordem['id']}", token,
+                      body={"feito": 0, "total": 1, "desc": "Chrome travado — reabrindo automaticamente..."})
+                if _recuperar_chrome():
+                    print(f"[AGENTE] Chrome OK — re-executando ordem {ordem['id']}", flush=True)
+                    resultado, erro = rodar_motor(ordem, panel, token)
+                else:
+                    erro_recovery = "Chrome CDP travou e nao consegui reabrir automaticamente. Feche o Chrome manualmente e rode '2 - ABRIR CHROME.bat'."
+                    erro = f"{erro or ''} | {erro_recovery}"
+
             envio = _http("POST", f"{panel}/api/agente/resultado/{ordem['id']}", token,
                           body={"resultado": resultado, "erro": erro})
             print(f"[AGENTE] ordem {ordem['id']} devolvida. erro={erro} envio={envio}")
