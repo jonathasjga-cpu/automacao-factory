@@ -46,36 +46,44 @@ DOWNLOAD_DIR.mkdir(exist_ok=True)
 
 async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict) -> Path | None:
     """
-    Acessa GW > Processos > Financeiro > Gerar Arquivo de Remessa
-    URL real: /jspexporta_boleto.jsp
-    Filtra por data de emissão = hoje e conta bancária, marca apenas as
-    faturas recebidas e baixa o arquivo .rem.
+    Wrapper original — launch + login e delega core.
     """
     log = lambda msg: status["logs"].append(msg)
     creds_gw = get_credencial("gw", user_id=status.get("usuario_id"))
     conta    = CONTA_POR_SISTEMA.get(sistema, "")
-    hoje     = _hoje()
-
     log(f"  GW — gerando remessa para conta '{conta}'...")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=True))
         context = await browser.new_context(accept_downloads=True)
         page    = await context.new_page()
-
-        # ── Login GW ──────────────────────────────────────────────────────────
-        await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
-        await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
-        await page.locator('input[name="login"]').fill(creds_gw["usuario"])
-        await page.locator('input[name="senha"]').fill(creds_gw["senha"])
-        await page.locator('button.button-login').click()
         try:
-            await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
-        except Exception:
-            pass
-        # Reduzido de 2000 pra 500 — wait_for_url acima ja eh o criterio de sucesso do login
-        await page.wait_for_timeout(500)
-        log(f"  GW — login OK")
+            # ── Login GW ──────────────────────────────────────────────────────
+            await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
+            await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
+            await page.locator('input[name="login"]').fill(creds_gw["usuario"])
+            await page.locator('input[name="senha"]').fill(creds_gw["senha"])
+            await page.locator('button.button-login').click()
+            try:
+                await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
+            except Exception:
+                pass
+            await page.wait_for_timeout(500)
+            log(f"  GW — login OK")
+            return await _core_gerar_remessa_gw(page, context, numeros_fatura, sistema, status)
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
+
+async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], sistema: str, status: dict) -> Path | None:
+    """Core reutilizavel — assume page ja logada no GW."""
+    log = lambda msg: status["logs"].append(msg)
+    conta = CONTA_POR_SISTEMA.get(sistema, "")
+    hoje = _hoje()
+    if True:
 
         # ── Navega para Gerar Arquivo de Remessa ──────────────────────────────
         # URL real descoberta via inspeção do menu (li[href="./jspexporta_boleto.jsp"])
@@ -171,7 +179,6 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
 
         if marcadas == 0:
             log("  Nenhuma fatura encontrada na tela de remessa — abortando")
-            await browser.close()
             return None
 
         # ── Exportar .rem ─────────────────────────────────────────────────────
@@ -186,10 +193,8 @@ async def gerar_remessa_gw(numeros_fatura: list[str], sistema: str, status: dict
             log(f"  Arquivo .rem salvo: {nome_arquivo}")
         except Exception as e:
             log(f"  Erro ao baixar .rem: {e}")
-            await browser.close()
             return None
 
-        await browser.close()
         return caminho
 
 
@@ -467,10 +472,22 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=True))
         page    = await browser.new_page()
+        try:
+            log(f"🔑 GC {sistema} — fazendo login...")
+            await fazer_login_gc(page, sistema)
+            await _core_executar_gc_portal(page, faturas_selecao, sistema, status, caminho_rem, numeros, total_qtd)
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+    return {"sistema": sistema, "qtd": total_qtd, "valor": total_valor}
 
-        log(f"🔑 GC {sistema} — fazendo login...")
-        await fazer_login_gc(page, sistema)
 
+async def _core_executar_gc_portal(page, faturas_selecao, sistema, status, caminho_rem, numeros, total_qtd):
+    """Core do portal GC — importar + preencher. Assume page ja logada."""
+    log = lambda msg: status["logs"].append(msg)
+    if True:
         log("📂 Importando arquivo de remessa na GC...")
         sucesso = await importar_remessa_gc(page, caminho_rem, status)
 
@@ -500,7 +517,4 @@ async def executar_gc(faturas_selecao, sistema: str, status: dict) -> dict:
                 status["erros"].append(f"GC {sistema}: nenhum Núm.Nota foi preenchido")
         else:
             status["erros"].append(f"GC {sistema}: falha na importação do arquivo .rem")
-
-        await browser.close()
-
-    return {"sistema": sistema, "qtd": total_qtd, "valor": total_valor}
+    # sem browser.close aqui — wrapper `executar_gc` faz o close no `finally`.

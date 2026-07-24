@@ -128,6 +128,7 @@ def download(request: Request):
         zf.writestr("agente_bot.py", _read(AGENTE_DIR / "agente_bot.py"))
         zf.writestr("motor_excel.py", _read(AGENTE_DIR / "motor_excel.py"))
         zf.writestr("motor_documentos.py", _read(AGENTE_DIR / "motor_documentos.py"))
+        zf.writestr("motor_factories.py", _read(AGENTE_DIR / "motor_factories.py"))
         zf.writestr("_tz.py", _read(BACKEND_DIR / "_tz.py"))
         zf.writestr("arquivos_recentes.py", _read(BACKEND_DIR / "arquivos_recentes.py"))
         zf.writestr("browser_config.py", _STUB_BROWSER_CONFIG)
@@ -143,6 +144,15 @@ def download(request: Request):
                     _read(SERVICES_DIR / "documentos.py"))
         zf.writestr("services/documentos_attach.py",
                     _read(SERVICES_DIR / "documentos_attach.py"))
+        # Factories (Firma / FluxAsset / GC) + wrapper attach
+        zf.writestr("services/firma_automation.py",
+                    _read(SERVICES_DIR / "firma_automation.py"))
+        zf.writestr("services/fluxasset_automation.py",
+                    _read(SERVICES_DIR / "fluxasset_automation.py"))
+        zf.writestr("services/gc_automation.py",
+                    _read(SERVICES_DIR / "gc_automation.py"))
+        zf.writestr("services/factories_attach.py",
+                    _read(SERVICES_DIR / "factories_attach.py"))
 
     buf.seek(0)
     return StreamingResponse(

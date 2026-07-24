@@ -610,16 +610,26 @@ async def _finalizar_na_pagina(page, sistema: str, status: dict):
 
 
 async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
+    """Wrapper original — faz launch + login e delega ao _core_executar_firma."""
     log = lambda msg: status["logs"].append(msg)
-    faturas_dados = status.get("faturas_cache", {})
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=True))
         page = await browser.new_page()
+        try:
+            log(f"[LOGIN] Fazendo login na Firma ({sistema})...")
+            await fazer_login_firma(page, sistema)
+            await _core_executar_firma(page, faturas_selecao, sistema, status)
+        finally:
+            await browser.close()
+    return {"sistema": sistema}
 
-        log(f"[LOGIN] Fazendo login na Firma ({sistema})...")
-        await fazer_login_firma(page, sistema)
 
+async def _core_executar_firma(page, faturas_selecao, sistema: str, status: dict) -> None:
+    """Loop principal — assume `page` ja logada. Usado por launch original
+    e por firma_attach (CDP attach)."""
+    log = lambda msg: status["logs"].append(msg)
+    faturas_dados = status.get("faturas_cache", {})
+    if True:  # bloco preservado (indentacao == launch original)
         log("[DIR] Navegando para Digitacao...")
         await navegar_para_digitacao(page)
 
@@ -718,7 +728,4 @@ async def executar_firma(faturas_selecao, sistema: str, status: dict) -> dict:
             sistema,
             status,
         )
-
-        await browser.close()
-
-    return {"sistema": sistema}
+    # sem browser.close aqui — wrapper original faz o close no `finally`.

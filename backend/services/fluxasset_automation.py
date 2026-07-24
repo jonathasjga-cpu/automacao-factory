@@ -811,13 +811,6 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
     clique manualmente em "Confirme que é humano" se aparecer.
     """
     log = lambda msg: status["logs"].append(msg)
-    faturas_dados = status.get("faturas_cache", {})
-
-    # FluxAsset usa Cloudflare Turnstile que bloqueia headless. Forçamos
-    # headless=False (Chrome real visível) — o usuário resolve o captcha
-    # manualmente quando ele aparece. Em Railway (sem display), launch_kwargs
-    # força headless=True automaticamente e fazer_login_fluxasset detecta
-    # IS_RAILWAY e dá erro claro orientando rodar local.
     log("[FluxAsset] Abrindo navegador VISÍVEL — se aparecer captcha, complete na janela.")
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -828,10 +821,20 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
             ignore_default_args=["--enable-automation"],
         )
         page = await browser.new_page()
+        try:
+            log(f"[LOGIN] Fazendo login na FluxAsset ({sistema})...")
+            await fazer_login_fluxasset(page, sistema, status)
+            await _core_executar_fluxasset(page, faturas_selecao, sistema, status)
+        finally:
+            await browser.close()
+    return {"sistema": sistema}
 
-        log(f"[LOGIN] Fazendo login na FluxAsset ({sistema})...")
-        await fazer_login_fluxasset(page, sistema, status)
 
+async def _core_executar_fluxasset(page, faturas_selecao, sistema: str, status: dict) -> None:
+    """Loop principal — assume `page` ja logada. Usado por launch original e attach."""
+    log = lambda msg: status["logs"].append(msg)
+    faturas_dados = status.get("faturas_cache", {})
+    if True:
         log("[DIR] Navegando para Digitacao...")
         await navegar_para_digitacao(page)
 
@@ -920,7 +923,4 @@ async def executar_fluxasset(faturas_selecao, sistema: str, status: dict) -> dic
             sistema,
             status,
         )
-
-        await browser.close()
-
-    return {"sistema": sistema}
+    # sem browser.close aqui — wrapper original faz o close no `finally`.

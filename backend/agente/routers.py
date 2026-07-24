@@ -83,14 +83,20 @@ def resultado(ordem_id: str, body: ResultadoBody, _=Depends(_verificar_token)):
 
 
 def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
-    """Se a ordem estava amarrada a uma operacao_id (via itens._operacao_id),
-    desserializa arquivos base64 e injeta no status_operacoes pra reusar o
-    fluxo de /api/download/{op_id} + arquivos_recentes existente."""
+    """Se a ordem estava amarrada a uma operacao_id, mescla resultado no
+    status_operacoes. Comportamento por tipo:
+      - baixar_documentos: converte arquivos base64 e injeta em arquivos+
+        arquivos_recentes; marca concluido. Fluxo de /api/download reusa.
+      - executar_factories: agrega logs/erros/concluidas. Se a ordem tinha
+        `_encadear_baixar_documentos`, enfileira em seguida uma ordem
+        baixar_documentos automaticamente (o fluxo executar+baixar da UI).
+    """
     import base64
     o = fila.get(ordem_id)
     if not o:
         return
-    op_id = (o.get("itens") or {}).get("_operacao_id") or ""
+    itens = o.get("itens") or {}
+    op_id = itens.get("_operacao_id") or ""
     if not op_id:
         return
     from operacoes import status_operacoes
@@ -98,31 +104,62 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
     op = status_operacoes.get(op_id)
     if not op:
         return
-    arquivos_b64 = (resultado or {}).get("arquivos") or {}
-    arquivos: dict = {}
-    for nome, meta in arquivos_b64.items():
-        b64 = (meta or {}).get("b64")
-        if not b64:
-            continue
-        try:
-            arquivos[nome] = base64.b64decode(b64)
-        except Exception:
-            continue
-    # Mescla no status
-    op.setdefault("arquivos", {}).update(arquivos)
-    if resultado.get("resumo_documentos"):
-        op["resumo_documentos"] = resultado["resumo_documentos"]
+
+    tipo = o.get("tipo", "")
+    resultado = resultado or {}
+
+    # Logs sempre acumula
     if resultado.get("logs"):
         op.setdefault("logs", []).extend(resultado["logs"])
-    # Marca status como concluido pra /api/status responder "pronto"
-    op["status"] = "concluido"
-    from datetime import datetime
-    op["fim"] = op.get("fim") or datetime.now().isoformat()
-    # Persiste em disco pra sobreviver 2 dias
-    try:
-        salvar_pacote(op_id, arquivos, titulo=op.get("titulo") or "Agente", usuario=op.get("usuario") or "")
-    except Exception:
-        pass
+    if resultado.get("erros"):
+        op.setdefault("erros", []).extend(resultado["erros"])
+    if resultado.get("erro"):
+        op.setdefault("erros", []).append(resultado["erro"])
+
+    if tipo == "baixar_documentos":
+        arquivos_b64 = resultado.get("arquivos") or {}
+        arquivos: dict = {}
+        for nome, meta in arquivos_b64.items():
+            b64 = (meta or {}).get("b64")
+            if not b64:
+                continue
+            try:
+                arquivos[nome] = base64.b64decode(b64)
+            except Exception:
+                continue
+        op.setdefault("arquivos", {}).update(arquivos)
+        if resultado.get("resumo_documentos"):
+            op["resumo_documentos"] = resultado["resumo_documentos"]
+        op["status"] = "concluido" if not op.get("erros") else "concluido_com_erros"
+        from datetime import datetime
+        op["fim"] = op.get("fim") or datetime.now().isoformat()
+        try:
+            salvar_pacote(op_id, arquivos, titulo=op.get("titulo") or "Agente", usuario=op.get("usuario") or "")
+        except Exception:
+            pass
+
+    elif tipo == "executar_factories":
+        # Acumula faturas_salvas e concluidas
+        for n in resultado.get("faturas_salvas", []):
+            op.setdefault("faturas_salvas", []).append(n)
+        op["concluidas"] = op.get("concluidas", 0) + int(resultado.get("concluidas", 0))
+        # Se pediu pra encadear e nao teve erro fatal, enfileira baixar_documentos
+        if itens.get("_encadear_baixar_documentos"):
+            op["status"] = "salvando_documentos"
+            op.setdefault("logs", []).append("📥 Factories concluidas — enfileirando baixar documentos...")
+            fila.enfileirar(
+                tipo="baixar_documentos",
+                itens={
+                    "faturas_por_factory": itens.get("faturas_por_factory") or op.get("faturas_por_factory") or {},
+                    "pasta_destino": op.get("pasta_destino") or "",
+                    "_operacao_id": op_id,
+                },
+                usuario=op.get("usuario", ""),
+            )
+        else:
+            op["status"] = "concluido"
+            from datetime import datetime
+            op["fim"] = op.get("fim") or datetime.now().isoformat()
 
 
 # ── Endpoints usados pelo frontend (JWT do usuario) ──────────────────────────

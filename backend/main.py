@@ -442,38 +442,54 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
         if f.factory != "ignorar":
             por_factory.setdefault(f.factory, []).append(f)
 
-    # Modo Agente + Apenas Documentos:
-    # pula Playwright do backend; enfileira ordem pro agente local baixar
-    # boletos/CTes via CDP. O restante do fluxo (polling do status, download
-    # via /api/download/{op_id}) fica identico — quando o agente devolver
-    # o resultado, `_injetar_resultado_em_operacao` mescla arquivos no
-    # status_operacoes[op_id] e marca concluido.
-    if is_agente_ativo() and status.get("apenas_documentos"):
+    # Modo Agente:
+    # pula Playwright do backend; enfileira ordem(s) pro agente local via CDP.
+    # - apenas_documentos=True: so enfileira `baixar_documentos`.
+    # - apenas_documentos=False: enfileira `executar_factories` primeiro; ao
+    #   concluir, o injetor detecta e enfileira `baixar_documentos` em cadeia.
+    if is_agente_ativo():
         try:
             from agente import fila as agente_fila
             if not agente_fila.agente_online():
                 status["status"] = "concluido_com_erros"
                 status["erros"] = [
                     "Agente Local offline. Rode '3 - INICIAR AGENTE.bat' na maquina "
-                    "onde o Chrome logado no GW esta aberto."
+                    "onde o Chrome logado esta aberto."
                 ]
                 status["logs"].append("❌ Agente offline — nao foi possivel enfileirar.")
                 status["fim"] = datetime.now().isoformat()
                 salvar_operacao(op_id, status)
                 return
-            ordem_id = agente_fila.enfileirar(
-                tipo="baixar_documentos",
-                itens={
-                    "faturas_por_factory": status["faturas_por_factory"],
-                    "pasta_destino": status.get("pasta_destino") or "",
-                    "_operacao_id": op_id,
-                },
-                usuario=status.get("usuario", ""),
-            )
-            status["status"] = "salvando_documentos"
-            status["logs"].append(f"📥 Ordem enfileirada no agente ({ordem_id}) — aguardando execucao local...")
-            # O restante (mescla arquivos + status=concluido) acontece quando
-            # `_injetar_resultado_em_operacao` roda no POST /api/agente/resultado.
+
+            fpf = status["faturas_por_factory"]
+            if status.get("apenas_documentos"):
+                ordem_id = agente_fila.enfileirar(
+                    tipo="baixar_documentos",
+                    itens={
+                        "faturas_por_factory": fpf,
+                        "pasta_destino": status.get("pasta_destino") or "",
+                        "_operacao_id": op_id,
+                    },
+                    usuario=status.get("usuario", ""),
+                )
+                status["status"] = "salvando_documentos"
+                status["logs"].append(f"📥 Ordem enfileirada no agente ({ordem_id}) — aguardando execucao local...")
+            else:
+                ordem_id = agente_fila.enfileirar(
+                    tipo="executar_factories",
+                    itens={
+                        "faturas_por_factory": fpf,
+                        "faturas_cache": status.get("faturas_cache", {}),
+                        "pasta_destino": status.get("pasta_destino") or "",
+                        # Amarra ordem <-> operacao_id pra o injetor tocar em cadeia
+                        # (executar_factories -> baixar_documentos)
+                        "_operacao_id": op_id,
+                        "_encadear_baixar_documentos": True,
+                    },
+                    usuario=status.get("usuario", ""),
+                )
+                status["status"] = "executando"
+                status["logs"].append(f"🏭 Ordem 'executar factories' enfileirada no agente ({ordem_id})...")
             return
         except Exception as e:
             status["logs"].append(f"❌ Falha ao enfileirar ordem no agente: {e}")
