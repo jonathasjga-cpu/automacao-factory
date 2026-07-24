@@ -122,13 +122,23 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
             try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
             except Exception: pass  # noqa
 
-        log(f"  Datas de emissao das faturas: {data_ini} -> {data_fim}")
+        # ⚠️ Filtro de data DESLIGADO: a "emissao" do Excel-fatura do GW pode
+        # diferir do campo que a tela `/jspexporta_boleto.jsp` usa como
+        # filtro (visto na pratica: 17 faturas gc_matriz existiam na tela
+        # via conta 3196-8 mas 0 quando adicionamos filtro de data).
+        # Confiamos no filtro de conta + marcacao por numero.
+        # Se precisar reativar futuramente, use as datas comentadas:
+        # log(f"  Datas de emissao das faturas: {data_ini} -> {data_fim}")
+        # try:
+        #     await page.fill('input[name="dtemissao1"]', data_ini)
+        #     await page.fill('input[name="dtemissao2"]', data_fim)
+        # except Exception: pass
+        # Limpa datas pra caso o form ja tenha preenchido com hoje por default
         try:
-            await page.fill('input[name="dtemissao1"]', data_ini)
-            await page.fill('input[name="dtemissao2"]', data_fim)
-        except Exception as _e:
-            try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
-            except Exception: pass  # noqa
+            await page.fill('input[name="dtemissao1"]', "")
+            await page.fill('input[name="dtemissao2"]', "")
+        except Exception:
+            pass
 
         # Conta bancária — MATCH EXATO pelo início do texto ("3196-8 / ...").
         # Crítico: `.includes('3196-8')` dava match também em "03196-8" (SP).
