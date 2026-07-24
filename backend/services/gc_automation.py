@@ -115,30 +115,33 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
         await page.wait_for_timeout(300)
 
         # ── Preenche filtros ──────────────────────────────────────────────────
-        # Tipo de busca: Data de Emissão
+        # Tipo de busca: Data de Emissão (tolerante a variacao de encoding)
         try:
-            await page.select_option('select[name="campoDeConsulta"]', label="Data de Emissão")
+            info_campo = await page.evaluate("""() => {
+                const s = document.querySelector('select[name="campoDeConsulta"]');
+                if (!s) return null;
+                const opt = [...s.options].find(o => {
+                    const t = (o.text || '').toLowerCase();
+                    return t.includes('emiss') && (t.includes('data') || t.includes('emis'));
+                });
+                if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); }
+                return opt ? {v: opt.value, t: opt.text} : null;
+            }""")
+            if info_campo:
+                log(f"  campoDeConsulta: {info_campo['t']} (value={info_campo['v']})")
+            else:
+                log(f"  ⚠️ campoDeConsulta 'Data de Emissao' nao encontrado")
         except Exception as _e:
-            try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
+            try: log(f"  ⚠️  [select campoDeConsulta] falhou: {_e}")
             except Exception: pass  # noqa
 
-        # ⚠️ Filtro de data DESLIGADO: a "emissao" do Excel-fatura do GW pode
-        # diferir do campo que a tela `/jspexporta_boleto.jsp` usa como
-        # filtro (visto na pratica: 17 faturas gc_matriz existiam na tela
-        # via conta 3196-8 mas 0 quando adicionamos filtro de data).
-        # Confiamos no filtro de conta + marcacao por numero.
-        # Se precisar reativar futuramente, use as datas comentadas:
-        # log(f"  Datas de emissao das faturas: {data_ini} -> {data_fim}")
-        # try:
-        #     await page.fill('input[name="dtemissao1"]', data_ini)
-        #     await page.fill('input[name="dtemissao2"]', data_fim)
-        # except Exception: pass
-        # Limpa datas pra caso o form ja tenha preenchido com hoje por default
+        log(f"  Datas de emissao das faturas: {data_ini} -> {data_fim}")
         try:
-            await page.fill('input[name="dtemissao1"]', "")
-            await page.fill('input[name="dtemissao2"]', "")
-        except Exception:
-            pass
+            await page.fill('input[name="dtemissao1"]', data_ini)
+            await page.fill('input[name="dtemissao2"]', data_fim)
+        except Exception as _e:
+            try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
+            except Exception: pass  # noqa
 
         # Conta bancária — MATCH EXATO pelo início do texto ("3196-8 / ...").
         # Crítico: `.includes('3196-8')` dava match também em "03196-8" (SP).
