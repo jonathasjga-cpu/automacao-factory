@@ -462,12 +462,34 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
                 return
 
             fpf = status["faturas_por_factory"]
+            # Credenciais dos sistemas envolvidos — o agente usa pra logar
+            # automaticamente nos portais (Firma/FluxAsset/GC) e no GW.
+            # Enviamos apenas as credenciais dos sistemas em uso na operacao.
+            sistemas_necessarios = set(fpf.keys()) | {"gw"}
+            credenciais_por_sistema = {}
+            uid = status.get("usuario_id")
+            for sist in sistemas_necessarios:
+                try:
+                    if sist == "gw":
+                        c = get_credencial("gw", user_id=uid) if uid else carregar_credenciais().get("gw", {})
+                    else:
+                        c = carregar_credenciais().get(sist, {})
+                    if c and (c.get("usuario") or c.get("senha")):
+                        credenciais_por_sistema[sist] = {
+                            "usuario": c.get("usuario", ""),
+                            "senha": c.get("senha", ""),
+                            "url": c.get("url", ""),
+                        }
+                except Exception as _e:
+                    pass
+
             if status.get("apenas_documentos"):
                 ordem_id = agente_fila.enfileirar(
                     tipo="baixar_documentos",
                     itens={
                         "faturas_por_factory": fpf,
                         "pasta_destino": status.get("pasta_destino") or "",
+                        "credenciais_por_sistema": credenciais_por_sistema,
                         "_operacao_id": op_id,
                     },
                     usuario=status.get("usuario", ""),
@@ -481,6 +503,7 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
                         "faturas_por_factory": fpf,
                         "faturas_cache": status.get("faturas_cache", {}),
                         "pasta_destino": status.get("pasta_destino") or "",
+                        "credenciais_por_sistema": credenciais_por_sistema,
                         # Amarra ordem <-> operacao_id pra o injetor tocar em cadeia
                         # (executar_factories -> baixar_documentos)
                         "_operacao_id": op_id,

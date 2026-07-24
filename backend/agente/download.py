@@ -57,11 +57,29 @@ def launch_kwargs(headless: bool = True, extra_args=None) -> dict:
     return {"headless": headless, "channel": "chrome", "args": []}
 '''
 
-_STUB_CONFIG_MANAGER = '''"""Stub do config_manager para o agente (attach nao faz login)."""
+_STUB_CONFIG_MANAGER = '''"""Config_manager do agente: le credenciais que o backend envia no payload
+da ordem. O motor (motor_factories/motor_documentos) grava as credenciais
+em _agente_credenciais_atuais.json na raiz do zip.
+
+Se o arquivo nao existir (agente rodando sem ordem), retorna vazio —
+comportamento do stub original."""
+import json
+from pathlib import Path
+
+_CREDS_FILE = Path(__file__).parent / "_agente_credenciais_atuais.json"
 
 
-def get_credencial(*args, **kwargs) -> dict:
-    return {"usuario": "", "senha": "", "url": ""}
+def _load() -> dict:
+    try:
+        if _CREDS_FILE.exists():
+            return json.loads(_CREDS_FILE.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+    return {}
+
+
+def get_credencial(sistema: str = "", user_id=None, **kwargs) -> dict:
+    return _load().get(sistema, {"usuario": "", "senha": "", "url": ""})
 
 
 def salvar_credenciais(*args, **kwargs) -> None:
@@ -69,7 +87,7 @@ def salvar_credenciais(*args, **kwargs) -> None:
 
 
 def carregar_credenciais(*args, **kwargs) -> dict:
-    return {}
+    return _load()
 '''
 
 

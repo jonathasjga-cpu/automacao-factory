@@ -34,6 +34,19 @@ def main():
     ordem = json.loads(job_file.read_text(encoding="utf-8"))
     itens = ordem.get("itens") or {}
 
+    # Grava credenciais recebidas do backend num arquivo temp que o stub
+    # config_manager.py do agente le. Assim `fazer_login_*` das factories
+    # funciona sem tocar nas originais.
+    creds = itens.get("credenciais_por_sistema") or {}
+    if creds:
+        try:
+            (RAIZ / "_agente_credenciais_atuais.json").write_text(
+                json.dumps(creds, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
     # faturas_por_factory: {sistema: [{numero, factory, valor, ...}]}
     faturas_por_factory_raw = itens.get("faturas_por_factory") or {}
     # faturas_cache: {numero: fatura_completa} — o attach precisa disso via status

@@ -13,12 +13,13 @@ from typing import Callable, Optional
 
 from playwright.async_api import async_playwright
 
-from services.firma_automation import _core_executar_firma
-from services.fluxasset_automation import _core_executar_fluxasset
+from services.firma_automation import _core_executar_firma, fazer_login_firma
+from services.fluxasset_automation import _core_executar_fluxasset, fazer_login_fluxasset
 from services.gc_automation import (
     _core_gerar_remessa_gw,
     _core_executar_gc_portal,
     CONTA_POR_SISTEMA,
+    fazer_login_gc,
 )
 
 
@@ -35,6 +36,33 @@ def _sistema_para_url(sistema: str) -> str:
     if sistema.startswith("gc"):
         return "gcrecursos.dyndns.org"
     return ""
+
+
+async def _login_gw_se_precisar(page, base_gw: str, status: dict) -> None:
+    """Loga no GW se a aba estiver em /login. Usa credenciais do config_manager."""
+    url_atual = (page.url or "").lower()
+    if "login" not in url_atual:
+        return
+    log = lambda msg: status.setdefault("logs", []).append(msg)
+    try:
+        from config_manager import get_credencial
+        creds = get_credencial("gw", user_id=status.get("usuario_id"))
+        if not creds.get("usuario") or not creds.get("senha"):
+            log("  ⚠️ [GW] Sem credenciais salvas — nao vou logar automaticamente")
+            return
+        log("  [LOGIN] GW — logando...")
+        await page.goto(f"{base_gw}/login", wait_until="domcontentloaded", timeout=30000)
+        await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
+        await page.locator('input[name="login"]').fill(creds["usuario"])
+        await page.locator('input[name="senha"]').fill(creds["senha"])
+        await page.locator('button.button-login').click()
+        try:
+            await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
+        except Exception:
+            pass
+        log("  [LOGIN] GW OK")
+    except Exception as e:
+        log(f"  ⚠️ [GW] Falha ao logar: {e}")
 
 
 async def _achar_ou_abrir_page(browser, url_marker: str, url_home: str):
@@ -79,6 +107,9 @@ async def executar_factory_attach(
                     browser, "firmasa.com",
                     "https://intrafac777.firmasa.com/Factadebentures/login",
                 )
+                if "login" in (page.url or "").lower():
+                    log(f"  [LOGIN] Firma {sistema} — logando...")
+                    await fazer_login_firma(page, sistema)
                 report(0, 1, f"executando Firma {sistema}...")
                 await _core_executar_firma(page, faturas_selecao, sistema, status)
 
@@ -87,6 +118,9 @@ async def executar_factory_attach(
                     browser, "fluxasset.com.br",
                     "https://portal.fluxasset.com.br/Factaconsult/login",
                 )
+                if "login" in (page.url or "").lower():
+                    log(f"  [LOGIN] FluxAsset {sistema} — logando (pode pedir Cloudflare)...")
+                    await fazer_login_fluxasset(page, sistema, status)
                 report(0, 1, f"executando FluxAsset {sistema}...")
                 await _core_executar_fluxasset(page, faturas_selecao, sistema, status)
 
@@ -96,6 +130,8 @@ async def executar_factory_attach(
                 ctx_gw, page_gw = await _achar_ou_abrir_page(
                     browser, "webtrans", f"{base_gw}/home",
                 )
+                # Se GW nao esta logado, faz login usando credenciais salvas
+                await _login_gw_se_precisar(page_gw, base_gw, status)
                 report(0, 3, f"GC {sistema} — gerando .rem no GW...")
                 numeros = [sel.numero for sel in faturas_selecao]
                 numeros_norm = [n.zfill(6) for n in numeros]
@@ -108,6 +144,9 @@ async def executar_factory_attach(
                     browser, "gcrecursos.dyndns.org",
                     "http://gcrecursos.dyndns.org:9000/FactaConsult",
                 )
+                if "login" in (page_gc.url or "").lower():
+                    log(f"  [LOGIN] GC {sistema} — logando...")
+                    await fazer_login_gc(page_gc, sistema)
                 report(1, 3, f"GC {sistema} — operando no portal...")
                 total_qtd = len(numeros)
                 await _core_executar_gc_portal(page_gc, faturas_selecao, sistema, status, caminho_rem, numeros, total_qtd)

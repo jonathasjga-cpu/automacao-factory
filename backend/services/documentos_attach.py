@@ -38,16 +38,38 @@ async def _encontrar_page_gw(browser, base_gw: str):
     return ctx, page
 
 
-async def _garantir_logado(page, report=None):
+async def _garantir_logado(page, report=None, base_gw: str = BASE_GW_DEFAULT, status: dict | None = None):
     try:
         await page.wait_for_load_state("load", timeout=15000)
     except Exception:
         pass
     url = (page.url or "").lower()
     if "login" in url:
+        # Tenta login automatico usando credenciais salvas
+        try:
+            from config_manager import get_credencial
+            creds = get_credencial("gw", user_id=(status or {}).get("usuario_id"))
+            if creds.get("usuario") and creds.get("senha"):
+                if status:
+                    status.setdefault("logs", []).append("  [LOGIN] GW — logando automaticamente...")
+                await page.goto(f"{base_gw}/login", wait_until="domcontentloaded", timeout=30000)
+                await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
+                await page.locator('input[name="login"]').fill(creds["usuario"])
+                await page.locator('input[name="senha"]').fill(creds["senha"])
+                await page.locator('button.button-login').click()
+                try:
+                    await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
+                except Exception:
+                    pass
+                url = (page.url or "").lower()
+        except Exception as e:
+            if status:
+                status.setdefault("logs", []).append(f"  ⚠️ Falha ao logar no GW: {e}")
+
+    if "login" in url:
         raise Exception(
-            "Chrome esta na tela de login do GW. Faca login manualmente na "
-            "janela do '2 - ABRIR CHROME.bat' e reenvie a operacao."
+            "Chrome esta na tela de login do GW e nao consegui logar "
+            "automaticamente. Verifique as credenciais em Configuracoes."
         )
     if report:
         try: report(1, 4, f"sessao GW OK: {page.url[:80]}")
@@ -80,7 +102,7 @@ async def baixar_documentos_attach(
             )
 
         ctx, page = await _encontrar_page_gw(browser, base_gw)
-        await _garantir_logado(page, report)
+        await _garantir_logado(page, report, base_gw=base_gw, status=status)
 
         # ETAPA 1 — Boletos PDF (Modelo 10)
         report(1, 4, "baixando PDF das faturas (Modelo 10)...")
