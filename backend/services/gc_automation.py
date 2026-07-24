@@ -167,16 +167,14 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
             except Exception as e:
                 log(f"  Erro ao selecionar conta: {e}")
 
-        # Apenas: "gerados / não gerados" (mostra ambos)
+        # Apenas: "gerados / não gerados" (mostra ambos) — usa VALUE
+        # em vez de label pra evitar problema de encoding do "ã".
         try:
-            await page.select_option('select[name="tipoGerado"]', label="gerados / não gerados")
-        except Exception:
-            try:
-                # Fallback: tenta sem acento caso o DOM varie
-                await page.select_option('select[name="tipoGerado"]', label="gerados / nao gerados")
-            except Exception as _e:
-                try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
-                except Exception: pass  # noqa
+            await page.select_option('select[name="tipoGerado"]', value="todos")
+            log("  tipoGerado: todos (gerados / nao gerados)")
+        except Exception as _e:
+            try: log(f"  ⚠️  [select tipoGerado] falhou: {_e}")
+            except Exception: pass  # noqa
 
         # ── Pesquisar ─────────────────────────────────────────────────────────
         async def _pesquisar():
