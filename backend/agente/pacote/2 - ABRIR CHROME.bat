@@ -1,44 +1,30 @@
 @echo off
+setlocal EnableDelayedExpansion
 chcp 65001 >nul
-setlocal
 rem =================================================
 rem Se voce quiser usar um Chrome portable (recomendado: 149)
 rem pra evitar bug de trava do Chrome 150 com CDP, extraia o
 rem Chrome portable dentro da pasta do agente e ele sera
 rem detectado automaticamente:
 rem   %~dp0chrome_portable\chrome.exe
-rem
-rem Onde baixar Chrome 149 portable:
-rem   https://portableapps.com/apps/internet/google_chrome_portable
-rem   ou https://www.google.com/chrome/older-versions/
 rem =================================================
 set "CHROME="
 if exist "%~dp0chrome_portable\chrome.exe" set "CHROME=%~dp0chrome_portable\chrome.exe"
-for %%P in (
-  "C:\Program Files\Google\Chrome\Application\chrome.exe"
-  "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-  "%LocalAppData%\Google\Chrome\Application\chrome.exe"
-) do if not defined CHROME if exist %%P set "CHROME=%%~P"
+if not defined CHROME if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe"
+if not defined CHROME if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+if not defined CHROME if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME=%LocalAppData%\Google\Chrome\Application\chrome.exe"
 if not defined CHROME (
-  echo [X] Chrome nao encontrado nos caminhos padrao.
-  echo     Instale o Google Chrome, ou abra manualmente com:
-  echo     chrome.exe --remote-debugging-port=9222 --user-data-dir="%~dp0cdp_profile"
-  pause
-  exit /b
+    echo [X] Chrome nao encontrado nos caminhos padrao.
+    echo     Instale o Google Chrome, ou abra manualmente com:
+    echo     chrome.exe --remote-debugging-port=9222 --user-data-dir="%~dp0cdp_profile"
+    pause
+    exit /b 1
 )
 echo ============================================================
 echo   Abrindo o Chrome de automacao (perfil isolado, porta 9222)
 echo   com abas de: GW, Firma, FluxAsset, GC.
 echo   Faca LOGIN em cada uma se pedir (uma vez so — perfil salvo).
 echo ============================================================
-start "" "%CHROME%" ^
-  --remote-debugging-port=9222 ^
-  --disable-popup-blocking ^
-  --no-first-run ^
-  --no-default-browser-check ^
-  --user-data-dir="%~dp0cdp_profile" ^
-  "https://webtrans.saas2.gwsistemas.com.br/login" ^
-  "https://intrafac777.firmasa.com/Factadebentures/login" ^
-  "https://portal.fluxasset.com.br/Factaconsult/login" ^
-  "http://gcrecursos.dyndns.org:9000/FactaConsult"
+start "" "!CHROME!" --remote-debugging-port=9222 --disable-popup-blocking --no-first-run --no-default-browser-check --user-data-dir="%~dp0cdp_profile" "https://webtrans.saas2.gwsistemas.com.br/login" "https://intrafac777.firmasa.com/Factadebentures/login" "https://portal.fluxasset.com.br/Factaconsult/login" "http://gcrecursos.dyndns.org:9000/FactaConsult"
 timeout /t 4 >nul
+exit /b 0
