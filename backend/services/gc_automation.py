@@ -470,6 +470,37 @@ async def preencher_num_nota_gc(page: Page, status: dict) -> int:
             continue
 
     log(f"  ✅ Total de Núm.Nota preenchidos: {total_preenchidos}")
+
+    # Deixa o Chrome na tela da LISTAGEM de operações (não mais no modal de digitação),
+    # para o usuário conseguir clicar direto em "Definir conta corrente" +
+    # "Encaminhar para operação" na operação recém-criada.
+    if total_preenchidos > 0:
+        try:
+            # Fecha o modal atual (X no cabeçalho) e volta pra tela de Operações
+            await page.evaluate("""() => {
+                // Fecha modais visiveis (X, close, fechar)
+                for (const m of document.querySelectorAll('.modal, [class*="modal"]')) {
+                    if (!m.offsetParent) continue;
+                    const x = m.querySelector('.bx-fechar, .fa-xmark, .close, [class*="fechar"], [aria-label="Close"]');
+                    if (x) x.click();
+                }
+            }""")
+            await page.wait_for_timeout(600)
+            # Navega para a listagem de operações e faz Pesquisar
+            await page.locator('text=Operação').first.click(timeout=5000)
+            await page.wait_for_timeout(800)
+            # Clica Pesquisar (botão verde da tela de filtros)
+            await page.evaluate("""() => {
+                for (const b of document.querySelectorAll('button')) {
+                    if (b.offsetParent && b.textContent.trim() === 'Pesquisar') { b.click(); return true; }
+                }
+                return false;
+            }""")
+            await page.wait_for_timeout(1500)
+            log(f"  📋 Tela deixada na listagem de operações — pronto para 'Definir conta corrente' + 'Encaminhar'")
+        except Exception as e:
+            log(f"  ⚠️ Nao consegui navegar pra listagem final: {e}")
+
     return total_preenchidos
 
 
