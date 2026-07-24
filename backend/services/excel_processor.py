@@ -130,7 +130,11 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     # Sempre navega para garantir estado limpo
     url_rel = f"{base}/relcontasreceber?acao=iniciar&modulo=webtrans"
     await page.goto(url_rel, wait_until="load", timeout=60000)
-    await page.wait_for_timeout(1500)
+    # Aguarda a aba "Relatorios Personalizados" ficar visivel (mais rapido que sleep fixo).
+    try:
+        await page.locator("text=Relatórios Personalizados").first.wait_for(state="visible", timeout=8000)
+    except Exception:
+        pass  # 403/tela diferente: bloco seguinte vai detectar
 
     # Se GW retornou 403, a sessão pode ter expirado — tenta refazer login uma vez
     titulo = await page.title()
@@ -268,7 +272,21 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     if isinstance(selecionado, str) and selecionado.startswith('NAO_ENCONTRADO'):
         raise Exception(f"Radio '{nome_relatorio}' não encontrado na lista do GW. {selecionado}")
 
-    await page.wait_for_timeout(1000)  # aguarda filtros do relatório selecionado atualizarem
+    # Aguarda os filtros do relatorio selecionado renderizarem — event-based.
+    # Assim que qualquer input de data conhecido aparecer, seguimos.
+    if preencher_data:
+        try:
+            await page.wait_for_function(
+                """() => {
+                    const ids = ['dtemissao1','dtemissao2','dataEmissao1','dataEmissao2',
+                                 'dataEmissaoInicial','dataEmissaoFinal'];
+                    return ids.some(id => document.getElementById(id) ||
+                                          document.querySelector(`input[name="${id}"]`));
+                }""",
+                timeout=5000,
+            )
+        except Exception:
+            pass  # fallback local no evaluate abaixo tenta achar por texto "emiss"
 
     if preencher_data:
         # Preenche os dois campos de data do filtro de Emissão (inicio e fim).
@@ -381,8 +399,15 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
     async def _clicar_gerar():
-        # Aguarda o botão estar disponível na página antes de clicar
-        await page.wait_for_timeout(500)
+        # Aguarda o botao Gerar aparecer — event-based, sem sleep cego.
+        try:
+            await page.wait_for_function(
+                """() => [...document.querySelectorAll('input[type="submit"], input[type="button"]')]
+                        .some(el => el.value && el.value.includes('Gerar'))""",
+                timeout=5000,
+            )
+        except Exception:
+            pass  # tenta clicar mesmo assim; se nao existir, evaluate abaixo eh noop
         await page.evaluate("""
             () => {
                 const btn = [...document.querySelectorAll('input[type="submit"], input[type="button"]')]
@@ -399,7 +424,11 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             popup = await popup_info.value
             # Aguarda o popup carregar (GW exibe "Seu relatório já foi gerado. Clique no link...")
             await popup.wait_for_load_state("domcontentloaded", timeout=30000)
-            await popup.wait_for_timeout(2000)
+            # Espera o link do download aparecer (event-based, sem sleep cego).
+            try:
+                await popup.wait_for_selector("a", state="attached", timeout=15000)
+            except Exception:
+                pass
             try:
                 async with popup.expect_download(timeout=60000) as dl_info:
                     # GW não faz download automático — precisa clicar no link azul do popup
@@ -427,7 +456,10 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     else:
         await _clicar_gerar()
 
-    await page.wait_for_timeout(3000)
+    # Pausa curta so pra dar tempo do GW registrar o "gerando" antes de
+    # buscar em "Meus Relatorios". Reduzido de 3s pra 500ms — o polling
+    # do proximo passo cobre variacao de tempo.
+    await page.wait_for_timeout(500)
 
 
 async def baixar_relatorios_gw(
@@ -559,7 +591,12 @@ async def _baixar_meu_relatorio(page, context, nome: str, url: str = None) -> Pa
                 f"{os.getenv('GW_BASE_URL', 'https://webtrans.saas2.gwsistemas.com.br')}/RelatorioControlador?acao=abrirTelaMeusRelatorios",
                 wait_until="load", timeout=60000
             )
-            await page.wait_for_timeout(2000)
+            # Aguarda a tabela de relatorios aparecer (rows renderizadas) —
+            # event-based ao inves de sleep fixo.
+            try:
+                await page.wait_for_selector("tr", state="attached", timeout=8000)
+            except Exception:
+                pass
             # Re-localiza a linha apÃ³s reload
             rows = await page.query_selector_all("tr")
             for row in rows:
