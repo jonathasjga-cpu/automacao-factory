@@ -78,6 +78,8 @@ def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, s
     tipo = ordem.get("tipo", "")
     if tipo == "carregar_faturas":
         motor_script = RAIZ / "motor_excel.py"
+    elif tipo == "baixar_documentos":
+        motor_script = RAIZ / "motor_documentos.py"
     else:
         return None, f"Tipo de ordem desconhecido: {tipo}"
 

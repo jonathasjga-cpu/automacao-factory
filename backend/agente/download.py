@@ -127,7 +127,9 @@ def download(request: Request):
         zf.writestr("agente_config.json", json.dumps(config, indent=2, ensure_ascii=False))
         zf.writestr("agente_bot.py", _read(AGENTE_DIR / "agente_bot.py"))
         zf.writestr("motor_excel.py", _read(AGENTE_DIR / "motor_excel.py"))
+        zf.writestr("motor_documentos.py", _read(AGENTE_DIR / "motor_documentos.py"))
         zf.writestr("_tz.py", _read(BACKEND_DIR / "_tz.py"))
+        zf.writestr("arquivos_recentes.py", _read(BACKEND_DIR / "arquivos_recentes.py"))
         zf.writestr("browser_config.py", _STUB_BROWSER_CONFIG)
         zf.writestr("config_manager.py", _STUB_CONFIG_MANAGER)
 
@@ -137,6 +139,10 @@ def download(request: Request):
                     _read(SERVICES_DIR / "excel_processor.py"))
         zf.writestr("services/excel_processor_attach.py",
                     _read(SERVICES_DIR / "excel_processor_attach.py"))
+        zf.writestr("services/documentos.py",
+                    _read(SERVICES_DIR / "documentos.py"))
+        zf.writestr("services/documentos_attach.py",
+                    _read(SERVICES_DIR / "documentos_attach.py"))
 
     buf.seek(0)
     return StreamingResponse(

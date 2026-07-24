@@ -623,18 +623,31 @@ async def baixar_faturas_pdf(
     faturas_por_factory: dict[str, list[dict]],
     status: dict,
 ):
+    """Wrapper original — mantido intocado no comportamento externo.
+    Faz launch + login e delega o loop a _core_baixar_faturas_pdf."""
     log = lambda msg: status["logs"].append(msg)
-    resumo_docs = status.setdefault("resumo_documentos", {})
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=False))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
-
         try:
             await _login_gw(page, user_id=status.get("usuario_id"))
+            await _core_baixar_faturas_pdf(page, context, faturas_por_factory, status)
+        except Exception as e:
+            log(f"  ❌ Erro geral faturas PDF: {e}")
+            log(traceback.format_exc()[-600:])
+        finally:
+            await browser.close()
 
-            for sistema, faturas in faturas_por_factory.items():
+
+async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
+    """Loop de factories reutilizavel. Assume `page` ja logada no GW.
+    Usado tanto pelo fluxo original (launch+login) quanto pelo modo agente
+    (CDP attach). Nao faz browser.close — quem chamou eh responsavel."""
+    log = lambda msg: status["logs"].append(msg)
+    resumo_docs = status.setdefault("resumo_documentos", {})
+    try:
+        for sistema, faturas in faturas_por_factory.items():
                 if not faturas:
                     continue
 
@@ -1033,12 +1046,9 @@ async def baixar_faturas_pdf(
                         "motivo": str(e)[:120],
                         "faturas_faltando": sorted(numeros_raw),
                     }
-
-        except Exception as e:
-            log(f"  ❌ Erro geral faturas PDF: {e}")
-            log(traceback.format_exc()[-600:])
-        finally:
-            await browser.close()
+    except Exception as e:
+        log(f"  ❌ Erro geral faturas PDF: {e}")
+        log(traceback.format_exc()[-600:])
 
 
 # ─── CTes PDF ────────────────────────────────────────────────────────────────
@@ -1052,19 +1062,31 @@ async def baixar_ctes_pdf(
     faturas_por_factory: dict[str, list[dict]],
     status: dict,
 ):
-    import httpx
+    """Wrapper original — mantido intocado no comportamento externo.
+    Faz launch + login e delega o loop a _core_baixar_ctes_pdf."""
     log = lambda msg: status["logs"].append(msg)
-    resumo_docs = status.setdefault("resumo_documentos", {})
-
     async with async_playwright() as p:
         browser = await p.chromium.launch(**launch_kwargs(headless=False))
         context = await browser.new_context(accept_downloads=True)
         page = await context.new_page()
-
         try:
             await _login_gw(page, user_id=status.get("usuario_id"))
+            await _core_baixar_ctes_pdf(page, context, faturas_por_factory, status)
+        except Exception as e:
+            log(f"  ❌ Erro geral CTes: {e}")
+            log(traceback.format_exc()[-600:])
+        finally:
+            await browser.close()
 
-            for sistema, faturas in faturas_por_factory.items():
+
+async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
+    """Loop de factories reutilizavel. Assume `page` ja logada no GW.
+    Usado tanto pelo fluxo original quanto pelo modo agente (CDP attach)."""
+    import httpx  # noqa
+    log = lambda msg: status["logs"].append(msg)
+    resumo_docs = status.setdefault("resumo_documentos", {})
+    try:
+        for sistema, faturas in faturas_por_factory.items():
                 if not faturas:
                     continue
 
@@ -1415,12 +1437,9 @@ async def baixar_ctes_pdf(
                     rd["zip"] = {"ok": True, "arquivo": nome_zip, "qtd": len(pdfs_desta_factory)}
                 else:
                     rd["zip"] = {"ok": False}
-
-        except Exception as e:
-            log(f"  ❌ Erro geral CTes: {e}")
-            log(traceback.format_exc()[-600:])
-        finally:
-            await browser.close()
+    except Exception as e:
+        log(f"  ❌ Erro geral CTes: {e}")
+        log(traceback.format_exc()[-600:])
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────

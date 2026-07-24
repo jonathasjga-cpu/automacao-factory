@@ -425,6 +425,47 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
         if f.factory != "ignorar":
             por_factory.setdefault(f.factory, []).append(f)
 
+    # Modo Agente + Apenas Documentos:
+    # pula Playwright do backend; enfileira ordem pro agente local baixar
+    # boletos/CTes via CDP. O restante do fluxo (polling do status, download
+    # via /api/download/{op_id}) fica identico — quando o agente devolver
+    # o resultado, `_injetar_resultado_em_operacao` mescla arquivos no
+    # status_operacoes[op_id] e marca concluido.
+    if is_agente_ativo() and status.get("apenas_documentos"):
+        try:
+            from agente import fila as agente_fila
+            if not agente_fila.agente_online():
+                status["status"] = "concluido_com_erros"
+                status["erros"] = [
+                    "Agente Local offline. Rode '3 - INICIAR AGENTE.bat' na maquina "
+                    "onde o Chrome logado no GW esta aberto."
+                ]
+                status["logs"].append("❌ Agente offline — nao foi possivel enfileirar.")
+                status["fim"] = datetime.now().isoformat()
+                salvar_operacao(op_id, status)
+                return
+            ordem_id = agente_fila.enfileirar(
+                tipo="baixar_documentos",
+                itens={
+                    "faturas_por_factory": status["faturas_por_factory"],
+                    "pasta_destino": status.get("pasta_destino") or "",
+                    "_operacao_id": op_id,
+                },
+                usuario=status.get("usuario", ""),
+            )
+            status["status"] = "salvando_documentos"
+            status["logs"].append(f"📥 Ordem enfileirada no agente ({ordem_id}) — aguardando execucao local...")
+            # O restante (mescla arquivos + status=concluido) acontece quando
+            # `_injetar_resultado_em_operacao` roda no POST /api/agente/resultado.
+            return
+        except Exception as e:
+            status["logs"].append(f"❌ Falha ao enfileirar ordem no agente: {e}")
+            status["status"] = "concluido_com_erros"
+            status["erros"] = [str(e)]
+            status["fim"] = datetime.now().isoformat()
+            salvar_operacao(op_id, status)
+            return
+
     # Cria sub-status por factory
     for sistema, fat_lista in por_factory.items():
         status["factories"][sistema] = {
