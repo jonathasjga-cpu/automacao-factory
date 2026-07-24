@@ -4,8 +4,20 @@ cd /d "%~dp0"
 echo ============================================================
 echo   AutoFactory Agente - INSTALADOR
 echo ============================================================
+
+rem Passo 0: desativa o stub python da Microsoft Store se existir.
+rem O stub eh um reparse point em WindowsApps\python*.exe que quando
+rem chamado abre a Store e nao instala nada — mas engana o `where`.
+if exist "%LocalAppData%\Microsoft\WindowsApps\python.exe" (
+  del "%LocalAppData%\Microsoft\WindowsApps\python.exe" >nul 2>&1
+)
+if exist "%LocalAppData%\Microsoft\WindowsApps\python3.exe" (
+  del "%LocalAppData%\Microsoft\WindowsApps\python3.exe" >nul 2>&1
+)
+
 call :detectpy
 if defined PYEXE goto :haspy
+
 echo Python nao encontrado. Vou instalar automaticamente (1-3 min)...
 echo.
 where winget >nul 2>&1
@@ -26,27 +38,25 @@ if not defined PYEXE (
   echo.
   pause & exit /b
 )
+
 :haspy
 echo Usando Python: %PYEXE%
-echo [2/2] Instalando dependencias (playwright, pandas, openpyxl, httpx, certifi)...
+echo [2/2] Atualizando pip e instalando dependencias (playwright, pandas, openpyxl, httpx, certifi)...
 echo       NAO clique dentro desta janela enquanto instala (o Windows pausa o processo).
 "%PYEXE%" -m pip install --upgrade pip >nul 2>&1
 "%PYEXE%" -m pip install --upgrade playwright pandas openpyxl httpx certifi
 if errorlevel 1 (
   echo.
-  echo [X] Falha ao instalar as dependencias.
-  echo     Causas possiveis:
-  echo       1. Sem internet — verifique conexao.
-  echo       2. O "python" no PATH e o stub da Microsoft Store (nao instala nada).
-  echo          Vá em: Configuracoes ^> Aplicativos ^> Configuracoes avancadas de app
-  echo                 ^> Aliases de execucao do aplicativo, e DESLIGUE python.exe e python3.exe.
-  echo          Depois rode este .bat de novo.
-  echo       3. Antivirus bloqueando o pip.
-  pause & exit /b
+  echo [X] Falha ao instalar as dependencias. Tentando com --user...
+  "%PYEXE%" -m pip install --upgrade --user playwright pandas openpyxl httpx certifi
+  if errorlevel 1 (
+    echo.
+    echo [X] Falha tambem com --user. Verifique internet ^& antivirus e rode de novo.
+    pause & exit /b
+  )
 )
 echo.
 echo Verificando imports...
-rem playwright nao expoe __version__ no modulo top; checa import puro.
 "%PYEXE%" -c "import pandas, openpyxl, playwright, httpx, certifi; print('OK: pandas', pandas.__version__, '| openpyxl', openpyxl.__version__, '| playwright OK', '| httpx', httpx.__version__)"
 if errorlevel 1 (
   echo.
@@ -63,17 +73,22 @@ pause
 exit /b
 
 :detectpy
-rem Procura um Python REAL. Evita o stub da Microsoft Store — ele existe
-rem no PATH mas quando chamado imprime "Python no foi encontrado" e nao
-rem instala nada. Detectamos isso rodando `python -c "print(1)"` e vendo
-rem se realmente executa.
+rem Procura Python REAL. Evita o stub da Microsoft Store — mesmo que
+rem `where python` retorne OK, o stub imprime mensagem e nao roda pip
+rem de verdade.
 set "PYEXE="
-where python >nul 2>&1
-if %errorlevel%==0 (
-  python -c "import sys; sys.exit(0)" >nul 2>&1
-  if not errorlevel 1 set "PYEXE=python"
-)
-if not defined PYEXE ( for /d %%D in ("%LocalAppData%\Programs\Python\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
+rem 1. Instalacoes de usuario (winget/python.org com "just me")
+for /d %%D in ("%LocalAppData%\Programs\Python\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe"
+rem 2. Instalacao global (root)
 if not defined PYEXE ( for /d %%D in ("C:\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
+rem 3. Instalacao "all users" no Program Files
 if not defined PYEXE ( for /d %%D in ("%ProgramFiles%\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
+if not defined PYEXE ( for /d %%D in ("%ProgramFiles(x86)%\Python3*") do if exist "%%D\python.exe" set "PYEXE=%%D\python.exe" )
+rem 4. So confia no `python` do PATH se ele imprimir versao real ("Python 3.X.Y")
+if not defined PYEXE (
+  for /f "tokens=* usebackq" %%V in (`python --version 2^>^&1`) do (
+    echo %%V | findstr /R /C:"^Python 3\." >nul 2>&1
+    if not errorlevel 1 set "PYEXE=python"
+  )
+)
 exit /b
