@@ -82,7 +82,26 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
     """Core reutilizavel — assume page ja logada no GW."""
     log = lambda msg: status["logs"].append(msg)
     conta = CONTA_POR_SISTEMA.get(sistema, "")
-    hoje = _hoje()
+
+    # Data de emissao pra filtrar: pega das faturas selecionadas via
+    # status["faturas_cache"]. Se nao tiver, cai em hoje. Antes filtrava
+    # SEMPRE por hoje — faturas de outros dias nunca apareciam.
+    faturas_cache = status.get("faturas_cache", {}) or {}
+    datas_emissao = []
+    for n in numeros_fatura:
+        # Normalizacao: aceita chave com/sem zeros a esquerda
+        f = faturas_cache.get(n) or faturas_cache.get(n.lstrip("0")) or {}
+        e = str(f.get("emissao") or "").strip()
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", e):
+            datas_emissao.append(e)
+    if datas_emissao:
+        datas_emissao.sort(key=lambda d: d.split("/")[::-1])
+        data_ini = datas_emissao[0]
+        data_fim = datas_emissao[-1]
+    else:
+        hoje_str = _hoje()
+        data_ini = data_fim = hoje_str
+
     if True:
 
         # ── Navega para Gerar Arquivo de Remessa ──────────────────────────────
@@ -103,10 +122,10 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
             try: log(f"  ⚠️  [select_option] falhou silenciosamente: {_e}")
             except Exception: pass  # noqa
 
-        # Datas já vêm pré-preenchidas com hoje — apenas confirma
+        log(f"  Datas de emissao das faturas: {data_ini} -> {data_fim}")
         try:
-            await page.fill('input[name="dtemissao1"]', hoje)
-            await page.fill('input[name="dtemissao2"]', hoje)
+            await page.fill('input[name="dtemissao1"]', data_ini)
+            await page.fill('input[name="dtemissao2"]', data_fim)
         except Exception as _e:
             try: log(f"  ⚠️  [fill] falhou silenciosamente: {_e}")
             except Exception: pass  # noqa
