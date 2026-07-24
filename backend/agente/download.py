@@ -139,6 +139,8 @@ def download(request: Request):
         # ── Raiz do pacote: .bat + LEIA-ME em CRLF ──
         for nome in ("1 - INSTALAR.bat", "2 - ABRIR CHROME.bat", "3 - INICIAR AGENTE.bat"):
             zf.writestr(nome, _crlf(_read(PACOTE_DIR / nome)))
+        # install.ps1 tambem CRLF (Windows PowerShell prefere)
+        zf.writestr("install.ps1", _crlf(_read(PACOTE_DIR / "install.ps1")))
         zf.writestr("LEIA-ME.txt", _crlf(_leia_me(panel_url)))
 
         # ── Raiz do pacote: config + .py (agente_bot na raiz — layout simplificado) ──
