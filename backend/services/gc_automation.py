@@ -178,25 +178,23 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
 
         # ── Pesquisar ─────────────────────────────────────────────────────────
         async def _pesquisar():
-            # Snapshot da tabela ANTES pra detectar quando mudou (AJAX)
-            linhas_antes = await page.query_selector_all("table tr")
-            n_antes = len(linhas_antes)
+            # O botao Pesquisar pode ser submit tradicional (navegacao) ou
+            # AJAX — o motor precisa lidar com ambos.
             await page.click('input[name="pesquisar"]')
+            # Se for navegacao, wait_for_load_state pega
             try:
                 await page.wait_for_load_state("load", timeout=20000)
             except Exception:
                 pass
-            # Espera a tabela mudar (AJAX). Poll ate 8s.
-            for _ in range(40):
-                await page.wait_for_timeout(200)
-                try:
-                    n_agora = len(await page.query_selector_all("table tr"))
-                    if n_agora != n_antes:
-                        break
-                except Exception:
-                    pass
-            # Margem extra pra AJAX terminar de renderizar cells
-            await page.wait_for_timeout(800)
+            # Depois, aguarda a tabela ter pelo menos 2 linhas (header + resultado)
+            # ou timeout de 8s. Usa locator (nao query_selector_all direto) —
+            # locator sobrevive a navegacao/re-render.
+            try:
+                await page.locator("table tr").nth(1).wait_for(state="attached", timeout=8000)
+            except Exception:
+                pass
+            # Margem pra render de cells + reload dinamico
+            await page.wait_for_timeout(1500)
 
         async def _marcar_faturas():
             marc = 0
