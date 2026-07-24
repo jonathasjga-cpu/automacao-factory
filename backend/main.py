@@ -57,7 +57,7 @@ app.include_router(auth_router)
 app.include_router(agente_router)
 app.include_router(agente_download_router)
 
-status_operacoes: dict = {}
+from operacoes import status_operacoes  # noqa: E402 — dict compartilhado com agente/routers
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 

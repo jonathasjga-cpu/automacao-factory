@@ -93,7 +93,7 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
     op_id = (o.get("itens") or {}).get("_operacao_id") or ""
     if not op_id:
         return
-    from main import status_operacoes
+    from operacoes import status_operacoes
     from arquivos_recentes import salvar_pacote
     op = status_operacoes.get(op_id)
     if not op:
@@ -171,8 +171,7 @@ def enfileirar_documentos(body: EnfileirarDocumentosBody, current_user = Depends
     fpf = body.faturas_por_factory
     pasta = body.pasta_destino or ""
     if body.operacao_id and (not fpf):
-        # tarde: leitura preguicosa pra evitar import circular
-        from main import status_operacoes
+        from operacoes import status_operacoes
         op = status_operacoes.get(body.operacao_id)
         if not op:
             raise HTTPException(status_code=404, detail="operacao_id nao encontrada")
