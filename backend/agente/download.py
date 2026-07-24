@@ -1,14 +1,30 @@
 """Gera dinamicamente o .zip do Agente ja configurado.
 
-Inclui: agente_bot.py + motor_excel.py + services (excel_processor +
-excel_processor_attach) + stubs de deps + config JSON com panel_url e token
-ja preenchidos + 3 .bat + LEIA-ME.
+Layout simplificado (todos os .py na raiz, exceto services/):
+
+  AutoFactory-Agente.zip
+  ├── 1 - INSTALAR.bat           (CRLF)
+  ├── 2 - ABRIR CHROME.bat       (CRLF)
+  ├── 3 - INICIAR AGENTE.bat     (CRLF)
+  ├── LEIA-ME.txt                (CRLF)
+  ├── agente_config.json         (panel_url + token embutidos)
+  ├── agente_bot.py
+  ├── motor_excel.py
+  ├── _tz.py                     (copiado de backend/)
+  ├── browser_config.py          (stub)
+  ├── config_manager.py          (stub)
+  └── services/
+      ├── __init__.py
+      ├── excel_processor.py
+      └── excel_processor_attach.py
+
+Arquivos de texto (.bat/.txt) sao convertidos LF→CRLF: o servidor roda em
+Linux/LF, o Windows precisa CRLF nos .bat pra nao quebrar labels/goto.
 """
 import io
 import json
 import zipfile
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -19,7 +35,6 @@ from . import token as token_mod
 
 router = APIRouter(prefix="/agente", tags=["agente-download"])
 
-# Paths do backend
 AGENTE_DIR = Path(__file__).parent
 BACKEND_DIR = AGENTE_DIR.parent
 SERVICES_DIR = BACKEND_DIR / "services"
@@ -27,7 +42,6 @@ PACOTE_DIR = AGENTE_DIR / "pacote"
 
 
 def _panel_url_from_request(request: Request) -> str:
-    # X-Forwarded-Proto/Host (Railway/Nginx atras de proxy)
     xf_proto = request.headers.get("x-forwarded-proto")
     xf_host = request.headers.get("x-forwarded-host") or request.headers.get("host")
     if xf_proto and xf_host:
@@ -35,11 +49,7 @@ def _panel_url_from_request(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-_STUB_BROWSER_CONFIG = '''"""Stub do browser_config para o agente.
-
-O agente NAO faz launch — usa CDP attach. Este stub existe so pra
-excel_processor.py importar sem erro.
-"""
+_STUB_BROWSER_CONFIG = '''"""Stub do browser_config para o agente (attach nao usa launch)."""
 IS_RAILWAY = False
 
 
@@ -47,12 +57,7 @@ def launch_kwargs(headless: bool = True, extra_args=None) -> dict:
     return {"headless": headless, "channel": "chrome", "args": []}
 '''
 
-_STUB_CONFIG_MANAGER = '''"""Stub do config_manager para o agente.
-
-No modo agente, o Chrome ja esta logado — nao precisamos de credencial
-armazenada. As funcoes retornam vazio; se qualquer motor tentar chamar
-`get_credencial` isso indica bug (agente nao devia fazer login).
-"""
+_STUB_CONFIG_MANAGER = '''"""Stub do config_manager para o agente (attach nao faz login)."""
 
 
 def get_credencial(*args, **kwargs) -> dict:
@@ -74,52 +79,29 @@ def _leia_me(panel_url: str) -> str:
 
 Painel: {panel_url}
 
-Instale uma vez, use sempre. Deixe as 3 janelas abertas para o agente
-puxar ordens do painel automaticamente.
+Instale UMA vez. Use SEMPRE:
 
-INSTALACAO (uma vez)
---------------------
-1) Rode "1 - INSTALAR.bat" (com duplo clique).
-   - Detecta/instala Python 3.12 (via winget) e as dependencias
-     (playwright, pandas, openpyxl, httpx, certifi).
-   - Nao roda "playwright install chromium" — o agente usa o Chrome real.
+1) "1 - INSTALAR.bat"     (instala Python + libs; so na primeira vez)
+2) "2 - ABRIR CHROME.bat" (perfil isolado; faca login manual no GW)
+3) "3 - INICIAR AGENTE.bat" (deixe a janela aberta enquanto usar)
 
-USO (toda vez)
---------------
-2) Rode "2 - ABRIR CHROME.bat".
-   - Abre uma janela do Chrome com --remote-debugging-port=9222 e um
-     perfil separado (nao mistura com seu Chrome pessoal).
-   - Faca login no GW e nos portais das factories que voce usa. Uma unica
-     vez. As sessoes ficam salvas no perfil.
+O agente puxa ordens do painel a cada 5s. O Chrome logado continua ativo
+enquanto voce nao fechar a janela dele (perfil salvo em cdp_profile/).
 
-3) Rode "3 - INICIAR AGENTE.bat".
-   - Comeca a puxar ordens do painel a cada 5 segundos.
-   - Quando um usuario disparar uma operacao no painel (com AGENTE_ATIVO
-     ligado), a execucao acontece AQUI, no Chrome ja logado.
-
-Deixe as duas janelas (Chrome + Agente) abertas enquanto usar. Fechar o
-Chrome interrompe a sessao. Se precisar reiniciar, feche o Chrome, rode
-o passo (2) de novo e refaca o login se pedir.
-
-DIAGNOSTICO
------------
-- No painel, veja "Agente online" (verde) se o ping esta chegando.
-- Se ficar "offline", verifique se "3 - INICIAR AGENTE" continua rodando.
-- Log do agente aparece na propria janela dele.
+Se algo der errado, feche as 3 janelas e comece pelo passo 2 de novo.
 """
 
 
-def _read_or_empty(p: Path) -> str:
+def _read(p: Path) -> str:
     try:
         return p.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
 
 
-def _read_bat(nome: str) -> str:
-    """Le .bat da pasta pacote/ ou retorna placeholder se ausente."""
-    p = PACOTE_DIR / nome
-    return _read_or_empty(p) or f"echo Arquivo {nome} ausente no build do painel.\r\npause\r\n"
+def _crlf(txt: str) -> bytes:
+    """Converte para CRLF (Windows) — Windows precisa disso em .bat/.txt."""
+    return txt.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
 
 
 @router.get("/download", dependencies=[Depends(get_current_user)])
@@ -136,30 +118,25 @@ def download(request: Request):
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        # ── Raiz do pacote ──
-        zf.writestr("LEIA-ME.txt", _leia_me(panel_url))
-        zf.writestr("1 - INSTALAR.bat", _read_bat("1 - INSTALAR.bat"))
-        zf.writestr("2 - ABRIR CHROME.bat", _read_bat("2 - ABRIR CHROME.bat"))
-        zf.writestr("3 - INICIAR AGENTE.bat", _read_bat("3 - INICIAR AGENTE.bat"))
+        # ── Raiz do pacote: .bat + LEIA-ME em CRLF ──
+        for nome in ("1 - INSTALAR.bat", "2 - ABRIR CHROME.bat", "3 - INICIAR AGENTE.bat"):
+            zf.writestr(nome, _crlf(_read(PACOTE_DIR / nome)))
+        zf.writestr("LEIA-ME.txt", _crlf(_leia_me(panel_url)))
 
-        # ── Pasta agente/ ──
-        zf.writestr("agente/agente_config.json", json.dumps(config, indent=2, ensure_ascii=False))
-        zf.writestr("agente/__init__.py", "")
+        # ── Raiz do pacote: config + .py (agente_bot na raiz — layout simplificado) ──
+        zf.writestr("agente_config.json", json.dumps(config, indent=2, ensure_ascii=False))
+        zf.writestr("agente_bot.py", _read(AGENTE_DIR / "agente_bot.py"))
+        zf.writestr("motor_excel.py", _read(AGENTE_DIR / "motor_excel.py"))
+        zf.writestr("_tz.py", _read(BACKEND_DIR / "_tz.py"))
+        zf.writestr("browser_config.py", _STUB_BROWSER_CONFIG)
+        zf.writestr("config_manager.py", _STUB_CONFIG_MANAGER)
 
-        for nome in ("agente_bot.py", "motor_excel.py"):
-            zf.writestr(f"agente/{nome}", _read_or_empty(AGENTE_DIR / nome))
-
-        # Stubs para o excel_processor importar sem erro
-        zf.writestr("agente/browser_config.py", _STUB_BROWSER_CONFIG)
-        zf.writestr("agente/config_manager.py", _STUB_CONFIG_MANAGER)
-        zf.writestr("agente/_tz.py", _read_or_empty(BACKEND_DIR / "_tz.py"))
-
-        # services: original + attach
-        zf.writestr("agente/services/__init__.py", "")
-        zf.writestr("agente/services/excel_processor.py",
-                    _read_or_empty(SERVICES_DIR / "excel_processor.py"))
-        zf.writestr("agente/services/excel_processor_attach.py",
-                    _read_or_empty(SERVICES_DIR / "excel_processor_attach.py"))
+        # ── services/ ──
+        zf.writestr("services/__init__.py", "")
+        zf.writestr("services/excel_processor.py",
+                    _read(SERVICES_DIR / "excel_processor.py"))
+        zf.writestr("services/excel_processor_attach.py",
+                    _read(SERVICES_DIR / "excel_processor_attach.py"))
 
     buf.seek(0)
     return StreamingResponse(
