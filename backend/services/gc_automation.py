@@ -324,15 +324,30 @@ async def importar_remessa_gc(page: Page, caminho_rem: Path, status: dict) -> bo
         return False
 
     # ── 5. Clica Enviar DENTRO do modal Leiaute (último modal aberto) ─────────
-    clicou_env = await page.evaluate("""() => {
-        const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
-        const modal = modais[modais.length - 1];
-        if (!modal) return false;
-        for (const b of modal.querySelectorAll('button')) {
-            if (b.offsetParent && b.textContent.trim() === 'Enviar') { b.click(); return true; }
-        }
-        return false;
-    }""")
+    # Espera o botao Enviar aparecer (o modal pode demorar 1-3s pra renderizar
+    # completamente apos o upload)
+    clicou_env = False
+    for _tentativa in range(15):  # 15 x 400ms = 6s
+        clicou_env = await page.evaluate("""() => {
+            // Estrategia 1: modal-interna-fundo (layout tradicional)
+            let modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
+            let modal = modais[modais.length - 1];
+            // Estrategia 2 (fallback): qualquer .modal visivel
+            if (!modal) {
+                modais = [...document.querySelectorAll('.modal, [class*="modal"]')].filter(m => m.offsetParent);
+                modal = modais[modais.length - 1];
+            }
+            const scopo = modal || document;
+            for (const b of scopo.querySelectorAll('button, input[type="submit"], input[type="button"]')) {
+                if (!b.offsetParent) continue;
+                const txt = (b.textContent || b.value || '').trim();
+                if (txt === 'Enviar' || txt === 'Confirmar' || txt === 'Importar') { b.click(); return true; }
+            }
+            return false;
+        }""")
+        if clicou_env:
+            break
+        await page.wait_for_timeout(400)
     if not clicou_env:
         log("  ⚠️ Botão 'Enviar' do modal Leiaute não encontrado")
         return False
