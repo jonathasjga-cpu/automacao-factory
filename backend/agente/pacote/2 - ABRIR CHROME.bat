@@ -15,8 +15,18 @@ if not defined CHROME (
   exit /b
 )
 echo ============================================================
-echo   Abrindo o Chrome de automacao (perfil isolado, porta 9222).
-echo   Faca LOGIN no GW e deixe a janela aberta.
+echo   Abrindo o Chrome de automacao (perfil isolado, porta 9222)
+echo   com abas de: GW, Firma, FluxAsset, GC.
+echo   Faca LOGIN em cada uma se pedir (uma vez so — perfil salvo).
 echo ============================================================
-start "" "%CHROME%" --remote-debugging-port=9222 --disable-popup-blocking --no-first-run --no-default-browser-check --user-data-dir="%~dp0cdp_profile" "https://webtrans.saas2.gwsistemas.com.br/login"
+start "" "%CHROME%" ^
+  --remote-debugging-port=9222 ^
+  --disable-popup-blocking ^
+  --no-first-run ^
+  --no-default-browser-check ^
+  --user-data-dir="%~dp0cdp_profile" ^
+  "https://webtrans.saas2.gwsistemas.com.br/login" ^
+  "https://intrafac777.firmasa.com/Factadebentures/login" ^
+  "https://portal.fluxasset.com.br/Factaconsult/login" ^
+  "http://gcrecursos.dyndns.org:9000/FactaConsult"
 timeout /t 4 >nul
