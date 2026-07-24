@@ -201,7 +201,8 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
             return None
 
         # ── Exportar .rem ─────────────────────────────────────────────────────
-        nome_arquivo = f"remessa_{sistema}_{hoje.replace('/', '')}.rem"
+        # Nome do .rem usa a data inicial das faturas selecionadas
+        nome_arquivo = f"remessa_{sistema}_{data_ini.replace('/', '')}.rem"
         caminho      = DOWNLOAD_DIR / nome_arquivo
 
         try:
