@@ -39,7 +39,8 @@ if errorlevel 1 (
 )
 echo.
 echo Verificando imports...
-"%PYEXE%" -c "import pandas, openpyxl, playwright, httpx, certifi; print('OK: pandas', pandas.__version__, '| openpyxl', openpyxl.__version__, '| playwright', playwright.__version__)"
+rem playwright nao expoe __version__ no modulo top; checa import puro.
+"%PYEXE%" -c "import pandas, openpyxl, playwright, httpx, certifi; print('OK: pandas', pandas.__version__, '| openpyxl', openpyxl.__version__, '| playwright OK', '| httpx', httpx.__version__)"
 if errorlevel 1 (
   echo.
   echo [X] Deps instaladas mas import falhou.
