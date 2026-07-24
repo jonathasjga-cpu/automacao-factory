@@ -199,6 +199,23 @@ async def get_faturas_progresso():
     from services.excel_processor import get_progresso_carregar
     return get_progresso_carregar()
 
+@app.post("/api/faturas-cache", dependencies=[Depends(get_current_user)])
+def post_faturas_cache(payload: dict):
+    """Substitui o _cache_faturas do backend. Usado no modo agente:
+    o agente retorna as faturas direto pro frontend, mas o backend precisa
+    saber delas pra depois enfileirar 'baixar_documentos' com faturas
+    completas. Sem esse cache o /api/executar vê faturas=[] e ordem sai
+    vazia. Aceita {faturas: [...]}."""
+    from services.excel_processor import _salvar_cache
+    faturas = (payload or {}).get("faturas") or []
+    if not isinstance(faturas, list):
+        raise HTTPException(status_code=400, detail="faturas deve ser lista")
+    import services.excel_processor as ep
+    ep._cache_faturas = faturas
+    _salvar_cache(faturas)
+    return {"ok": True, "total": len(faturas)}
+
+
 @app.get("/api/faturas-cache", dependencies=[Depends(get_current_user)])
 def get_faturas_cache():
     """

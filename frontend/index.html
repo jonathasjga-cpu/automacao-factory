@@ -1216,6 +1216,16 @@ async function _carregarFaturasViaAgente(dataInicial, dataFinal) {
     }
     if (o.status === 'concluida') {
       const faturas = (o.resultado && o.resultado.faturas) || [];
+      // Sobe as faturas pro cache do backend — sem isso, quando o usuario
+      // depois clicar em Baixar Arquivos, o /api/executar nao vai achar
+      // as faturas por numero e enfileira ordem vazia.
+      try {
+        await fetch(`${API}/faturas-cache`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ faturas }),
+        });
+      } catch (_) { /* nao critico */ }
       return faturas;
     }
     if (o.status === 'erro') {
