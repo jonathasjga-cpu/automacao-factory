@@ -133,6 +133,7 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
         # Conta bancária — MATCH EXATO pelo início do texto ("3196-8 / ...").
         # Crítico: `.includes('3196-8')` dava match também em "03196-8" (SP).
         # Usamos regex âncora ^ + espaço/barra como separador.
+        conta_selecionada = False
         if conta:
             try:
                 opt_info = await page.evaluate(f"""() => {{
@@ -147,8 +148,9 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
                 if opt_info:
                     await page.select_option('select[name="conta"]', value=opt_info["value"])
                     log(f"  Conta selecionada: {opt_info['text']} (value={opt_info['value']})")
+                    conta_selecionada = True
                 else:
-                    log(f"  Conta '{conta}' nao encontrada no select (match exato)")
+                    log(f"  ⚠️ Conta '{conta}' nao encontrada no select — pesquisando SEM filtro de conta.")
             except Exception as e:
                 log(f"  Erro ao selecionar conta: {e}")
 
@@ -164,35 +166,50 @@ async def _core_gerar_remessa_gw(page, context, numeros_fatura: list[str], siste
                 except Exception: pass  # noqa
 
         # ── Pesquisar ─────────────────────────────────────────────────────────
-        await page.click('input[name="pesquisar"]')
-        try:
-            await page.wait_for_load_state("load", timeout=20000)
-        except Exception:
-            pass
-        # Reduzido de 1500 pra 500 — load acima ja aguardou o essencial
-        await page.wait_for_timeout(500)
-
-        # ── Marca apenas as faturas selecionadas ──────────────────────────────
-        # Tabela: col 0 = checkbox, col 1 = Fatura, col 2 = Nosso Número, ...
-        marcadas = 0
-        linhas = await page.query_selector_all("table tr")
-        for linha in linhas:
-            celulas = await linha.query_selector_all("td")
-            if len(celulas) < 2:
-                continue
+        async def _pesquisar():
+            await page.click('input[name="pesquisar"]')
             try:
-                texto = (await celulas[1].inner_text()).strip()
-                # Extrai "005148" de "005148/2026" ou "005148"
-                m = re.match(r'^(\d{5,6})(?:/\d{4})?$', texto)
-                if m:
-                    num = m.group(1).zfill(6)
-                    if num in numeros_fatura:
-                        cb = await linha.query_selector('input[type="checkbox"]')
-                        if cb:
-                            await cb.check()
-                            marcadas += 1
+                await page.wait_for_load_state("load", timeout=20000)
             except Exception:
-                continue
+                pass
+            await page.wait_for_timeout(500)
+
+        async def _marcar_faturas():
+            marc = 0
+            linhas = await page.query_selector_all("table tr")
+            for linha in linhas:
+                celulas = await linha.query_selector_all("td")
+                if len(celulas) < 2:
+                    continue
+                try:
+                    texto = (await celulas[1].inner_text()).strip()
+                    m = re.match(r'^(\d{5,6})(?:/\d{4})?$', texto)
+                    if m:
+                        num = m.group(1).zfill(6)
+                        if num in numeros_fatura:
+                            cb = await linha.query_selector('input[type="checkbox"]')
+                            if cb:
+                                await cb.check()
+                                marc += 1
+                except Exception:
+                    continue
+            return marc
+
+        await _pesquisar()
+        marcadas = await _marcar_faturas()
+        # Se filtrou por conta e nao achou nada, tenta SEM filtro de conta
+        # (mapa CONTA_POR_SISTEMA pode estar desatualizado — GW as vezes muda).
+        if marcadas == 0 and conta_selecionada:
+            log(f"  ⚠️ 0 faturas com filtro de conta — refazendo sem filtro de conta.")
+            try:
+                await page.evaluate("""() => {
+                    const s = document.querySelector('select[name="conta"]');
+                    if (s) { s.selectedIndex = 0; s.dispatchEvent(new Event('change', {bubbles:true})); }
+                }""")
+            except Exception:
+                pass
+            await _pesquisar()
+            marcadas = await _marcar_faturas()
 
         log(f"  {marcadas} fatura(s) marcada(s) para remessa")
 
