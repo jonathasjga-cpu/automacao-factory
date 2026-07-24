@@ -78,6 +78,70 @@ def _http(method: str, url: str, token: str, body: dict | None = None,
     return ultimo_erro
 
 
+def _erro_indica_chrome_travado(erro: str | None, resultado: dict | None) -> bool:
+    """Detecta padroes de trava do Chrome/CDP (Chrome 150 tem bug conhecido)."""
+    textos = [erro or ""]
+    if resultado:
+        textos.append(str(resultado.get("erro") or ""))
+        textos.append(str(resultado.get("traceback") or ""))
+    joined = " | ".join(textos).lower()
+    padroes = [
+        "connect_over_cdp: timeout",
+        "connect_over_cdp: read econnreset",
+        "nao foi possivel conectar ao chrome",
+        "target page, context or browser has been closed",
+        "browsertype.connect_over_cdp: timeout",
+    ]
+    return any(p in joined for p in padroes)
+
+
+def _recuperar_chrome() -> bool:
+    """Mata Chrome CDP travado e reabre via 2-ABRIR CHROME.bat.
+    Retorna True se CDP voltou a responder em ate 20s."""
+    print("[AGENTE] Chrome travado detectado — recuperando...", flush=True)
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
+                       capture_output=True, timeout=15)
+    except Exception as e:
+        print(f"[AGENTE] taskkill falhou: {e}", flush=True)
+    time.sleep(3)
+
+    # Acha o .bat "2 - ABRIR CHROME.bat" — pode estar na raiz do zip
+    # (layout atual) ou na pasta pai (layout antigo).
+    candidatos = [
+        RAIZ / "2 - ABRIR CHROME.bat",
+        RAIZ.parent / "2 - ABRIR CHROME.bat",
+    ]
+    bat = next((p for p in candidatos if p.exists()), None)
+    if not bat:
+        print("[AGENTE] 2 - ABRIR CHROME.bat nao encontrado — nao consegui recuperar", flush=True)
+        return False
+
+    try:
+        subprocess.Popen(["cmd.exe", "/c", str(bat)],
+                         cwd=str(bat.parent),
+                         creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    except Exception as e:
+        print(f"[AGENTE] Falha ao rodar {bat}: {e}", flush=True)
+        return False
+
+    # Aguarda CDP responder
+    from urllib import request as urlreq
+    for _t in range(20):
+        time.sleep(1)
+        try:
+            with urlreq.urlopen("http://localhost:9222/json/version",
+                                timeout=3, context=CTX) as resp:
+                if resp.status == 200:
+                    print(f"[AGENTE] Chrome recuperado apos {_t+1}s", flush=True)
+                    time.sleep(3)  # margem pra abas carregarem
+                    return True
+        except Exception:
+            pass
+    print("[AGENTE] Chrome nao respondeu apos 20s — abortando recovery", flush=True)
+    return False
+
+
 def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, str | None]:
     """Executa o motor apropriado num subprocess, monitorando progresso."""
     tmpdir = Path(tempfile.mkdtemp(prefix="autof-ordem-"))

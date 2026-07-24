@@ -107,9 +107,11 @@ async def executar_factory_attach(
                     browser, "firmasa.com",
                     "https://intrafac777.firmasa.com/Factadebentures/login",
                 )
-                if "login" in (page.url or "").lower():
-                    log(f"  [LOGIN] Firma {sistema} — logando...")
-                    await fazer_login_firma(page, sistema)
+                # SEMPRE loga forcado — garante credencial correta por filial.
+                # Firma Matriz e Firma SP usam mesmo dominio (cookies compartilhados
+                # no CDP), entao sessao aberta pode nao ser a do sistema atual.
+                log(f"  [LOGIN] Firma {sistema} — forcando login com credencial da filial...")
+                await fazer_login_firma(page, sistema)
                 report(0, 1, f"executando Firma {sistema}...")
                 await _core_executar_firma(page, faturas_selecao, sistema, status)
 
@@ -118,9 +120,8 @@ async def executar_factory_attach(
                     browser, "fluxasset.com.br",
                     "https://portal.fluxasset.com.br/Factaconsult/login",
                 )
-                if "login" in (page.url or "").lower():
-                    log(f"  [LOGIN] FluxAsset {sistema} — logando (pode pedir Cloudflare)...")
-                    await fazer_login_fluxasset(page, sistema, status)
+                log(f"  [LOGIN] FluxAsset {sistema} — forcando login com credencial da filial (pode pedir Cloudflare)...")
+                await fazer_login_fluxasset(page, sistema, status)
                 report(0, 1, f"executando FluxAsset {sistema}...")
                 await _core_executar_fluxasset(page, faturas_selecao, sistema, status)
 
@@ -144,9 +145,9 @@ async def executar_factory_attach(
                     browser, "gcrecursos.dyndns.org",
                     "http://gcrecursos.dyndns.org:9000/FactaConsult",
                 )
-                if "login" in (page_gc.url or "").lower():
-                    log(f"  [LOGIN] GC {sistema} — logando...")
-                    await fazer_login_gc(page_gc, sistema)
+                # SEMPRE loga forcado no GC — Matriz e SP usam mesmo dominio
+                log(f"  [LOGIN] GC {sistema} — forcando login com credencial da filial...")
+                await fazer_login_gc(page_gc, sistema)
                 report(1, 3, f"GC {sistema} — operando no portal...")
                 total_qtd = len(numeros)
                 await _core_executar_gc_portal(page_gc, faturas_selecao, sistema, status, caminho_rem, numeros, total_qtd)
