@@ -38,14 +38,11 @@ def _hoje_br() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
-async def _encontrar_ou_abrir_pagina_gw(browser, base_gw: str):
-    """Tenta reusar aba ja aberta no GW.
-    Estrategia:
-      1. Preferencia: aba GW ja logada (webtrans na URL, sem 'login').
-      2. Fallback: aba GW em tela de login — REUSA (o _garantir_logado
-         faz o login nela). Antes abriamos uma nova, o que resultava em
-         DUAS abas GW no Chrome do usuario.
-      3. Ultimo caso: nenhuma aba GW — abre uma nova.
+async def _abrir_aba_automacao_gw(browser, base_gw: str):
+    """SEMPRE abre uma aba nova pra automacao — nao toca nas abas do usuario.
+    A aba fica no mesmo contexto (mesmos cookies/sessao) que as outras abas
+    do Chrome CDP, entao herda o login que o usuario ja fez no GW. No fim do
+    fluxo, `_fechar_aba_automacao` fecha essa aba pra nao acumular no Chrome.
     """
     contexts = browser.contexts
     if not contexts:
@@ -53,23 +50,18 @@ async def _encontrar_ou_abrir_pagina_gw(browser, base_gw: str):
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro "
             "e deixe a janela aberta."
         )
-    aba_login = None
-    for ctx in contexts:
-        for pg in ctx.pages:
-            u = (pg.url or "").lower()
-            if "webtrans" not in u:
-                continue
-            if "login" not in u:
-                return ctx, pg           # aba logada — usa direto
-            if aba_login is None:
-                aba_login = (ctx, pg)    # guarda pra fallback
-    if aba_login is not None:
-        return aba_login                 # tinha aba GW mas na tela de login — reusa
-    # Nenhuma aba GW — abre nova no primeiro contexto
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
     return ctx, page
+
+
+async def _fechar_aba_automacao(page):
+    """Fecha a aba que _abrir_aba_automacao_gw criou. Silencioso se falhar."""
+    try:
+        await page.close()
+    except Exception:
+        pass
 
 
 async def _fazer_login_gw(page, base_gw: str) -> None:
@@ -166,35 +158,38 @@ async def carregar_faturas_attach(
                 "Rode '2 - ABRIR CHROME.bat' primeiro. Detalhe: {}".format(str(e)[:200])
             )
 
-        ctx, page = await _encontrar_ou_abrir_pagina_gw(browser, base_gw)
-        await _garantir_logado(page, base_gw, report)
-
-        # Gera Automacao
-        report(1, 3, f"gerando 'Automacao Operacoes' ({data_ini} -> {data_fim})...")
-        await _gerar_relatorio_personalizado(
-            page, "Automação Operações - Jonathas", data_ini, base_gw,
-            context=ctx, data_final=data_fim,
-        )
-        report(1, 3, f"baixando 'Automacao Operacoes'...")
-        arquivo1 = await _aguardar_e_baixar(
-            page, ctx, "Automação Operações - Jonathas", meus_rel_url
-        )
-
-        # Gera Complemento (pagina ja esta na aba Personalizados)
-        report(2, 3, f"gerando 'Complemento Operacoes' ({data_ini} -> {data_fim})...")
+        ctx, page = await _abrir_aba_automacao_gw(browser, base_gw)
         try:
-            await _gerar_relatorio_personalizado(
-                page, "Complemento Operações - Jonathas", data_ini, base_gw,
-                preencher_data=True, context=ctx, navegar=False, data_final=data_fim,
-            )
-            report(2, 3, "baixando 'Complemento Operacoes'...")
-            arquivo2 = await _aguardar_e_baixar(
-                page, ctx, "Complemento Operações - Jonathas", meus_rel_url
-            )
-        except Exception as e:
-            raise Exception(f"[Complemento] Falha: {e}")
+            await _garantir_logado(page, base_gw, report)
 
-        # Nao fechamos o browser — a sessao do usuario continua aberta.
-        report(3, 3, "processando planilhas...")
-        faturas = processar_dataframes(arquivo1, arquivo2)
-        return faturas
+            # Gera Automacao
+            report(1, 3, f"gerando 'Automacao Operacoes' ({data_ini} -> {data_fim})...")
+            await _gerar_relatorio_personalizado(
+                page, "Automação Operações - Jonathas", data_ini, base_gw,
+                context=ctx, data_final=data_fim,
+            )
+            report(1, 3, f"baixando 'Automacao Operacoes'...")
+            arquivo1 = await _aguardar_e_baixar(
+                page, ctx, "Automação Operações - Jonathas", meus_rel_url
+            )
+
+            # Gera Complemento (pagina ja esta na aba Personalizados)
+            report(2, 3, f"gerando 'Complemento Operacoes' ({data_ini} -> {data_fim})...")
+            try:
+                await _gerar_relatorio_personalizado(
+                    page, "Complemento Operações - Jonathas", data_ini, base_gw,
+                    preencher_data=True, context=ctx, navegar=False, data_final=data_fim,
+                )
+                report(2, 3, "baixando 'Complemento Operacoes'...")
+                arquivo2 = await _aguardar_e_baixar(
+                    page, ctx, "Complemento Operações - Jonathas", meus_rel_url
+                )
+            except Exception as e:
+                raise Exception(f"[Complemento] Falha: {e}")
+
+            # Nao fechamos o browser — a sessao do usuario continua aberta.
+            report(3, 3, "processando planilhas...")
+            faturas = processar_dataframes(arquivo1, arquivo2)
+            return faturas
+        finally:
+            await _fechar_aba_automacao(page)

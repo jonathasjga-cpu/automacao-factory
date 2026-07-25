@@ -64,6 +64,21 @@ def progresso(ordem_id: str, body: ProgressoBody, _=Depends(_verificar_token)):
     ok = fila.atualizar_progresso(ordem_id, body.feito, body.total, body.desc)
     if not ok:
         raise HTTPException(status_code=404, detail="Ordem nao encontrada")
+    # Propaga o `desc` pros logs da operacao amarrada — evita "silencio" na UI
+    # enquanto a ordem esta rodando (o resultado so eh injetado no fim).
+    try:
+        o = fila.get(ordem_id)
+        op_id = ((o or {}).get("itens") or {}).get("_operacao_id") or ""
+        if op_id and body.desc:
+            from operacoes import status_operacoes
+            op = status_operacoes.get(op_id)
+            if op is not None:
+                logs = op.setdefault("logs", [])
+                # Evita spam: so adiciona se mudou do ultimo
+                if not logs or logs[-1] != body.desc:
+                    logs.append(body.desc)
+    except Exception:
+        pass  # nunca deixar isso quebrar o endpoint
     return {"ok": True}
 
 

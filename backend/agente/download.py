@@ -173,7 +173,7 @@ def download(request: Request):
     config = {
         "panel_url": panel_url,
         "token": token,
-        "intervalo_poll_seg": 5,
+        "intervalo_poll_seg": 2,
         "versao": get_versao_agente(),
     }
 

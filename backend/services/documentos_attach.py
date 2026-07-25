@@ -20,30 +20,26 @@ CDP_URL_DEFAULT = os.getenv("CDP_URL", "http://localhost:9222")
 BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
 
 
-async def _encontrar_page_gw(browser, base_gw: str):
-    """Reusa aba GW existente (preferindo aba logada; senao, reusa a de login).
-    So abre nova se nao existir NENHUMA aba webtrans no Chrome CDP."""
+async def _abrir_aba_automacao_gw(browser, base_gw: str):
+    """SEMPRE abre uma aba nova pra automacao. Nao mexe nas abas do usuario.
+    Fica no mesmo contexto (mesmos cookies/sessao) — herda o login que o
+    usuario ja fez no GW. Deve ser fechada com `_fechar_aba_automacao` ao fim."""
     contexts = browser.contexts
     if not contexts:
         raise Exception(
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro."
         )
-    aba_login = None
-    for ctx in contexts:
-        for pg in ctx.pages:
-            u = (pg.url or "").lower()
-            if "webtrans" not in u:
-                continue
-            if "login" not in u:
-                return ctx, pg
-            if aba_login is None:
-                aba_login = (ctx, pg)
-    if aba_login is not None:
-        return aba_login
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
     return ctx, page
+
+
+async def _fechar_aba_automacao(page):
+    try:
+        await page.close()
+    except Exception:
+        pass
 
 
 async def _garantir_logado(page, report=None, base_gw: str = BASE_GW_DEFAULT, status: dict | None = None):
@@ -117,30 +113,33 @@ async def baixar_documentos_attach(
                 f"Rode '2 - ABRIR CHROME.bat' primeiro. Detalhe: {str(e)[:200]}"
             )
 
-        ctx, page = await _encontrar_page_gw(browser, base_gw)
-        await _garantir_logado(page, report, base_gw=base_gw, status=status)
-
-        # ETAPA 1 — Boletos PDF (Modelo 10)
-        report(1, 4, "baixando PDF das faturas (Modelo 10)...")
-        log("📄 ETAPA 1: Baixando PDF das faturas (Modelo 10)...")
+        ctx, page = await _abrir_aba_automacao_gw(browser, base_gw)
         try:
-            await _core_baixar_faturas_pdf(page, ctx, faturas_por_factory, status)
-        except Exception as e:
-            log(f"❌ ETAPA 1 falhou com excecao: {e}")
-            log(traceback.format_exc()[-600:])
+            await _garantir_logado(page, report, base_gw=base_gw, status=status)
 
-        # ETAPA 2 — CTes PDF + ZIP
-        report(2, 4, "baixando CTes e criando ZIPs...")
-        log("📋 ETAPA 2: Baixando CTes e criando ZIPs...")
-        try:
-            await _core_baixar_ctes_pdf(page, ctx, faturas_por_factory, status)
-        except Exception as e:
-            log(f"❌ ETAPA 2 falhou com excecao: {e}")
-            log(traceback.format_exc()[-600:])
+            # ETAPA 1 — Boletos PDF (Modelo 10)
+            report(1, 4, "baixando PDF das faturas (Modelo 10)...")
+            log("📄 ETAPA 1: Baixando PDF das faturas (Modelo 10)...")
+            try:
+                await _core_baixar_faturas_pdf(page, ctx, faturas_por_factory, status)
+            except Exception as e:
+                log(f"❌ ETAPA 1 falhou com excecao: {e}")
+                log(traceback.format_exc()[-600:])
 
-        # Nao fechamos o browser — sessao do usuario continua ativa.
-        rd = status.get("resumo_documentos", {})
-        total_arquivos = len(status.get("arquivos", {}))
-        report(3, 4, f"gerados {total_arquivos} arquivo(s)")
-        log(f"✅ {total_arquivos} arquivo(s) prontos")
-        return status
+            # ETAPA 2 — CTes PDF + ZIP
+            report(2, 4, "baixando CTes e criando ZIPs...")
+            log("📋 ETAPA 2: Baixando CTes e criando ZIPs...")
+            try:
+                await _core_baixar_ctes_pdf(page, ctx, faturas_por_factory, status)
+            except Exception as e:
+                log(f"❌ ETAPA 2 falhou com excecao: {e}")
+                log(traceback.format_exc()[-600:])
+
+            # Nao fechamos o browser — sessao do usuario continua ativa.
+            rd = status.get("resumo_documentos", {})
+            total_arquivos = len(status.get("arquivos", {}))
+            report(3, 4, f"gerados {total_arquivos} arquivo(s)")
+            log(f"✅ {total_arquivos} arquivo(s) prontos")
+            return status
+        finally:
+            await _fechar_aba_automacao(page)

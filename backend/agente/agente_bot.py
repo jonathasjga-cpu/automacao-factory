@@ -219,7 +219,7 @@ def main():
     cfg = _load_config()
     panel = cfg["panel_url"].rstrip("/")
     token = cfg["token"]
-    intervalo = int(cfg.get("intervalo_poll_seg", 5))
+    intervalo = int(cfg.get("intervalo_poll_seg", 2))
     global _VERSAO_LOCAL
     _VERSAO_LOCAL = cfg.get("versao", "")
     print(f" Versao agente: {_VERSAO_LOCAL or '(nao definida)'}")
