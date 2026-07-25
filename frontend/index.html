@@ -842,6 +842,56 @@
   }
   .count-badge-v2 .num { color: var(--text); font-weight: 700; font-size: 13px; }
 
+  /* Modo "operação rodando" no bloco de faturas — foco só no painel de status */
+  #wizard-faturas.op-running > .toolbar-v2,
+  #wizard-faturas.op-running > #faturas-container,
+  #wizard-faturas.op-running > .wizard-action-bar {
+    display: none !important;
+  }
+  #wizard-faturas.op-running > #op-panel-inline {
+    margin-top: 8px;
+  }
+
+  /* Contador grande "X de Y faturas" dentro do painel de operação */
+  .op-counter {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 20px 12px 12px;
+    margin: 6px 0 14px;
+  }
+  .op-counter-num {
+    display: inline-flex; align-items: baseline; gap: 12px;
+    font-family: 'Inter', system-ui, sans-serif;
+    line-height: 1;
+  }
+  .op-counter-num .feitas {
+    font-size: 56px;
+    font-weight: 800;
+    color: var(--accent);
+    letter-spacing: -1.5px;
+    font-variant-numeric: tabular-nums;
+    transition: color .3s;
+  }
+  .op-panel.finished .op-counter-num .feitas { color: var(--green, #10B981); }
+  .op-counter-num .sep {
+    font-size: 20px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .op-counter-num .total {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text2);
+    font-variant-numeric: tabular-nums;
+  }
+  .op-counter-label {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+
   /* Painel de operação inline (aparece abaixo dos botões, sem trocar página) */
   .op-panel {
     background: linear-gradient(180deg, var(--surface2), var(--surface));
@@ -2341,6 +2391,7 @@ function renderOpPainelInline(status, opId) {
   if (!status) {
     painel.style.display = 'none';
     painel.innerHTML = '';
+    _setOpRodando(false);
     return;
   }
   painel.style.display = 'block';
@@ -2349,6 +2400,17 @@ function renderOpPainelInline(status, opId) {
   const pct = _calcProgresso(etapas);
   const isDone = status.status === 'concluido' || status.status === 'concluido_com_erros';
   const isErro = status.status === 'concluido_com_erros' || (status.erros && status.erros.length);
+  // Enquanto a operação NÃO terminou, esconde a lista de faturas e a barra
+  // de ação — o usuário só precisa ver o andamento (foco no que está rodando).
+  _setOpRodando(!isDone);
+
+  // ── Contador de faturas processadas ────────────────────────────────
+  // Total: quantas o usuario marcou (guardado em window._opTotalFaturas).
+  // Processadas: nº únicos de faturas mencionados em logs "CT-e(s) fatura NNNN"
+  // ou "Salvo: Fatura - NNN.pdf" (individuais). Cobre modo Salvar Arquivos
+  // (só documentos) e modo Completa (factories + documentos).
+  const total = window._opTotalFaturas || 0;
+  const processadas = _contarFaturasProcessadas(status);
 
   // Título dinâmico
   let title = 'Operação em andamento';
@@ -2372,7 +2434,7 @@ function renderOpPainelInline(status, opId) {
   `).join('');
 
   // Logs (últimos 40)
-  const logs = (status.logs || []).slice(-40);
+  const logs = (status.logs || []).slice(-200);
   const logsHtml = logs.map(l => {
     const c = _classifyLogLine(l);
     return `<div class="op-log-line ${c.cls}">${icon(c.ico, 'icn-sm')}<span>${c.texto}</span></div>`;
@@ -2400,6 +2462,18 @@ function renderOpPainelInline(status, opId) {
     ? (isErro ? 'var(--red)' : 'var(--green)')
     : 'var(--accent)';
 
+  // Bloco do contador de faturas (X de Y). Só faz sentido quando total>0.
+  const contadorHtml = total > 0 ? `
+    <div class="op-counter">
+      <div class="op-counter-num">
+        <span class="feitas">${processadas}</span>
+        <span class="sep">de</span>
+        <span class="total">${total}</span>
+      </div>
+      <div class="op-counter-label">fatura${total > 1 ? 's' : ''} ${isDone ? 'processada' + (processadas > 1 ? 's' : '') : 'em processamento'}</div>
+    </div>
+  ` : '';
+
   painel.className = 'op-panel' + (isDone ? ' finished' : '');
   painel.innerHTML = `
     <div class="op-panel-header">
@@ -2412,6 +2486,7 @@ function renderOpPainelInline(status, opId) {
         ? `<button class="btn btn-ghost" onclick="wizardReset()" style="font-size:12px;padding:8px 14px" title="Nova operação">${icon('arrow-path', 'icn-sm')} Nova operação</button>`
         : ''}
     </div>
+    ${contadorHtml}
     <div class="op-progress"><div class="op-progress-bar" style="width:${pct}%"></div></div>
     <div class="op-steps">${stepsHtml}</div>
     <div class="op-log" id="op-panel-log">${logsHtml}</div>
@@ -2423,9 +2498,39 @@ function renderOpPainelInline(status, opId) {
   if (logEl) logEl.scrollTop = logEl.scrollHeight;
 }
 
+// Alterna o modo "operação rodando" no bloco de faturas — esconde toolbar,
+// lista e barra de ação enquanto a operação está ativa (usuário só vê o
+// painel de andamento). Restaura quando termina/reseta.
+function _setOpRodando(rodando) {
+  const w = document.getElementById('wizard-faturas');
+  if (!w) return;
+  w.classList.toggle('op-running', !!rodando);
+}
+
+// Conta faturas distintas processadas a partir dos logs.
+// Padrões: "CT-e(s) fatura NNNN — …" (documentos) e "Salvo: Fatura - NNN.pdf"
+// (boleto individual). Também aceita "fatura NNNN" isolado em resumo.
+function _contarFaturasProcessadas(status) {
+  const logs = (status && status.logs) || [];
+  const seen = new Set();
+  const patterns = [
+    /CT-e\(s\)\s*fatura\s*(\d{4,7})/i,
+    /Salvo:\s*Fatura\s*-\s*(\d{4,7})/i,
+    /PDF via nova aba/i,          // sinal fraco — n/a pra number
+  ];
+  for (const l of logs) {
+    for (const p of patterns) {
+      const m = String(l).match(p);
+      if (m && m[1]) seen.add(String(parseInt(m[1], 10)));
+    }
+  }
+  return seen.size;
+}
+
 function fecharOpPainel() {
   const p = document.getElementById('op-panel-inline');
   if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+  _setOpRodando(false);
   // Para o polling se estiver ativo
   if (typeof poolingInterval !== 'undefined' && poolingInterval) {
     clearInterval(poolingInterval);
@@ -3660,10 +3765,14 @@ function _coletarSelecionadas() {
 
 async function _disparaOperacao(apenasDocumentos) {
   const selecionadas = _coletarSelecionadas();
-  if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
+  const relevantes = selecionadas.filter(f => f.factory !== 'ignorar');
+  if (!relevantes.length) {
     notifyWarn('Marque pelo menos uma fatura na lista antes de continuar.', 'Nenhuma fatura selecionada');
     return;
   }
+  // Guarda total pra o contador do painel de operacao
+  window._opTotalFaturas = relevantes.length;
+  window._opApenasDocs = !!apenasDocumentos;
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -3696,10 +3805,13 @@ async function baixarApenasArquivos() {
 
 async function executarAutomacao() {
   const selecionadas = _coletarSelecionadas();
-  if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
+  const relevantes = selecionadas.filter(f => f.factory !== 'ignorar');
+  if (!relevantes.length) {
     notifyWarn('Marque as faturas cujos boletos e CT-es você quer baixar.', 'Nenhuma fatura selecionada');
     return;
   }
+  window._opTotalFaturas = relevantes.length;
+  window._opApenasDocs = false;
 
   const resp = await fetch(`${API}/executar`, {
     method: 'POST',
