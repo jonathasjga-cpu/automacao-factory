@@ -1001,6 +1001,354 @@
     transition: all .2s;
   }
   .op-download-cta:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(16,185,129,.5); }
+
+  /* ═══════════════════════════════════════════════════════════
+     WIZARD DE ETAPAS — Start / Modo / Faturas
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Stepper visual no topo (pequeno) */
+  .stepper {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 0 24px;
+    margin-bottom: 4px;
+    animation: fadeSlideIn .35s ease both;
+  }
+  .stepper-item {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+    color: var(--text2);
+    transition: all .2s;
+  }
+  .stepper-item.active {
+    background: rgba(79,142,247,.14);
+    border-color: rgba(79,142,247,.45);
+    color: var(--accent);
+  }
+  .stepper-item.done {
+    background: rgba(16,185,129,.12);
+    border-color: rgba(16,185,129,.35);
+    color: var(--green);
+  }
+  .stepper-item .num {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px;
+    background: var(--bg);
+    font-size: 11px; font-weight: 700;
+    border: 1px solid currentColor;
+  }
+  .stepper-item.done .num { background: var(--green); color: white; border-color: var(--green); }
+  .stepper-connector {
+    flex: 0 0 24px;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+  }
+  .stepper-info {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--text2);
+  }
+  .stepper-info .badge-info {
+    padding: 4px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-weight: 500;
+  }
+  .stepper-info .btn-reset {
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text2);
+    font-size: 12px; font-weight: 500;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    transition: all .15s;
+  }
+  .stepper-info .btn-reset:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Etapa Start — botão gigante centralizado */
+  .wizard-start {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+    animation: fadeSlideIn .4s ease both;
+  }
+  .wizard-start h1 {
+    font-size: 32px; font-weight: 700; color: var(--text);
+    margin-bottom: 12px;
+    letter-spacing: -.5px;
+  }
+  .wizard-start p {
+    font-size: 15px; color: var(--text2); margin-bottom: 40px;
+    max-width: 480px;
+  }
+  .btn-iniciar-op {
+    display: inline-flex; align-items: center; gap: 12px;
+    padding: 22px 44px;
+    background: linear-gradient(135deg, var(--accent), #6DA6FF);
+    color: white; border: none;
+    border-radius: 14px;
+    font-size: 17px; font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 28px rgba(79,142,247,.35);
+    transition: all .25s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: .3px;
+    position: relative;
+    overflow: hidden;
+  }
+  .btn-iniciar-op::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at var(--x, 50%) var(--y, 50%), rgba(255,255,255,.25), transparent 40%);
+    opacity: 0; transition: opacity .3s;
+  }
+  .btn-iniciar-op:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 40px rgba(79,142,247,.5);
+  }
+  .btn-iniciar-op:hover::before { opacity: 1; }
+  .btn-iniciar-op:active { transform: translateY(-1px); }
+  .btn-iniciar-op .icn { width: 24px; height: 24px; }
+
+  /* Etapa Modo — cards de escolha */
+  .wizard-modo {
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 50vh;
+    padding: 40px 0;
+    animation: fadeSlideIn .4s ease both;
+  }
+  .wizard-modo h2 {
+    font-size: 24px; font-weight: 700; color: var(--text); margin-bottom: 8px;
+    text-align: center;
+  }
+  .wizard-modo p {
+    font-size: 14px; color: var(--text2); margin-bottom: 32px;
+    text-align: center;
+  }
+  .modo-cards {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(280px, 1fr));
+    gap: 20px;
+    max-width: 720px;
+    width: 100%;
+  }
+  .modo-card {
+    background: var(--surface2);
+    border: 2px solid var(--border);
+    border-radius: 16px;
+    padding: 28px 24px;
+    cursor: pointer;
+    transition: all .25s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: left;
+    position: relative;
+    overflow: hidden;
+  }
+  .modo-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent);
+    box-shadow: 0 12px 32px rgba(79,142,247,.15);
+  }
+  .modo-card .modo-icon {
+    width: 52px; height: 52px;
+    background: rgba(79,142,247,.12);
+    border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    margin-bottom: 16px;
+    transition: all .2s;
+  }
+  .modo-card:hover .modo-icon {
+    background: rgba(79,142,247,.22);
+    transform: scale(1.05);
+  }
+  .modo-card .modo-icon .icn { width: 26px; height: 26px; }
+  .modo-card h3 {
+    font-size: 17px; font-weight: 700; color: var(--text);
+    margin-bottom: 6px;
+  }
+  .modo-card p {
+    font-size: 13px; color: var(--text2); line-height: 1.5;
+    margin: 0; text-align: left;
+  }
+  .modo-card .modo-arrow {
+    position: absolute; top: 28px; right: 24px;
+    color: var(--muted);
+    opacity: 0; transform: translateX(-6px);
+    transition: all .2s;
+  }
+  .modo-card:hover .modo-arrow {
+    opacity: 1; transform: translateX(0);
+    color: var(--accent);
+  }
+
+  /* Modal de calendário mais bonito */
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(79,142,247,.08);
+    max-width: 460px;
+    width: calc(100% - 40px);
+    animation: modalCardIn .25s cubic-bezier(0.4, 0, 0.2, 1) both;
+  }
+  @keyframes modalCardIn {
+    from { opacity: 0; transform: translateY(-8px) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .modal-header {
+    padding: 22px 24px 12px;
+    display: flex; align-items: center; gap: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-header h3 {
+    font-size: 16px; font-weight: 700; color: var(--text); margin: 0; flex: 1;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .modal-header h3 .icn { color: var(--accent); }
+  .modal-close {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text2); border-radius: 8px;
+    width: 32px; height: 32px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 18px; line-height: 1;
+    transition: all .15s;
+  }
+  .modal-close:hover { border-color: var(--red); color: var(--red); }
+  .modal-body { padding: 20px 24px; }
+  .modal-hint { font-size: 13px; color: var(--text2); margin: 0 0 16px; line-height: 1.5; }
+  .modal-range-display {
+    background: linear-gradient(135deg, rgba(79,142,247,.12), rgba(79,142,247,.04));
+    border: 1px solid rgba(79,142,247,.3);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 15px; font-weight: 600; color: var(--accent);
+    text-align: center;
+  }
+  .modal-range-display strong { color: var(--text); font-weight: 700; }
+  .modal-flatpickr-host {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    background: var(--bg);
+  }
+  .modal-footer {
+    padding: 16px 24px 20px;
+    display: flex; justify-content: flex-end; gap: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .modal-footer .btn { min-width: 100px; }
+
+  /* Botão "Iniciar automação" grande no fim da lista de faturas */
+  .wizard-action-bar {
+    position: sticky;
+    bottom: 0;
+    background: linear-gradient(180deg, transparent, var(--bg) 30%);
+    padding: 20px 0 8px;
+    display: flex; align-items: center; gap: 16px;
+    margin-top: 24px;
+    z-index: 10;
+  }
+  .btn-iniciar-auto {
+    flex: 1;
+    padding: 16px 24px;
+    background: linear-gradient(135deg, var(--green), #0BA971);
+    color: white; border: none;
+    border-radius: 12px;
+    font-size: 15px; font-weight: 700;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    box-shadow: 0 6px 22px rgba(16,185,129,.32);
+    transition: all .2s;
+  }
+  .btn-iniciar-auto:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(16,185,129,.48);
+  }
+  .btn-iniciar-auto:disabled {
+    background: var(--surface2);
+    color: var(--muted);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+
+  /* Flatpickr — melhorias no calendário embutido */
+  .flatpickr-calendar.inline {
+    background: transparent !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 380px;
+    margin: 0 auto;
+  }
+  .flatpickr-months .flatpickr-month {
+    color: var(--text) !important;
+    fill: var(--text) !important;
+  }
+  .flatpickr-current-month .flatpickr-monthDropdown-months,
+  .flatpickr-current-month input.cur-year {
+    color: var(--text) !important;
+    font-weight: 700 !important;
+  }
+  .flatpickr-weekday {
+    color: var(--muted) !important;
+    font-weight: 600 !important;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+  }
+  .flatpickr-day {
+    color: var(--text2) !important;
+    border-radius: 8px !important;
+    transition: all .15s;
+    font-weight: 500;
+  }
+  .flatpickr-day:hover:not(.selected):not(.startRange):not(.endRange):not(.inRange) {
+    background: var(--surface2) !important;
+    color: var(--text) !important;
+    border-color: transparent !important;
+  }
+  .flatpickr-day.selected,
+  .flatpickr-day.startRange,
+  .flatpickr-day.endRange {
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: white !important;
+    box-shadow: 0 4px 12px rgba(79,142,247,.4);
+  }
+  .flatpickr-day.inRange {
+    background: rgba(79,142,247,.14) !important;
+    border-color: transparent !important;
+    color: var(--text) !important;
+    box-shadow: none !important;
+  }
+  .flatpickr-day.today {
+    border-color: rgba(79,142,247,.5) !important;
+    color: var(--accent) !important;
+    font-weight: 700 !important;
+  }
+  .flatpickr-day.flatpickr-disabled,
+  .flatpickr-day.prevMonthDay,
+  .flatpickr-day.nextMonthDay {
+    color: var(--muted) !important;
+    opacity: .35 !important;
+  }
+  .flatpickr-prev-month, .flatpickr-next-month {
+    color: var(--text) !important;
+    fill: var(--text) !important;
+    border-radius: 8px;
+    transition: background .15s;
+  }
+  .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
+    background: var(--surface2) !important;
+    color: var(--accent) !important;
+  }
 </style>
 </head>
 <body>
@@ -1096,46 +1444,80 @@
 
 <main>
 
-  <!-- ── FATURAS ──────────────────────────────────────── -->
+  <!-- ── FATURAS (wizard de 4 etapas) ─────────────────── -->
   <div class="page active" id="page-faturas">
-    <div class="toolbar-v2">
-      <!-- Grupo: Fonte de dados -->
-      <div class="btn-group btn-group-primary">
-        <button class="btn btn-primary" id="btn-carregar" onclick="abrirPeriodoModal()"
-          title="Carrega faturas do GW no período escolhido"></button>
-      </div>
 
-      <!-- Grupo: Ações principais -->
-      <div class="btn-group">
-        <button class="btn btn-success" id="btn-executar" onclick="executarAutomacao()" disabled
-          title="Executa digitação nas factories e depois baixa boletos + CT-es"></button>
-        <div class="btn-divider"></div>
-        <button class="btn btn-ghost" id="btn-baixar" onclick="baixarApenasArquivos()" disabled
-          title="Pula a digitação nas factories e baixa apenas boletos + CT-es"></button>
-      </div>
+    <!-- Stepper visual (aparece a partir da etapa 2) -->
+    <div id="stepper" style="display:none"></div>
 
-      <div class="toolbar-spacer"></div>
+    <!-- ETAPA 1: Botão gigante "Iniciar operação" -->
+    <div id="wizard-start" class="wizard-start">
+      <h1>Bem-vindo</h1>
+      <p>Clique no botão abaixo para começar uma nova operação de factoring. Vou te guiar em 4 passos rápidos.</p>
+      <button class="btn-iniciar-op" onclick="wizardIniciar()">
+        <span id="btn-iniciar-icon"></span>
+        <span>Iniciar operação</span>
+      </button>
+    </div>
 
-      <!-- Grupo: Utilitários (à direita) -->
-      <div class="btn-group btn-group-utility">
-        <button class="btn-ghost" onclick="selecionarTodas()" title="Alterna seleção de todas"></button>
-        <select id="filtro-filial" onchange="renderFaturas()">
-          <option value="">Todas as filiais</option>
-        </select>
-        <button class="btn-ghost" id="btn-excluir" onclick="excluirSelecionadas()" disabled
-          style="border-color: var(--red); color: var(--red)"></button>
-      </div>
-
-      <div class="count-badge-v2" id="count-badge">
-        <span class="num">0</span> faturas
+    <!-- ETAPA 3: Escolher modo -->
+    <div id="wizard-modo" class="wizard-modo" style="display:none">
+      <h2>O que você quer fazer?</h2>
+      <p>Escolha o tipo de operação que vai rodar com essas faturas.</p>
+      <div class="modo-cards">
+        <div class="modo-card" onclick="wizardEscolheModo('completo')">
+          <div class="modo-icon" id="modo-completo-icon"></div>
+          <h3>Operação Completa</h3>
+          <p>Digita as faturas nas factories (Firma / FluxAsset / GC) e depois baixa boletos + CT-es do GW.</p>
+          <div class="modo-arrow" id="modo-completo-arrow"></div>
+        </div>
+        <div class="modo-card" onclick="wizardEscolheModo('apenas')">
+          <div class="modo-icon" id="modo-apenas-icon"></div>
+          <h3>Salvar Arquivos</h3>
+          <p>Pula a digitação nas factories e apenas baixa os boletos + CT-es do GW pra você guardar.</p>
+          <div class="modo-arrow" id="modo-apenas-arrow"></div>
+        </div>
       </div>
     </div>
 
-    <!-- Painel de operação em andamento (aparece INLINE) -->
-    <div id="op-panel-inline" style="display:none"></div>
+    <!-- ETAPA 4: Lista de faturas + botão de ação -->
+    <div id="wizard-faturas" style="display:none">
+      <div class="toolbar-v2">
+        <div class="btn-group btn-group-utility">
+          <button class="btn-ghost" onclick="selecionarTodas()" title="Alterna seleção de todas"></button>
+          <select id="filtro-filial" onchange="renderFaturas()">
+            <option value="">Todas as filiais</option>
+          </select>
+          <button class="btn-ghost" id="btn-excluir" onclick="excluirSelecionadas()" disabled
+            style="border-color: var(--red); color: var(--red)"></button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="count-badge-v2" id="count-badge">
+          <span class="num">0</span> faturas
+        </div>
+      </div>
 
-    <div id="faturas-container">
-      <div class="empty-v2" id="empty-faturas"></div>
+      <!-- Painel de operação em andamento (aparece INLINE) -->
+      <div id="op-panel-inline" style="display:none"></div>
+
+      <div id="faturas-container">
+        <div class="empty-v2" id="empty-faturas"></div>
+      </div>
+
+      <!-- Barra de ação sticky com o botão principal -->
+      <div id="wizard-action-bar" class="wizard-action-bar" style="display:none">
+        <button class="btn-iniciar-auto" id="btn-iniciar-auto" onclick="wizardIniciarAutomacao()" disabled>
+          <span id="btn-iniciar-auto-icon"></span>
+          <span id="btn-iniciar-auto-label">Iniciar automação</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Botões antigos ficam escondidos (mantidos p/ compatibilidade com chamadas internas) -->
+    <div style="display:none">
+      <button id="btn-carregar" onclick="abrirPeriodoModal()"></button>
+      <button id="btn-executar" onclick="executarAutomacao()"></button>
+      <button id="btn-baixar" onclick="baixarApenasArquivos()"></button>
     </div>
   </div>
 
@@ -1487,7 +1869,9 @@ function renderOpPainelInline(status, opId) {
         <div class="op-panel-title">${title}</div>
         <div class="op-panel-subtitle">${subtitle}</div>
       </div>
-      ${isDone ? `<button class="op-panel-close" onclick="fecharOpPainel()" title="Fechar painel">${icon('x-mark', 'icn-sm')}</button>` : ''}
+      ${isDone
+        ? `<button class="btn btn-ghost" onclick="wizardReset()" style="font-size:12px;padding:8px 14px" title="Nova operação">${icon('arrow-path', 'icn-sm')} Nova operação</button>`
+        : ''}
     </div>
     <div class="op-progress"><div class="op-progress-bar" style="width:${pct}%"></div></div>
     <div class="op-steps">${stepsHtml}</div>
@@ -1508,6 +1892,137 @@ function fecharOpPainel() {
     clearInterval(poolingInterval);
     poolingInterval = null;
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// WIZARD DE ETAPAS
+// Etapas: start -> periodo (modal calendario) -> modo -> faturas
+// ═══════════════════════════════════════════════════════════════
+let _wizardModo = null;           // 'completo' | 'apenas'
+let _wizardPeriodo = null;        // { inicial, final } em YYYY-MM-DD
+
+function _mostrarEtapaWizard(etapa) {
+  const start   = document.getElementById('wizard-start');
+  const modo    = document.getElementById('wizard-modo');
+  const faturas = document.getElementById('wizard-faturas');
+  const stepper = document.getElementById('stepper');
+  if (start)   start.style.display   = (etapa === 'start')   ? 'flex' : 'none';
+  if (modo)    modo.style.display    = (etapa === 'modo')    ? 'flex' : 'none';
+  if (faturas) faturas.style.display = (etapa === 'faturas') ? 'block' : 'none';
+  if (stepper) stepper.style.display = (etapa === 'start')   ? 'none' : 'flex';
+  _renderStepper(etapa);
+  if (etapa === 'start') {
+    // Reset visual
+    if (start) {
+      const btnIcon = document.getElementById('btn-iniciar-icon');
+      if (btnIcon && !btnIcon.innerHTML) btnIcon.innerHTML = icon('play', 'icn-lg');
+    }
+  } else if (etapa === 'modo') {
+    // Popula icones dos cards
+    const ci = document.getElementById('modo-completo-icon');
+    const ai = document.getElementById('modo-apenas-icon');
+    const car = document.getElementById('modo-completo-arrow');
+    const aar = document.getElementById('modo-apenas-arrow');
+    if (ci && !ci.innerHTML) ci.innerHTML = icon('bolt');
+    if (ai && !ai.innerHTML) ai.innerHTML = icon('arrow-down-tray');
+    if (car && !car.innerHTML) car.innerHTML = icon('arrow-path').replace('icn"', 'icn" style="width:18px;height:18px"').replace('m21 21', 'M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3');
+    if (aar && !aar.innerHTML) aar.innerHTML = car ? car.innerHTML : '';
+  } else if (etapa === 'faturas') {
+    // Botao de acao popula icone + label
+    _atualizarBotaoAcao();
+  }
+}
+
+function _renderStepper(atual) {
+  const el = document.getElementById('stepper');
+  if (!el) return;
+  const etapas = [
+    { key: 'start',    n: 1, label: 'Iniciar' },
+    { key: 'periodo',  n: 2, label: 'Período' },
+    { key: 'modo',     n: 3, label: 'Modo' },
+    { key: 'faturas',  n: 4, label: 'Faturas' },
+  ];
+  const idxAtual = etapas.findIndex(e => e.key === atual);
+  const parts = [];
+  etapas.forEach((e, i) => {
+    let cls = '';
+    if (i < idxAtual) cls = 'done';
+    else if (i === idxAtual) cls = 'active';
+    parts.push(`<div class="stepper-item ${cls}"><span class="num">${e.n}</span>${e.label}</div>`);
+    if (i < etapas.length - 1) parts.push('<div class="stepper-connector"></div>');
+  });
+  // Info: período + modo se já escolhidos + botão recomeçar
+  const infoBits = [];
+  if (_wizardPeriodo) {
+    const d = _wizardPeriodo;
+    const fmt = s => s ? s.split('-').reverse().join('/') : '';
+    const dt = d.inicial === d.final ? fmt(d.inicial) : `${fmt(d.inicial)} - ${fmt(d.final)}`;
+    infoBits.push(`<span class="badge-info">${dt}</span>`);
+  }
+  if (_wizardModo) {
+    const nomeModo = _wizardModo === 'completo' ? 'Operação Completa' : 'Salvar Arquivos';
+    infoBits.push(`<span class="badge-info">${nomeModo}</span>`);
+  }
+  const info = infoBits.length
+    ? `<div class="stepper-info">${infoBits.join('')}<button class="btn-reset" onclick="wizardReset()">${icon('arrow-path','icn-sm')} Recomeçar</button></div>`
+    : '';
+  el.innerHTML = parts.join('') + info;
+}
+
+function wizardIniciar() {
+  // ETAPA 1 -> abre modal do calendário. Confirmar leva pra 'modo'
+  abrirPeriodoModal();
+}
+
+function wizardEscolheModo(m) {
+  _wizardModo = m;
+  _mostrarEtapaWizard('faturas');
+  // Carrega as faturas do período escolhido (se ainda não estiverem carregadas)
+  if (_wizardPeriodo && !faturas.length) {
+    carregarFaturas(_wizardPeriodo.inicial, _wizardPeriodo.final);
+  } else {
+    // Faturas já carregadas — só re-renderiza
+    renderFaturas();
+  }
+}
+
+function wizardReset() {
+  _wizardModo = null;
+  _wizardPeriodo = null;
+  faturas = [];
+  checkState = {};
+  fecharOpPainel();
+  _mostrarEtapaWizard('start');
+}
+
+// Atualiza label + estado do botão "Iniciar automação"
+function _atualizarBotaoAcao() {
+  const bar = document.getElementById('wizard-action-bar');
+  const btn = document.getElementById('btn-iniciar-auto');
+  const icoEl = document.getElementById('btn-iniciar-auto-icon');
+  const lblEl = document.getElementById('btn-iniciar-auto-label');
+  if (!bar || !btn) return;
+
+  // Só mostra a barra se tem faturas carregadas
+  bar.style.display = faturas.length ? 'flex' : 'none';
+
+  // Numero de selecionadas
+  const selecionadas = document.querySelectorAll('[id^="chk-"]:checked').length;
+  btn.disabled = selecionadas === 0;
+
+  // Label reflete o modo escolhido
+  if (icoEl) icoEl.innerHTML = icon(_wizardModo === 'apenas' ? 'arrow-down-tray' : 'play');
+  if (lblEl) {
+    const nomeAcao = _wizardModo === 'apenas' ? 'Salvar arquivos' : 'Iniciar automação';
+    lblEl.textContent = selecionadas > 0
+      ? `${nomeAcao} (${selecionadas} fatura${selecionadas > 1 ? 's' : ''})`
+      : nomeAcao;
+  }
+}
+
+function wizardIniciarAutomacao() {
+  if (_wizardModo === 'apenas') baixarApenasArquivos();
+  else executarAutomacao();
 }
 
 // ─── AUTH ─────────────────────────────────────────────────
@@ -1657,6 +2172,7 @@ async function _bootstrapAuth() {
     localStorage.setItem('auth_user', JSON.stringify(u));
     esconderLogin();
     _popularToolbarUI(); // popula botões e empty states com ícones
+    _mostrarEtapaWizard('start'); // wizard sempre começa no botão inicial
     _bootstrapAgente();  // após login, checa se modo agente está ativo
   } catch (_) {
     fazerLogout();
@@ -2448,6 +2964,8 @@ function atualizarContador() {
     const filialLbl = filtro ? ` • ${visiveis} visível(is)` : '';
     cb.innerHTML = `<span class="num">${faturas.length}</span> fatura(s)${filialLbl}${sufixo}`;
   }
+  // Atualiza tambem o botao de acao do wizard
+  if (typeof _atualizarBotaoAcao === 'function') _atualizarBotaoAcao();
   const btnExcluir = document.getElementById('btn-excluir');
   if (btnExcluir) btnExcluir.disabled = selecionadas === 0;
 }
@@ -2505,6 +3023,9 @@ async function _disparaOperacao(apenasDocumentos) {
   operacaoAtual = data.operacao_id;
   _conclusaoScrollado = false;
   iniciarPolling();
+  // Desabilita botao de acao do wizard enquanto operação está rodando
+  const btn = document.getElementById('btn-iniciar-auto');
+  if (btn) btn.disabled = true;
   // Scroll suave pro painel de operação que vai aparecer inline
   setTimeout(() => {
     const p = document.getElementById('op-panel-inline');
@@ -2513,7 +3034,8 @@ async function _disparaOperacao(apenasDocumentos) {
 }
 
 async function baixarApenasArquivos() {
-  if (!confirm('Vai pular a digitação nas factories e baixar apenas boletos + CT-es das faturas selecionadas. Confirma?')) return;
+  // Sem confirm — no fluxo wizard o usuário já escolheu "Salvar Arquivos"
+  // na etapa 'modo'. Se chamado fora do wizard, ainda assim é intencional.
   await _disparaOperacao(true);
 }
 
@@ -2534,6 +3056,9 @@ async function executarAutomacao() {
   operacaoAtual = data.operacao_id;
   _conclusaoScrollado = false;
   iniciarPolling();
+  // Desabilita botao de acao do wizard enquanto operação está rodando
+  const btn = document.getElementById('btn-iniciar-auto');
+  if (btn) btn.disabled = true;
   // Scroll suave pro painel de operação que vai aparecer inline
   setTimeout(() => {
     const p = document.getElementById('op-panel-inline');
@@ -3682,7 +4207,9 @@ function _confirmarPeriodoModal() {
   const data_inicial = _toISO(ini);
   const data_final = _toISO(fim);
   _fecharPeriodoModal();
-  carregarFaturas(data_inicial, data_final);
+  // Salva período no wizard e avança pra etapa 'modo' (não carrega faturas ainda)
+  _wizardPeriodo = { inicial: data_inicial, final: data_final };
+  _mostrarEtapaWizard('modo');
 }
 </script>
 
