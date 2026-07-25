@@ -1178,6 +1178,149 @@
   /* Badge do topbar (agente) — reduzido no novo design */
   #agente-badge { display: none !important; } /* escondido — status agora fica na tela inicial */
 
+  /* ═════════════════════════════════════════════════════
+     Notificações in-app: toast + modal de confirmação
+     ═════════════════════════════════════════════════════ */
+  .toast-container {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+    max-width: min(420px, calc(100vw - 48px));
+  }
+  .toast {
+    pointer-events: auto;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px;
+    box-shadow: 0 12px 32px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.02) inset;
+    color: var(--text);
+    font-size: 13.5px;
+    line-height: 1.45;
+    animation: toastIn .28s cubic-bezier(0.2,0.9,0.3,1.2) both;
+    position: relative;
+    overflow: hidden;
+  }
+  .toast.leaving { animation: toastOut .22s ease forwards; }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateX(24px) scale(.96); }
+    to   { opacity: 1; transform: translateX(0)    scale(1);   }
+  }
+  @keyframes toastOut {
+    to { opacity: 0; transform: translateX(24px) scale(.96); }
+  }
+  .toast::before {
+    content: '';
+    position: absolute; left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--accent);
+  }
+  .toast.toast-success::before { background: var(--green, #10B981); }
+  .toast.toast-error::before   { background: var(--red,   #EF4444); }
+  .toast.toast-warn::before    { background: #F59E0B; }
+  .toast .toast-icon {
+    flex-shrink: 0;
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--accent);
+    margin-top: 1px;
+  }
+  .toast.toast-success .toast-icon { color: var(--green, #10B981); }
+  .toast.toast-error   .toast-icon { color: var(--red, #EF4444); }
+  .toast.toast-warn    .toast-icon { color: #F59E0B; }
+  .toast .toast-body { flex: 1; min-width: 0; }
+  .toast .toast-title {
+    font-weight: 700;
+    font-size: 13.5px;
+    color: var(--text);
+    margin-bottom: 2px;
+    white-space: pre-line;
+  }
+  .toast .toast-msg {
+    color: var(--text2);
+    font-size: 12.5px;
+    white-space: pre-line;
+  }
+  .toast .toast-close {
+    background: transparent; border: 0;
+    color: var(--muted); font-size: 18px; line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    align-self: flex-start;
+    transition: color .15s;
+  }
+  .toast .toast-close:hover { color: var(--text); }
+
+  /* Modal de confirmação (reaproveita modal-overlay/modal-card) */
+  .confirm-modal .modal-card { max-width: 480px; }
+  .confirm-modal .modal-body {
+    padding: 24px;
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .confirm-modal .confirm-icon {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: rgba(79,142,247,.14);
+    color: var(--accent);
+  }
+  .confirm-modal.is-danger .confirm-icon {
+    background: rgba(239,68,68,.14);
+    color: var(--red, #EF4444);
+  }
+  .confirm-modal.is-warn .confirm-icon {
+    background: rgba(245,158,11,.14);
+    color: #F59E0B;
+  }
+  .confirm-modal .confirm-icon svg { width: 24px; height: 24px; }
+  .confirm-modal .confirm-title {
+    font-size: 16px; font-weight: 700; color: var(--text); margin: 0 0 8px;
+  }
+  .confirm-modal .confirm-msg {
+    color: var(--text2); font-size: 13.5px; line-height: 1.5; margin: 0;
+    white-space: pre-line;
+  }
+  .confirm-modal .modal-footer {
+    padding: 16px 24px 20px;
+    display: flex; justify-content: flex-end; gap: 10px;
+    border-top: 1px solid var(--border);
+  }
+  .confirm-modal .btn-confirm {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+    border: 1px solid transparent;
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .confirm-modal .btn-confirm:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .confirm-modal.is-danger .btn-confirm { background: var(--red, #EF4444); }
+  .confirm-modal.is-warn .btn-confirm { background: #F59E0B; }
+  .confirm-modal .btn-cancel {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border2);
+    background: transparent;
+    color: var(--text2);
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .confirm-modal .btn-cancel:hover { background: var(--surface2); color: var(--text); }
+
   /* Etapa Start — botão gigante centralizado */
   .wizard-start {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1930,6 +2073,125 @@ function icon(name, cls) {
 // Wrap: pra usar dentro de innerHTML seguro
 function iconWrap(name, cls) { return icon(name, cls); }
 
+// ═════════════════════════════════════════════════════════════
+// NOTIFICAÇÕES IN-APP — toast e modal de confirmação
+// Substituem alert()/confirm() do browser pra manter tudo dentro
+// do sistema (mesma linguagem visual do resto).
+// ═════════════════════════════════════════════════════════════
+function _escapeHTML(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * Mostra um toast no canto superior direito.
+ * @param {Object|string} opts - Ou string (mensagem simples) ou {title, message, type, duration}.
+ *   type: 'info' | 'success' | 'warn' | 'error' (padrao: 'info')
+ *   duration: ms até auto-fechar (0 = não fecha). Padrao: 5000 (7000 pra error).
+ */
+function notify(opts) {
+  if (typeof opts === 'string') opts = { message: opts };
+  const { title = '', message = '', type = 'info' } = opts || {};
+  const dur = opts.duration != null ? opts.duration : (type === 'error' ? 7000 : 5000);
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const iconName = ({
+    success: 'check-circle',
+    error: 'x-circle',
+    warn: 'exclamation',
+    info: 'information',
+  })[type] || 'information';
+
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `
+    <span class="toast-icon">${icon(iconName)}</span>
+    <div class="toast-body">
+      ${title ? `<div class="toast-title">${_escapeHTML(title)}</div>` : ''}
+      <div class="toast-msg">${_escapeHTML(message)}</div>
+    </div>
+    <button class="toast-close" type="button" aria-label="Fechar">&times;</button>
+  `;
+  const close = () => {
+    if (!el.parentNode) return;
+    el.classList.add('leaving');
+    setTimeout(() => el.remove(), 240);
+  };
+  el.querySelector('.toast-close').addEventListener('click', close);
+  container.appendChild(el);
+  if (dur > 0) setTimeout(close, dur);
+  return { close };
+}
+
+// Atalhos convenientes
+function notifyOk(msg, title)   { return notify({ message: msg, title, type: 'success' }); }
+function notifyErr(msg, title)  { return notify({ message: msg, title: title || 'Erro', type: 'error' }); }
+function notifyWarn(msg, title) { return notify({ message: msg, title, type: 'warn' }); }
+function notifyInfo(msg, title) { return notify({ message: msg, title, type: 'info' }); }
+
+/**
+ * Modal de confirmação — retorna Promise<boolean>.
+ * @param {Object} opts
+ *   title: string
+ *   message: string
+ *   confirmText: string (padrao 'Confirmar')
+ *   cancelText: string (padrao 'Cancelar')
+ *   type: 'default' | 'danger' | 'warn' (afeta cor do icone/botao)
+ *   icon: nome do icon (padrao depende do type)
+ */
+function showConfirm(opts) {
+  const {
+    title = 'Confirmar',
+    message = '',
+    confirmText = 'Confirmar',
+    cancelText = 'Cancelar',
+    type = 'default',
+    icon: iconName,
+  } = opts || {};
+  return new Promise(resolve => {
+    const modal = document.getElementById('confirm-modal');
+    if (!modal) { resolve(false); return; }
+    modal.classList.remove('is-danger', 'is-warn');
+    if (type === 'danger') modal.classList.add('is-danger');
+    else if (type === 'warn') modal.classList.add('is-warn');
+
+    const defaultIcon = type === 'danger' ? 'exclamation'
+                      : type === 'warn'   ? 'exclamation'
+                      : 'information';
+    document.getElementById('confirm-modal-icon').innerHTML = icon(iconName || defaultIcon);
+    document.getElementById('confirm-modal-title').textContent = title;
+    document.getElementById('confirm-modal-msg').textContent = message;
+    const okBtn = document.getElementById('confirm-modal-ok');
+    const cancelBtn = document.getElementById('confirm-modal-cancel');
+    okBtn.textContent = confirmText;
+    cancelBtn.textContent = cancelText;
+
+    const fechar = (result) => {
+      modal.classList.remove('is-open');
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      modal.onclick = null;
+      document.removeEventListener('keydown', keyHandler);
+      resolve(result);
+    };
+    const keyHandler = (e) => {
+      if (e.key === 'Escape') fechar(false);
+      else if (e.key === 'Enter') fechar(true);
+    };
+    okBtn.onclick = () => fechar(true);
+    cancelBtn.onclick = () => fechar(false);
+    modal.onclick = (e) => { if (e.target === modal) fechar(false); };
+    document.addEventListener('keydown', keyHandler);
+    modal.classList.add('is-open');
+    setTimeout(() => okBtn.focus(), 50);
+  });
+}
+
+// Compatibilidade: alias pra alerta simples (só mostra um toast de info)
+function showAlert(msg, title) { return notifyInfo(msg, title); }
+
 // ═══════════════════════════════════════════════════════════════
 // UI: popula botões da toolbar e empty states com ícones
 // ═══════════════════════════════════════════════════════════════
@@ -2235,15 +2497,18 @@ async function wizardIniciar() {
     // Refresca status atual do agente antes de decidir
     await _pingAgente();
     if (!window.AGENTE_ONLINE) {
-      alert('Agente Local offline.\n\nBaixe e inicie o agente na sua máquina antes de operar.');
+      notifyErr('Baixe e inicie o agente na sua máquina antes de operar.', 'Agente Local offline');
       return;
     }
     if (!window.AGENTE_ATUALIZADO) {
-      const msg = 'O agente na sua máquina está desatualizado.\n\n' +
-        `Sua versão: ${window.AGENTE_VERSAO_LOCAL || '?'}\n` +
-        `Versão atual: ${window.AGENTE_VERSAO_ATUAL}\n\n` +
-        'Recomendamos baixar a versão nova antes de operar.\n\nDeseja seguir mesmo assim?';
-      if (!confirm(msg)) return;
+      const ok = await showConfirm({
+        title: 'Agente desatualizado',
+        message: `Sua versão: ${window.AGENTE_VERSAO_LOCAL || '?'}\nVersão atual: ${window.AGENTE_VERSAO_ATUAL}\n\nRecomendamos baixar a versão nova antes de operar. Deseja seguir mesmo assim?`,
+        confirmText: 'Seguir mesmo assim',
+        cancelText: 'Cancelar',
+        type: 'warn',
+      });
+      if (!ok) return;
     }
   }
   abrirPeriodoModal();
@@ -2564,17 +2829,19 @@ function _atualizarBotaoIniciar() {
 
 async function abrirModalAgente() {
   const online = window.AGENTE_ONLINE ? 'online' : 'offline';
-  const msg = `Agente Local está ${online}.\n\n` +
-    `Baixar o pacote do agente para instalar em uma máquina?\n` +
-    `(gera .zip com config e credenciais já embutidas)`;
-  if (!confirm(msg)) return;
+  const ok = await showConfirm({
+    title: 'Baixar pacote do agente',
+    message: `Agente Local está ${online}.\n\nBaixar o pacote (.zip com config e credenciais já embutidas) para instalar em uma máquina?`,
+    confirmText: 'Baixar .zip',
+    cancelText: 'Cancelar',
+  });
+  if (!ok) return;
   try {
-    // /agente/download exige Authorization — chamamos com token manualmente
     const resp = await _origFetch(`/agente/download`, {
       headers: { 'Authorization': `Bearer ${_authToken}` }
     });
     if (!resp.ok) {
-      alert(`Falha ao baixar pacote (HTTP ${resp.status}).`);
+      notifyErr(`Falha ao baixar pacote (HTTP ${resp.status}).`);
       return;
     }
     const blob = await resp.blob();
@@ -2586,8 +2853,9 @@ async function abrirModalAgente() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
+    notifyOk('Download iniciado. Descompacte e siga o LEIA-ME.', 'Pacote gerado');
   } catch (e) {
-    alert('Erro ao baixar pacote: ' + e.message);
+    notifyErr('Erro ao baixar pacote: ' + e.message);
   }
 }
 
@@ -2767,10 +3035,17 @@ async function salvarUsuario() {
 }
 
 async function deletarUsuario(id, nome) {
-  if (!confirm(`Excluir usuário ${nome}?`)) return;
+  const ok = await showConfirm({
+    title: 'Excluir usuário',
+    message: `Confirma a exclusão do usuário "${nome}"?\nEssa ação não pode ser desfeita.`,
+    confirmText: 'Excluir',
+    cancelText: 'Cancelar',
+    type: 'danger',
+  });
+  if (!ok) return;
   const r = await fetch(`${API}/users/${id}`, { method: 'DELETE' });
-  if (r.ok) carregarUsuarios();
-  else alert('Erro ao excluir');
+  if (r.ok) { notifyOk(`Usuário ${nome} excluído.`); carregarUsuarios(); }
+  else notifyErr('Erro ao excluir usuário.');
 }
 
 async function baixarDocumentos(opId, btnEl) {
@@ -2815,7 +3090,7 @@ async function baixarDocumentos(opId, btnEl) {
       btn.style.cursor = '';
       btn.innerHTML = textoOriginal;
     }
-    alert('Erro ao baixar: ' + e.message);
+    notifyErr('Erro ao baixar: ' + e.message);
   }
 }
 
@@ -2825,10 +3100,10 @@ async function aprovarUsuario(id) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ativo: true }),
   });
-  if (r.ok) carregarUsuarios();
+  if (r.ok) { notifyOk('Usuário aprovado.'); carregarUsuarios(); }
   else {
     const d = await r.json().catch(()=>({}));
-    alert(d.detail || 'Erro ao aprovar');
+    notifyErr(d.detail || 'Erro ao aprovar');
   }
 }
 
@@ -3058,7 +3333,10 @@ async function carregarFaturas(dataInicial, dataFinal) {
       if (!window.AGENTE_ONLINE) {
         btn.disabled = false;
         btn.innerHTML = labelOriginal;
-        alert('Agente Local offline.\n\nAbra o pacote do agente e execute:\n1. "1 - INSTALAR.bat" (uma vez)\n2. "2 - ABRIR CHROME.bat" (logue no GW)\n3. "3 - INICIAR AGENTE.bat"\n\nEnquanto o agente estiver offline, o painel nao consegue carregar faturas neste modo.');
+        notifyErr(
+          'Abra o pacote do agente e execute: "1 - INSTALAR.bat" (uma vez), "2 - ABRIR CHROME.bat" (logue no GW), "3 - INICIAR AGENTE.bat". Enquanto o agente estiver offline, o painel não consegue carregar faturas neste modo.',
+          'Agente Local offline'
+        );
         return;
       }
       const fats = await _carregarFaturasViaAgente(dataInicial, dataFinal);
@@ -3090,7 +3368,7 @@ async function carregarFaturas(dataInicial, dataFinal) {
     document.getElementById('btn-baixar').disabled = faturas.length === 0;
   } catch(e) {
     _pararPollingCarregar();
-    alert('Erro ao carregar faturas:\n' + e.message);
+    notifyErr(e.message, 'Erro ao carregar faturas');
   } finally {
     _pararPollingCarregar();
     btn.disabled = false;
@@ -3317,21 +3595,34 @@ function atualizarContador() {
   }
 }
 
-function excluirSelecionadas() {
+async function excluirSelecionadas() {
   const indices = [];
   faturas.forEach((_, i) => { if (document.getElementById(`chk-${i}`)?.checked) indices.push(i); });
   if (!indices.length) return;
-  if (!confirm(`Remover ${indices.length} fatura(s) da lista local?`)) return;
+  const ok = await showConfirm({
+    title: 'Remover faturas',
+    message: `Remover ${indices.length} fatura(s) da lista local?\nEssa remoção afeta apenas esta sessão — as faturas continuam existindo no GW.`,
+    confirmText: `Remover ${indices.length}`,
+    cancelText: 'Cancelar',
+    type: 'danger',
+  });
+  if (!ok) return;
   faturas = faturas.filter((_, i) => !indices.includes(i));
   renderFaturas();
   document.getElementById('btn-executar').disabled = faturas.length === 0;
-    document.getElementById('btn-baixar').disabled = faturas.length === 0;
+  document.getElementById('btn-baixar').disabled = faturas.length === 0;
 }
 
 async function cancelarAutomacao() {
   if (!operacaoAtual) return;
-  const confirmar = confirm('Tem certeza que deseja cancelar a automação em andamento?\n\nAs faturas já digitadas serão mantidas.');
-  if (!confirmar) return;
+  const ok = await showConfirm({
+    title: 'Cancelar automação',
+    message: 'Tem certeza que deseja cancelar a automação em andamento?\nAs faturas já digitadas serão mantidas.',
+    confirmText: 'Cancelar automação',
+    cancelText: 'Voltar',
+    type: 'warn',
+  });
+  if (!ok) return;
   try {
     await fetch(`${API}/cancelar/${operacaoAtual}`, { method: 'POST' });
   } catch (e) { /* ignora erro de rede */ }
@@ -3353,7 +3644,7 @@ function _coletarSelecionadas() {
 async function _disparaOperacao(apenasDocumentos) {
   const selecionadas = _coletarSelecionadas();
   if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
-    alert('Nenhuma fatura selecionada!');
+    notifyWarn('Marque pelo menos uma fatura na lista antes de continuar.', 'Nenhuma fatura selecionada');
     return;
   }
   const resp = await fetch(`${API}/executar`, {
@@ -3389,7 +3680,7 @@ async function baixarApenasArquivos() {
 async function executarAutomacao() {
   const selecionadas = _coletarSelecionadas();
   if (!selecionadas.filter(f => f.factory !== 'ignorar').length) {
-    alert('Nenhuma fatura selecionada para envio!');
+    notifyWarn('Marque as faturas cujos boletos e CT-es você quer baixar.', 'Nenhuma fatura selecionada');
     return;
   }
 
@@ -3959,7 +4250,7 @@ async function carregarConfig() {
 async function salvarMeuGw() {
   const usuario = document.getElementById('meu-gw-user')?.value?.trim() || '';
   const senha   = document.getElementById('meu-gw-pass')?.value || '';
-  if (!usuario || !senha) { alert('Preencha usuário e senha'); return; }
+  if (!usuario || !senha) { notifyWarn('Preencha usuário e senha.'); return; }
   const r = await fetch(`${API}/meu-gw`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -3967,10 +4258,11 @@ async function salvarMeuGw() {
   });
   if (r.ok) {
     window._meuGw = await r.json();
+    notifyOk('Credenciais do GW salvas.');
     carregarConfig();
   } else {
     const d = await r.json().catch(()=>({}));
-    alert('Erro: ' + (d.detail || 'não foi possível salvar'));
+    notifyErr(d.detail || 'Não foi possível salvar as credenciais.');
   }
 }
 
@@ -4113,7 +4405,7 @@ async function salvarNovaFactory() {
   const icone   = document.getElementById('nova-factory-icone')?.value?.trim() || 'building-office';
   const usuario = document.getElementById('nova-factory-usuario')?.value?.trim() || '';
   const senha   = document.getElementById('nova-factory-senha')?.value || '';
-  if (!nome) { alert('Informe o nome da factory'); return; }
+  if (!nome) { notifyWarn('Informe o nome da factory.'); return; }
   const btn = document.querySelector('#nova-factory-nome')?.closest('div')?.parentElement?.parentElement?.querySelector('.btn-primary');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Salvando...'; }
   await fetch(`${API}/factories-extras`, {
@@ -4126,8 +4418,16 @@ async function salvarNovaFactory() {
 }
 
 async function removerFactoryExtra(id) {
-  if (!confirm('Remover esta factory?')) return;
+  const ok = await showConfirm({
+    title: 'Remover factory',
+    message: 'Deseja remover esta factory personalizada?',
+    confirmText: 'Remover',
+    cancelText: 'Cancelar',
+    type: 'danger',
+  });
+  if (!ok) return;
   await fetch(`${API}/factories-extras/${id}`, { method: 'DELETE' });
+  notifyOk('Factory removida.');
   carregarConfig();
 }
 
@@ -4223,8 +4523,8 @@ async function salvarCredencial(sistema) {
   const usuario = document.getElementById(`usr-${sistema}`)?.value?.trim();
   const senha   = document.getElementById(`pwd-${sistema}`)?.value;
   const url     = document.getElementById(`url-${sistema}`)?.value?.trim() || '';
-  if (!usuario) { alert('Informe o usuário'); return; }
-  if (!senha)   { alert('Informe a senha');   return; }
+  if (!usuario) { notifyWarn('Informe o usuário.'); return; }
+  if (!senha)   { notifyWarn('Informe a senha.');   return; }
 
   const btn = document.querySelector(`#cred-row-${sistema} .btn-primary`);
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="btn-spinner"></span> Salvando...'; }
@@ -4234,6 +4534,7 @@ async function salvarCredencial(sistema) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sistema, usuario, senha, url }),
   });
+  notifyOk('Credenciais salvas.');
   expandedCredencial = null;
   carregarConfig();
 }
@@ -4545,7 +4846,7 @@ function _confirmarPeriodoModal() {
   if (!_periodoPicker) { _fecharPeriodoModal(); return; }
   const sel = _periodoPicker.selectedDates || [];
   if (sel.length === 0) {
-    alert('Selecione pelo menos uma data.');
+    notifyWarn('Selecione pelo menos uma data no calendário.');
     return;
   }
   const ini = sel[0];
@@ -4559,6 +4860,26 @@ function _confirmarPeriodoModal() {
   _mostrarEtapaWizard('modo');
 }
 </script>
+
+<!-- ── TOAST CONTAINER ───────────────────────────────────── -->
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+<!-- ── MODAL DE CONFIRMAÇÃO GENERICO (usado pelo showConfirm) ─── -->
+<div id="confirm-modal" class="modal-overlay confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-modal-title">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-body">
+      <div class="confirm-icon" id="confirm-modal-icon"></div>
+      <div style="flex:1">
+        <h3 class="confirm-title" id="confirm-modal-title">Confirmar</h3>
+        <p class="confirm-msg" id="confirm-modal-msg"></p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" type="button" id="confirm-modal-cancel">Cancelar</button>
+      <button class="btn-confirm" type="button" id="confirm-modal-ok">OK</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── MODAL DE PERIODO ────────────────────────────────────── -->
 <div id="periodo-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="periodo-modal-title">
