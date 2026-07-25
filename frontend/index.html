@@ -748,6 +748,259 @@
   .sidebar-item:nth-child(3) { animation-delay: .15s; }
   .sidebar-item:nth-child(4) { animation-delay: .20s; }
   .sidebar-item:hover { transform: translateX(4px); }
+
+  /* ═══════════════════════════════════════════════════════════
+     REDESIGN 2026 — grupos de botões, painel inline, animações
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Ícones inline (Heroicons) */
+  .icn { width: 18px; height: 18px; stroke-width: 2; flex-shrink: 0; }
+  .icn-sm { width: 14px; height: 14px; }
+  .icn-lg { width: 22px; height: 22px; }
+  .icn-xl { width: 40px; height: 40px; stroke-width: 1.5; }
+  .icn-spin { animation: iconSpin 1.2s linear infinite; }
+  @keyframes iconSpin { to { transform: rotate(360deg); } }
+
+  /* Toolbar reorganizada em grupos */
+  .toolbar-v2 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 4px 0 16px;
+    border-bottom: 1px solid transparent;
+    margin-bottom: 16px;
+  }
+  .btn-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .btn-group-primary { background: rgba(79,142,247,0.06); border-color: rgba(79,142,247,0.20); }
+  .btn-group-utility { background: transparent; border-color: transparent; padding: 0; gap: 8px; }
+  .btn-divider { width: 1px; background: var(--border2); align-self: stretch; margin: 4px 0; }
+  .toolbar-v2 .btn {
+    height: 36px;
+    padding: 0 14px;
+    gap: 8px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .toolbar-v2 .btn-primary { box-shadow: 0 2px 8px rgba(79,142,247,.25); }
+  .toolbar-v2 .btn-primary:not(:disabled):hover { box-shadow: 0 4px 12px rgba(79,142,247,.35); transform: translateY(-1px); }
+  .toolbar-v2 select, .toolbar-v2 .btn-ghost {
+    height: 36px; padding: 0 12px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    cursor: pointer; transition: all .15s;
+  }
+  .toolbar-v2 select:hover, .toolbar-v2 .btn-ghost:hover {
+    background: var(--surface); border-color: var(--border2);
+  }
+  .toolbar-spacer { flex: 1 1 auto; min-width: 8px; }
+  .count-badge-v2 {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px;
+    background: linear-gradient(135deg, rgba(79,142,247,0.14), rgba(79,142,247,0.06));
+    border: 1px solid rgba(79,142,247,0.28);
+    border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .count-badge-v2 .num { color: var(--text); font-weight: 700; font-size: 13px; }
+
+  /* Painel de operação inline (aparece abaixo dos botões, sem trocar página) */
+  .op-panel {
+    background: linear-gradient(180deg, var(--surface2), var(--surface));
+    border: 1px solid var(--border2);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 20px;
+    animation: opPanelIn .35s ease both;
+    box-shadow: 0 4px 24px rgba(0,0,0,.35);
+    position: relative;
+    overflow: hidden;
+  }
+  @keyframes opPanelIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .op-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(600px circle at 0% 0%, rgba(79,142,247,.12), transparent 40%);
+    pointer-events: none;
+  }
+  .op-panel-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px;
+    position: relative;
+  }
+  .op-panel-title { font-size: 15px; font-weight: 700; color: var(--text); flex: 1; }
+  .op-panel-subtitle { font-size: 12px; color: var(--text2); margin-top: 2px; }
+  .op-panel-close {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text2); border-radius: 8px;
+    width: 32px; height: 32px; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: all .15s;
+  }
+  .op-panel-close:hover { border-color: var(--red); color: var(--red); }
+
+  /* Steps (etapas do fluxo) */
+  .op-steps {
+    display: flex; align-items: stretch; gap: 4px;
+    background: var(--bg); padding: 4px; border-radius: 12px;
+    margin-bottom: 20px;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .op-step {
+    flex: 1; min-width: 120px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    display: flex; align-items: center; gap: 10px;
+    color: var(--text2);
+    transition: all .3s;
+    position: relative;
+  }
+  .op-step .step-icon {
+    width: 32px; height: 32px;
+    border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface2); border: 1px solid var(--border2);
+    flex-shrink: 0;
+    transition: all .3s;
+  }
+  .op-step .step-icon .icn { width: 16px; height: 16px; }
+  .op-step .step-label { font-size: 12px; font-weight: 600; }
+  .op-step .step-detail { font-size: 10.5px; color: var(--muted); margin-top: 1px; }
+  .op-step.done { color: var(--green); }
+  .op-step.done .step-icon { background: rgba(16,185,129,0.14); border-color: rgba(16,185,129,0.35); color: var(--green); }
+  .op-step.active { color: var(--accent); }
+  .op-step.active .step-icon {
+    background: rgba(79,142,247,0.18);
+    border-color: rgba(79,142,247,0.55);
+    color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(79,142,247,0.15);
+    animation: stepPulse 1.6s ease-in-out infinite;
+  }
+  .op-step.error { color: var(--red); }
+  .op-step.error .step-icon { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.4); color: var(--red); }
+  @keyframes stepPulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(79,142,247,0.15); }
+    50%      { box-shadow: 0 0 0 8px rgba(79,142,247,0.03); }
+  }
+
+  /* Barra de progresso */
+  .op-progress {
+    height: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .op-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--green));
+    border-radius: 999px;
+    width: 0%;
+    transition: width .5s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+  }
+  .op-progress-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
+    animation: shimmer 1.8s infinite;
+  }
+  @keyframes shimmer {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Área de logs ao vivo */
+  .op-log {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', ui-monospace, 'Consolas', monospace;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: var(--text2);
+    max-height: 260px;
+    overflow-y: auto;
+    position: relative;
+  }
+  .op-log-line {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 3px 0;
+    animation: logLineIn .3s ease both;
+  }
+  @keyframes logLineIn {
+    from { opacity: 0; transform: translateX(-4px); }
+    to { opacity: 1; }
+  }
+  .op-log-line .icn-sm { margin-top: 2px; flex-shrink: 0; }
+  .op-log-line.ok { color: var(--green); }
+  .op-log-line.err { color: var(--red); }
+  .op-log-line.warn { color: #F59E0B; }
+  .op-log-line.info { color: var(--text2); }
+  .op-log-line.step { color: var(--accent); font-weight: 600; }
+
+  /* Loading state pra tabela */
+  .skeleton {
+    background: linear-gradient(90deg, var(--surface2), var(--surface), var(--surface2));
+    background-size: 200% 100%;
+    animation: skelSlide 1.4s ease-in-out infinite;
+    border-radius: 6px;
+  }
+  @keyframes skelSlide {
+    0%   { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+
+  /* Empty state moderno */
+  .empty-v2 {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 80px 24px;
+    text-align: center;
+    color: var(--text2);
+    animation: fadeSlideIn .4s ease both;
+  }
+  .empty-v2 .icn-xl { color: var(--muted); margin-bottom: 16px; opacity: .6; }
+  .empty-v2 h3 { color: var(--text); font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  .empty-v2 p { font-size: 13px; margin: 0; }
+
+  /* Ação encerrada (botão de download destacado) */
+  .op-panel.finished .op-progress-bar { background: var(--green); }
+  .op-panel.finished .op-progress-bar::after { animation: none; }
+  .op-download-cta {
+    display: inline-flex; align-items: center; gap: 10px;
+    padding: 12px 22px;
+    background: linear-gradient(135deg, var(--green), #0BA971);
+    color: white;
+    border: none; border-radius: 10px;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(16,185,129,.35);
+    transition: all .2s;
+  }
+  .op-download-cta:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(16,185,129,.5); }
 </style>
 </head>
 <body>
@@ -845,38 +1098,44 @@
 
   <!-- ── FATURAS ──────────────────────────────────────── -->
   <div class="page active" id="page-faturas">
-    <div class="toolbar">
-      <button class="btn btn-primary" id="btn-carregar" onclick="abrirPeriodoModal()">
-        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-        Carregar do GW
-      </button>
-      <button class="btn btn-success" id="btn-executar" onclick="executarAutomacao()" disabled>
-        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
-        Executar Selecionadas
-      </button>
-      <button class="btn btn-ghost" id="btn-baixar" onclick="baixarApenasArquivos()" disabled
-        title="Pula a digitação nas factories e baixa apenas boletos + CT-es das selecionadas">
-        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
-        Apenas baixar arquivos
-      </button>
-      <button class="btn btn-ghost" onclick="selecionarTodas()">Selecionar Todas</button>
-      <select id="filtro-filial" onchange="renderFaturas()" style="height:36px;padding:0 10px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;cursor:pointer;width:auto;flex-shrink:0;">
-        <option value="">Todas as filiais</option>
-        <!-- opcoes de filial sao populadas dinamicamente por _populaFiltroFiliais() -->
-      </select>
-      <button class="btn btn-danger" id="btn-excluir" onclick="excluirSelecionadas()" disabled>
-        <svg class="btn-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
-        Excluir
-      </button>
-      <div class="count-badge" id="count-badge">0 faturas</div>
+    <div class="toolbar-v2">
+      <!-- Grupo: Fonte de dados -->
+      <div class="btn-group btn-group-primary">
+        <button class="btn btn-primary" id="btn-carregar" onclick="abrirPeriodoModal()"
+          title="Carrega faturas do GW no período escolhido"></button>
+      </div>
+
+      <!-- Grupo: Ações principais -->
+      <div class="btn-group">
+        <button class="btn btn-success" id="btn-executar" onclick="executarAutomacao()" disabled
+          title="Executa digitação nas factories e depois baixa boletos + CT-es"></button>
+        <div class="btn-divider"></div>
+        <button class="btn btn-ghost" id="btn-baixar" onclick="baixarApenasArquivos()" disabled
+          title="Pula a digitação nas factories e baixa apenas boletos + CT-es"></button>
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <!-- Grupo: Utilitários (à direita) -->
+      <div class="btn-group btn-group-utility">
+        <button class="btn-ghost" onclick="selecionarTodas()" title="Alterna seleção de todas"></button>
+        <select id="filtro-filial" onchange="renderFaturas()">
+          <option value="">Todas as filiais</option>
+        </select>
+        <button class="btn-ghost" id="btn-excluir" onclick="excluirSelecionadas()" disabled
+          style="border-color: var(--red); color: var(--red)"></button>
+      </div>
+
+      <div class="count-badge-v2" id="count-badge">
+        <span class="num">0</span> faturas
+      </div>
     </div>
 
+    <!-- Painel de operação em andamento (aparece INLINE) -->
+    <div id="op-panel-inline" style="display:none"></div>
+
     <div id="faturas-container">
-      <div class="empty-state">
-        <span class="icon">📄</span>
-        <h3>Nenhuma fatura carregada</h3>
-        <p>Clique em "Carregar do GW" para buscar as faturas de hoje</p>
-      </div>
+      <div class="empty-v2" id="empty-faturas"></div>
     </div>
   </div>
 
@@ -894,7 +1153,7 @@
   <!-- ── RELATÓRIOS ────────────────────────────────────── -->
   <div class="page" id="page-relatorios">
     <div id="relatorios-container">
-      <div class="empty-state"><span class="icon">📊</span><h3>Carregando...</h3></div>
+      <div class="empty-v2"><svg class="icn icn-xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg><h3>Carregando...</h3></div>
     </div>
   </div>
 
@@ -963,6 +1222,293 @@
 
 <script>
 const API = location.protocol === 'file:' ? 'http://localhost:8000/api' : '/api';
+
+// ═══════════════════════════════════════════════════════════════
+// BIBLIOTECA DE ICONES (Heroicons v2 outline) — SVG inline
+// Uso: icon('name') ou icon('name', 'icn-lg icn-spin')
+// ═══════════════════════════════════════════════════════════════
+const _ICON_SVGS = {
+  // Documentos / arquivos
+  'document-text':    'M9 12h6m-6 3h6m-6-6h6M9 4.5A2.25 2.25 0 016.75 6.75H6a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 006 21.75h12A2.25 2.25 0 0020.25 19.5V9a2.25 2.25 0 00-2.25-2.25h-.75A2.25 2.25 0 0115 4.5v-.75A2.25 2.25 0 0012.75 1.5h-1.5A2.25 2.25 0 009 3.75v.75z',
+  'folder':           'M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z',
+  'archive':          'M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z',
+  'inbox':            'M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 00-2.15-1.588H6.911a2.25 2.25 0 00-2.15 1.588L2.35 13.177a2.25 2.25 0 00-.1.661z',
+  'clipboard':        'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z',
+
+  // Ações
+  'arrow-down-tray':  'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5',
+  'arrow-up-tray':    'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 7.5m0 0L7.5 12m4.5-4.5v13.5',
+  'arrow-path':       'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99',
+  'play':             'M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971L6.917 19.334c-.75.412-1.667-.13-1.667-.986V5.653z',
+  'trash':            'M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0',
+  'plus':             'M12 4.5v15m7.5-7.5h-15',
+  'check':            'M4.5 12.75l6 6 9-13.5',
+  'check-circle':     'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  'x-mark':           'M6 18L18 6M6 6l12 12',
+  'x-circle':         'M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  'exclamation':      'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z',
+  'information':      'M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z',
+
+  // Nav / sistema
+  'chart-bar':        'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z',
+  'users':            'M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z',
+  'cog':              'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+  'download-cloud':   'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3',
+  'building-office':  'M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 3.75h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z',
+  'building-library': 'M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z',
+  'briefcase':        'M20.25 14.15v4.098a2.25 2.25 0 01-2.25 2.25h-12a2.25 2.25 0 01-2.25-2.25v-4.098m16.5 0a2.25 2.25 0 00.586-1.06L21 8.25a48.474 48.474 0 00-6.75-.583M4.5 8.25v6a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25v-6M15.75 8.25V6a2.25 2.25 0 00-2.25-2.25h-3A2.25 2.25 0 008.25 6v2.25m7.5 0V6a2.25 2.25 0 00-2.25-2.25h-3A2.25 2.25 0 008.25 6v2.25',
+  'computer-desktop': 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25',
+  'globe':            'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418',
+  'lock':             'M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z',
+  'eye':              'M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z M15 12a3 3 0 11-6 0 3 3 0 016 0z',
+  'sparkles':         'M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z',
+  'currency-dollar':  'M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+  'target':           'M15 10.5a3 3 0 11-6 0 3 3 0 016 0z M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z',
+  'clock':            'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+  'magnifying-glass': 'm21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z',
+  'server':           'M21.75 17.25v-.228a4.5 4.5 0 00-.12-1.03l-2.268-9.64a3.375 3.375 0 00-3.285-2.602H7.923a3.375 3.375 0 00-3.285 2.602l-2.268 9.64a4.5 4.5 0 00-.12 1.03v.228m19.5 0a3 3 0 01-3 3H5.25a3 3 0 01-3-3m19.5 0a3 3 0 00-3-3H5.25a3 3 0 00-3 3m16.5 0h.008v.008h-.008v-.008zm-3 0h.008v.008h-.008v-.008z',
+  'bolt':             'M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z',
+  'calendar':         'M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z',
+  'party':            'M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21M3 21h18M12 6.75h.008v.008H12V6.75z',
+};
+
+function icon(name, cls) {
+  const path = _ICON_SVGS[name];
+  if (!path) return '';
+  const classes = 'icn' + (cls ? ' ' + cls : '');
+  return `<svg class="${classes}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`;
+}
+
+// Wrap: pra usar dentro de innerHTML seguro
+function iconWrap(name, cls) { return icon(name, cls); }
+
+// ═══════════════════════════════════════════════════════════════
+// UI: popula botões da toolbar e empty states com ícones
+// ═══════════════════════════════════════════════════════════════
+function _popularToolbarUI() {
+  const setBtn = (id, iconName, label) => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = icon(iconName) + '<span>' + label + '</span>';
+  };
+  setBtn('btn-carregar',  'arrow-down-tray', 'Carregar do GW');
+  setBtn('btn-executar',  'play',            'Executar Selecionadas');
+  setBtn('btn-baixar',    'archive',         'Apenas baixar arquivos');
+  setBtn('btn-excluir',   'trash',           'Excluir');
+
+  // Botao "Selecionar Todas" (dentro do btn-group-utility, sem id fixo)
+  const utilGroup = document.querySelector('.btn-group-utility');
+  if (utilGroup) {
+    const selBtn = utilGroup.querySelector('button:not(#btn-excluir)');
+    if (selBtn && !selBtn.querySelector('svg')) {
+      selBtn.innerHTML = icon('check') + '<span>Selecionar Todas</span>';
+    }
+  }
+
+  // Empty state Faturas
+  const emptyF = document.getElementById('empty-faturas');
+  if (emptyF && !emptyF.querySelector('svg')) {
+    emptyF.innerHTML = icon('document-text', 'icn-xl') +
+      '<h3>Nenhuma fatura carregada</h3>' +
+      '<p>Clique em <strong>Carregar do GW</strong> para buscar as faturas.</p>';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PAINEL DE OPERAÇÃO INLINE (na mesma pagina de Faturas)
+// Mostra: header + progresso + etapas visuais + logs ao vivo
+// ═══════════════════════════════════════════════════════════════
+function _classifyLogLine(line) {
+  // Detecta tipo do log e retorna {cls, icon, texto limpo}
+  const raw = String(line || '');
+  let cls = 'info', ico = 'information';
+  if (/^\s*✅|✓ /.test(raw))               { cls = 'ok';   ico = 'check-circle'; }
+  else if (/^\s*❌/.test(raw))              { cls = 'err';  ico = 'x-circle'; }
+  else if (/^\s*⚠️?/.test(raw))             { cls = 'warn'; ico = 'exclamation'; }
+  else if (/^\s*(🏭|📄|📋|📥|📂|🔑|📊)/.test(raw)) { cls = 'step'; ico = 'sparkles'; }
+  else if (/^\s*🔍/.test(raw))              { cls = 'info'; ico = 'magnifying-glass'; }
+  else if (/erro|falhou|falha|excec/i.test(raw)) { cls = 'err';  ico = 'x-circle'; }
+  else if (/aguardando|iniciando/i.test(raw))    { cls = 'info'; ico = 'clock'; }
+  else if (/OK|concluid|salvo|preenchid/i.test(raw))  { cls = 'ok';   ico = 'check-circle'; }
+
+  // Remove emojis do inicio
+  const texto = raw.replace(/^[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}✅❌⚠️🔐📂📝🏢🏙️💼🏦📅📋📁📥▶️⏳🎉🔄⚡💰🎯⏱🔍🏭📄📊🔑]+\s*/u, '');
+  return { cls, ico, texto };
+}
+
+// Steps do fluxo — define quais etapas existem e status atual
+function _detectarEtapas(status) {
+  // Retorna array de {key, label, detail, state}
+  // state: 'pending' | 'active' | 'done' | 'error'
+  const s = status || {};
+  const st = String(s.status || '');
+  const logs = s.logs || [];
+  const logStr = logs.join(' | ').toLowerCase();
+
+  const hasCarregar   = /carregar_faturas|iniciando download|baixando relat/i.test(logStr);
+  const hasEnfileirouExec  = /executar factories/i.test(logStr);
+  const hasFactoryDone     = /operação completa|operacao completa|preenchido|preenchida|salvo|validado/i.test(logStr);
+  const hasDocs            = /baixando pdf|baixando ct|baixar documentos/i.test(logStr);
+  const hasArquivosProntos = /arquivo\(s\) prontos|zip|arquivos prontos/i.test(logStr);
+  const isErro = st.includes('erros') || (s.erros && s.erros.length);
+  const isDone = st === 'concluido' || st === 'concluido_com_erros';
+
+  const etapas = [];
+
+  // 1. Recebendo ordem
+  etapas.push({
+    key: 'enfileirar',
+    label: 'Enfileirando ordem',
+    detail: 'Preparando execução',
+    state: 'done',
+    icon: 'inbox',
+  });
+
+  // 2. Executar factories (só se ordem incluir factory)
+  const temFactory = /executar factories|factories concluidas|forcando login|firma|fluxasset|gc[_ ]/i.test(logStr);
+  if (temFactory) {
+    let state = 'pending';
+    if (hasFactoryDone) state = 'done';
+    else if (hasEnfileirouExec || /iniciando|logando|digitando/i.test(logStr)) state = 'active';
+    if (isErro && !hasFactoryDone) state = 'error';
+    etapas.push({
+      key: 'factories',
+      label: 'Digitando factories',
+      detail: 'Firma / FluxAsset / GC',
+      state,
+      icon: 'building-office',
+    });
+  }
+
+  // 3. Baixar documentos (boletos+CTe)
+  const temDocs = /baixar documentos|salvando_documentos|fatura pdf|ctes|zip:/i.test(logStr) || st === 'salvando_documentos';
+  if (temDocs) {
+    let state = 'pending';
+    if (hasArquivosProntos) state = 'done';
+    else if (hasDocs || st === 'salvando_documentos') state = 'active';
+    if (isErro && hasFactoryDone && !hasArquivosProntos) state = 'error';
+    etapas.push({
+      key: 'documentos',
+      label: 'Baixando documentos',
+      detail: 'Boletos + CT-es',
+      state,
+      icon: 'arrow-down-tray',
+    });
+  }
+
+  // 4. Concluído
+  etapas.push({
+    key: 'finalizar',
+    label: 'Concluído',
+    detail: isDone ? (isErro ? 'com erros' : 'tudo pronto') : 'aguardando',
+    state: isDone ? (isErro ? 'error' : 'done') : 'pending',
+    icon: isErro ? 'x-circle' : 'check-circle',
+  });
+
+  return etapas;
+}
+
+function _calcProgresso(etapas) {
+  const total = etapas.length;
+  const done = etapas.filter(e => e.state === 'done').length;
+  const active = etapas.filter(e => e.state === 'active').length;
+  return Math.round(((done + active * 0.5) / total) * 100);
+}
+
+function renderOpPainelInline(status, opId) {
+  const painel = document.getElementById('op-panel-inline');
+  if (!painel) return;
+  if (!status) {
+    painel.style.display = 'none';
+    painel.innerHTML = '';
+    return;
+  }
+  painel.style.display = 'block';
+
+  const etapas = _detectarEtapas(status);
+  const pct = _calcProgresso(etapas);
+  const isDone = status.status === 'concluido' || status.status === 'concluido_com_erros';
+  const isErro = status.status === 'concluido_com_erros' || (status.erros && status.erros.length);
+
+  // Título dinâmico
+  let title = 'Operação em andamento';
+  let subtitle = 'Preparando...';
+  const active = etapas.find(e => e.state === 'active');
+  if (active) subtitle = active.label + ' — ' + active.detail;
+  if (isDone) {
+    title = isErro ? 'Operação concluída com erros' : 'Operação concluída';
+    subtitle = isErro ? 'Verifique os logs abaixo' : 'Todos os arquivos estão prontos';
+  }
+
+  // Steps HTML
+  const stepsHtml = etapas.map(e => `
+    <div class="op-step ${e.state}">
+      <div class="step-icon">${icon(e.state === 'active' ? 'arrow-path' : e.icon, e.state === 'active' ? 'icn-spin' : '')}</div>
+      <div>
+        <div class="step-label">${e.label}</div>
+        <div class="step-detail">${e.detail}</div>
+      </div>
+    </div>
+  `).join('');
+
+  // Logs (últimos 40)
+  const logs = (status.logs || []).slice(-40);
+  const logsHtml = logs.map(l => {
+    const c = _classifyLogLine(l);
+    return `<div class="op-log-line ${c.cls}">${icon(c.ico, 'icn-sm')}<span>${c.texto}</span></div>`;
+  }).join('');
+
+  // Ação de conclusão
+  let ctaHtml = '';
+  if (isDone) {
+    const hasFile = status.resumo_documentos && Object.keys(status.resumo_documentos).length > 0;
+    if (hasFile && opId) {
+      ctaHtml = `
+        <div style="text-align:center;margin-top:16px">
+          <button class="op-download-cta" onclick="baixarDocumentos('${opId}', this)">
+            ${icon('arrow-down-tray')} Baixar documentos (.zip)
+          </button>
+        </div>`;
+    }
+  }
+
+  const headerIcon = isDone
+    ? (isErro ? icon('exclamation', 'icn-lg') : icon('check-circle', 'icn-lg'))
+    : icon('bolt', 'icn-lg icn-spin');
+
+  const headerColor = isDone
+    ? (isErro ? 'var(--red)' : 'var(--green)')
+    : 'var(--accent)';
+
+  painel.className = 'op-panel' + (isDone ? ' finished' : '');
+  painel.innerHTML = `
+    <div class="op-panel-header">
+      <div style="color:${headerColor}">${headerIcon}</div>
+      <div style="flex:1">
+        <div class="op-panel-title">${title}</div>
+        <div class="op-panel-subtitle">${subtitle}</div>
+      </div>
+      ${isDone ? `<button class="op-panel-close" onclick="fecharOpPainel()" title="Fechar painel">${icon('x-mark', 'icn-sm')}</button>` : ''}
+    </div>
+    <div class="op-progress"><div class="op-progress-bar" style="width:${pct}%"></div></div>
+    <div class="op-steps">${stepsHtml}</div>
+    <div class="op-log" id="op-panel-log">${logsHtml}</div>
+    ${ctaHtml}
+  `;
+
+  // Auto-scroll do log
+  const logEl = painel.querySelector('#op-panel-log');
+  if (logEl) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function fecharOpPainel() {
+  const p = document.getElementById('op-panel-inline');
+  if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+  // Para o polling se estiver ativo
+  if (typeof poolingInterval !== 'undefined' && poolingInterval) {
+    clearInterval(poolingInterval);
+    poolingInterval = null;
+  }
+}
 
 // ─── AUTH ─────────────────────────────────────────────────
 let _authToken = localStorage.getItem('auth_token') || '';
@@ -1110,6 +1656,7 @@ async function _bootstrapAuth() {
     _authUser = u;
     localStorage.setItem('auth_user', JSON.stringify(u));
     esconderLogin();
+    _popularToolbarUI(); // popula botões e empty states com ícones
     _bootstrapAgente();  // após login, checa se modo agente está ativo
   } catch (_) {
     fazerLogout();
@@ -1244,7 +1791,7 @@ async function carregarUsuarios() {
     if (!r.ok) throw new Error('Erro ao listar');
     const users = await r.json();
     if (!users.length) {
-      cont.innerHTML = '<div class="empty-state"><span class="icon">👥</span><h3>Nenhum usuário</h3></div>';
+      cont.innerHTML = '<div class="empty-v2">' + icon('users', 'icn-xl') + '<h3>Nenhum usuário</h3></div>';
       return;
     }
     const pendentes = users.filter(u => !u.ativo);
@@ -1397,7 +1944,7 @@ async function baixarDocumentos(opId, btnEl) {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     if (btn) {
-      btn.innerHTML = '✓ Baixado';
+      btn.innerHTML = icon('check') + ' Baixado';
       setTimeout(() => {
         btn.disabled = false;
         btn.style.opacity = '';
@@ -1525,7 +2072,7 @@ async function carregarArquivos() {
     const d = await r.json();
     const pacotes = d.pacotes || [];
     if (!pacotes.length) {
-      cont.innerHTML = '<div class="empty-state"><span class="icon">📦</span><h3>Sem arquivos recentes</h3><p>Arquivos gerados aparecerão aqui por até 48h.</p></div>';
+      cont.innerHTML = '<div class="empty-v2"><svg class="icn icn-xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z"/></svg><h3>Sem arquivos recentes</h3><p>Arquivos gerados aparecerão aqui por até 48h.</p></div>';
       return;
     }
     cont.innerHTML = pacotes.map(p => {
@@ -1554,7 +2101,7 @@ async function carregarArquivos() {
               <ul style="list-style:none;padding:0;margin:0;max-height:120px;overflow-y:auto">${arqList}</ul>
             </div>
             <button class="btn btn-primary" style="font-size:12px;padding:8px 16px;white-space:nowrap" onclick="baixarDocumentos('${p.op_id}', this)">
-              📥 Baixar .zip
+              Baixar .zip
             </button>
           </div>
         </div>`;
@@ -1745,7 +2292,7 @@ function renderFaturas() {
   });
 
   if (!faturas.length) {
-    container.innerHTML = '<div class="empty-state"><span class="icon">📭</span><h3>Sem faturas para hoje</h3><p>Nenhuma fatura encontrada com emissão hoje</p></div>';
+    container.innerHTML = '<div class="empty-v2"><svg class="icn icn-xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2.25 13.5h3.86a2.25 2.25 0 012.012 1.244l.256.512a2.25 2.25 0 002.013 1.244h3.218a2.25 2.25 0 002.013-1.244l.256-.512a2.25 2.25 0 012.013-1.244h3.859M2.35 13.177L4.76 5.338A2.25 2.25 0 016.912 3.75h10.176a2.25 2.25 0 012.15 1.588l2.41 7.839"/></svg><h3>Sem faturas para hoje</h3><p>Nenhuma fatura encontrada com emissão hoje</p></div>';
     badge.textContent = '0 faturas';
     return;
   }
@@ -1789,7 +2336,7 @@ function renderFaturas() {
   badge.textContent = `${faturas.length} fatura(s)${filtroFilial ? ` — ${faturasFiltradas.length} visível(is)` : ''}`;
 
   if (!faturasFiltradas.length) {
-    container.innerHTML = '<div class="empty-state"><span class="icon">🔍</span><h3>Nenhuma fatura para essa filial</h3></div>';
+    container.innerHTML = '<div class="empty-v2"><svg class="icn icn-xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg><h3>Nenhuma fatura para essa filial</h3></div>';
     return;
   }
 
@@ -1892,8 +2439,15 @@ function atualizarContador() {
   const filtro = document.getElementById('filtro-filial')?.value || '';
   const visiveis = document.querySelectorAll('[id^="chk-"]').length;
   const label = filtro ? `${faturas.length} fatura(s) — ${visiveis} visível(is)` : `${faturas.length} fatura(s)`;
-  document.getElementById('count-badge').textContent =
-    selecionadas > 0 ? `${label} — ${selecionadas} selecionada(s)` : label;
+  // Novo formato do badge: span.num pro numero em destaque
+  const cb = document.getElementById('count-badge');
+  if (cb) {
+    const sufixo = selecionadas > 0
+      ? ` — <strong style="color:var(--text)">${selecionadas}</strong> selecionada(s)`
+      : '';
+    const filialLbl = filtro ? ` • ${visiveis} visível(is)` : '';
+    cb.innerHTML = `<span class="num">${faturas.length}</span> fatura(s)${filialLbl}${sufixo}`;
+  }
   const btnExcluir = document.getElementById('btn-excluir');
   if (btnExcluir) btnExcluir.disabled = selecionadas === 0;
 }
@@ -1950,8 +2504,12 @@ async function _disparaOperacao(apenasDocumentos) {
   const data = await resp.json();
   operacaoAtual = data.operacao_id;
   _conclusaoScrollado = false;
-  showPage('status');
   iniciarPolling();
+  // Scroll suave pro painel de operação que vai aparecer inline
+  setTimeout(() => {
+    const p = document.getElementById('op-panel-inline');
+    if (p) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 200);
 }
 
 async function baixarApenasArquivos() {
@@ -1975,8 +2533,12 @@ async function executarAutomacao() {
   const data = await resp.json();
   operacaoAtual = data.operacao_id;
   _conclusaoScrollado = false;
-  showPage('status');
   iniciarPolling();
+  // Scroll suave pro painel de operação que vai aparecer inline
+  setTimeout(() => {
+    const p = document.getElementById('op-panel-inline');
+    if (p) p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 200);
 }
 
 // ── STATUS ───────────────────────────────────────────────
@@ -1992,6 +2554,8 @@ async function atualizarStatus() {
     if (!resp.ok) return; // erro de rede — mantém polling
     const s = await resp.json();
     renderStatus(s);
+    // Popula tambem o painel inline na aba Faturas (novo design)
+    renderOpPainelInline(s, operacaoAtual);
     const terminal = ['concluido', 'concluido_com_erros', 'erro', 'cancelado'];
     if (terminal.includes(s.status)) clearInterval(poolingInterval);
   } catch (e) {
@@ -2137,7 +2701,7 @@ function renderStatus(s) {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
         </div>
         <div style="flex:1;min-width:0">
-          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text)">🔒 Cloudflare Turnstile — ${s.aguardando_captcha.site || 'Verificação'}</h3>
+          <h3 style="font-size:16px;font-weight:700;margin-bottom:4px;color:var(--text)">Cloudflare Turnstile — ${s.aguardando_captcha.site || 'Verificação'}</h3>
           <p style="color:var(--text2);font-size:13px;margin:0">
             O sistema online não consegue resolver sozinho. Clique no captcha abaixo para liberar o login no servidor.
           </p>
@@ -2298,7 +2862,7 @@ async function _renderizarWidgetTurnstile(sitekey, opId) {
       sitekey: sitekey,
       callback: async (token) => {
         const stat = document.getElementById('captcha-status');
-        if (stat) { stat.textContent = '⏳ Enviando token ao servidor...'; stat.style.color = 'var(--text2)'; }
+        if (stat) { stat.textContent = 'Enviando token ao servidor...'; stat.style.color = 'var(--text2)'; }
         try {
           const r = await fetch(`${API}/operacao/${opId}/captcha`, {
             method: 'POST',
@@ -2306,17 +2870,17 @@ async function _renderizarWidgetTurnstile(sitekey, opId) {
             body: JSON.stringify({ token: token }),
           });
           if (r.ok) {
-            if (stat) { stat.textContent = '✅ Token enviado, aguardando servidor processar...'; stat.style.color = 'var(--green)'; }
+            if (stat) { stat.textContent = 'Token enviado, aguardando servidor processar...'; stat.style.color = 'var(--green)'; }
           } else {
-            if (stat) { stat.textContent = '❌ Erro ao enviar token: ' + r.status; stat.style.color = 'var(--red)'; }
+            if (stat) { stat.textContent = 'Erro ao enviar token: ' + r.status; stat.style.color = 'var(--red)'; }
           }
         } catch (e) {
-          if (stat) { stat.textContent = '❌ Erro de rede: ' + (e.message || e); stat.style.color = 'var(--red)'; }
+          if (stat) { stat.textContent = 'Erro de rede: ' + (e.message || e); stat.style.color = 'var(--red)'; }
         }
       },
       'error-callback': () => {
         const stat = document.getElementById('captcha-status');
-        if (stat) { stat.textContent = '⚠️ Erro no Cloudflare. Tente recarregar a página.'; stat.style.color = 'var(--red)'; }
+        if (stat) { stat.textContent = 'Erro no Cloudflare. Tente recarregar a página.'; stat.style.color = 'var(--red)'; }
       },
     });
   } catch (e) {
@@ -2337,9 +2901,9 @@ function _renderResumoDocumentos(rd, opId) {
       if (b.ok) {
         const ind = (b.individuais || []).length;
         const indTxt = ind > 0 ? ` + ${ind} individual(is)` : '';
-        boletoCell = `<span style="color:var(--green)">✅ ${b.qtd} fatura(s)${indTxt}</span>`;
+        boletoCell = `<span style="color:var(--green);display:inline-flex;align-items:center;gap:4px">${b.qtd} fatura(s)${indTxt}</span>`;
       } else {
-        boletoCell = `<span style="color:var(--red)">❌ ${b.motivo || 'falhou'}</span>`;
+        boletoCell = `<span style="color:var(--red);display:inline-flex;align-items:center;gap:4px">${b.motivo || 'falhou'}</span>`;
       }
     }
 
@@ -2350,11 +2914,11 @@ function _renderResumoDocumentos(rd, opId) {
     let ctesCell = '—';
     if (ctes.length > 0) {
       if (ctesOk > 0 && ctesFail === 0) {
-        ctesCell = `<span style="color:var(--green)">✅ ${ctesOk} CTe(s)</span>`;
+        ctesCell = `<span style="color:var(--green);display:inline-flex;align-items:center;gap:4px">${ctesOk} CTe(s)</span>`;
       } else if (ctesOk > 0) {
-        ctesCell = `<span style="color:var(--green)">✅ ${ctesOk}</span> <span style="color:var(--red);font-size:11px">(${ctesFail} erro${ctesFail>1?'s':''})</span>`;
+        ctesCell = `<span style="color:var(--green);display:inline-flex;align-items:center;gap:4px">${ctesOk}</span> <span style="color:var(--red);font-size:11px">(${ctesFail} erro${ctesFail>1?'s':''})</span>`;
       } else {
-        ctesCell = `<span style="color:var(--red)">❌ nenhum baixado</span>`;
+        ctesCell = `<span style="color:var(--red);display:inline-flex;align-items:center;gap:4px">nenhum baixado</span>`;
       }
     }
 
@@ -2363,8 +2927,8 @@ function _renderResumoDocumentos(rd, opId) {
     let zipCell = '—';
     if (z) {
       zipCell = z.ok
-        ? `<span style="color:var(--green)">✅ ${z.qtd} CTe(s)</span>`
-        : `<span style="color:var(--red)">❌</span>`;
+        ? `<span style="color:var(--green);display:inline-flex;align-items:center;gap:4px">${z.qtd} CTe(s)</span>`
+        : `<span style="color:var(--red);display:inline-flex;align-items:center">-</span>`;
     }
 
     // Pendências para download manual:
@@ -2403,7 +2967,7 @@ function _renderResumoDocumentos(rd, opId) {
           </li>`
         ).join('');
         return `<div style="margin:4px 0">
-          <span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.4px">⚠ ${p.rotulo} pendentes (baixar manualmente)</span>
+          <span style="font-size:11px;font-weight:600;color:var(--red);text-transform:uppercase;letter-spacing:.4px;display:inline-flex;align-items:center;gap:4px">${icon("exclamation","icn-sm")} ${p.rotulo} pendentes (baixar manualmente)</span>
           <ul style="margin:4px 0 6px 18px;padding:0;list-style:disc">${itens}</ul>
         </div>`;
       }).join('');
@@ -2420,7 +2984,7 @@ function _renderResumoDocumentos(rd, opId) {
   const btnDownload = opId
     ? `<div style="margin-top:12px;text-align:center">
         <button onclick="baixarDocumentos('${opId}', this)" class="btn btn-primary" style="display:inline-flex">
-          📥 Baixar todos os documentos (.zip)
+          Baixar todos os documentos (.zip)
         </button>
        </div>`
     : '';
@@ -2428,7 +2992,7 @@ function _renderResumoDocumentos(rd, opId) {
   return `
     <div style="overflow:hidden;border:1px solid var(--border);border-radius:10px;margin:16px 0 0">
       <div style="padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border);text-align:left">
-        <span style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">📥 Documentos gerados</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Documentos gerados</span>
       </div>
       <table style="width:100%;border-collapse:collapse;background:var(--surface)">
         <thead>
@@ -2493,13 +3057,13 @@ function _renderBotoesAcesso(resumo) {
 
 // ── CONFIG ───────────────────────────────────────────────
 const sistemas = [
-  { id: 'gw',              nome: 'GW Webtrans',             icone: '🖥️' },
-  { id: 'firma_matriz',    nome: 'Firma Capital — Matriz',  icone: '🏢' },
-  { id: 'firma_sp',        nome: 'Firma Capital — SP',      icone: '🏙️' },
-  { id: 'fluxasset_matriz',nome: 'FluxAsset — Matriz',      icone: '💼' },
-  { id: 'fluxasset_sp',    nome: 'FluxAsset — SP',          icone: '💼' },
-  { id: 'gc_matriz',       nome: 'GC Recursos — Matriz',    icone: '🏦' },
-  { id: 'gc_sp',           nome: 'GC Recursos — SP',        icone: '🏦' },
+  { id: 'gw',              nome: 'GW Webtrans',             icone: 'computer-desktop' },
+  { id: 'firma_matriz',    nome: 'Firma Capital — Matriz',  icone: 'building-office' },
+  { id: 'firma_sp',        nome: 'Firma Capital — SP',      icone: 'building-library' },
+  { id: 'fluxasset_matriz',nome: 'FluxAsset — Matriz',      icone: 'briefcase' },
+  { id: 'fluxasset_sp',    nome: 'FluxAsset — SP',          icone: 'briefcase' },
+  { id: 'gc_matriz',       nome: 'GC Recursos — Matriz',    icone: 'building-library' },
+  { id: 'gc_sp',           nome: 'GC Recursos — SP',        icone: 'building-library' },
 ];
 
 let expandedCredencial = null;
@@ -2579,7 +3143,7 @@ function renderConfig(creds) {
             <div style="position:relative">
               <input type="password" id="meu-gw-pass" value="${(meuGw.senha||'').replace(/"/g,'&quot;')}" placeholder="Senha" style="padding-right:38px">
               <button type="button" onclick="const e=document.getElementById('meu-gw-pass');e.type=e.type==='password'?'text':'password'" title="Mostrar/ocultar"
-                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px">👁</button>
+                style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px"></button>
             </div>
           </div>
         </div>
@@ -2606,7 +3170,7 @@ function renderConfig(creds) {
         <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
           ${credBadge}
           <span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:#92400E;background:#FEF3C7;border:1px solid #FDE68A;padding:3px 10px;border-radius:20px">
-            🔄 Pendente de automatização
+            Pendente de automatização
           </span>
           ${f.url ? `<a href="${f.url}" target="_blank" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">Abrir</a>` : ''}
           <button class="btn btn-ghost" style="font-size:12px;padding:5px 12px;color:var(--red)" onclick="removerFactoryExtra('${f.id}')">Remover</button>
@@ -2630,7 +3194,7 @@ function renderConfig(creds) {
         </div>
         <div class="field" style="margin:0">
           <label>Ícone</label>
-          <input type="text" id="nova-factory-icone" placeholder="🏭" value="🏭" style="text-align:center;font-size:18px">
+          <input type="text" id="nova-factory-icone" placeholder="factory" value="factory" style="text-align:center;font-size:18px">
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -2660,7 +3224,7 @@ function renderConfig(creds) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div class="cred-section-label" style="margin:0">Factories pendentes de automatização</div>
         <button class="btn btn-ghost" style="font-size:12px;padding:6px 14px;gap:6px;display:inline-flex;align-items:center" onclick="_mostrandoFormFactory=!_mostrandoFormFactory;renderConfig(window._ultimoCreds||{})">
-          ${_mostrandoFormFactory ? '✕ Cancelar' : '＋ Adicionar factory'}
+          ${_mostrandoFormFactory ? 'Cancelar' : 'Adicionar factory'}
         </button>
       </div>
       <div class="cred-card" style="overflow:hidden">
@@ -2674,7 +3238,7 @@ function renderConfig(creds) {
 async function salvarNovaFactory() {
   const nome    = document.getElementById('nova-factory-nome')?.value?.trim();
   const url     = document.getElementById('nova-factory-url')?.value?.trim();
-  const icone   = document.getElementById('nova-factory-icone')?.value?.trim() || '🏭';
+  const icone   = document.getElementById('nova-factory-icone')?.value?.trim() || 'building-office';
   const usuario = document.getElementById('nova-factory-usuario')?.value?.trim() || '';
   const senha   = document.getElementById('nova-factory-senha')?.value || '';
   if (!nome) { alert('Informe o nome da factory'); return; }
@@ -2728,7 +3292,7 @@ function _renderCredRow(s, cfg, hasDivider) {
               style="padding-right:38px">
             <button type="button" onclick="toggleSenha('${s.id}')" title="Mostrar/ocultar senha"
               style="position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;line-height:1;padding:0">
-              👁
+              
             </button>
           </div>
         </div>
@@ -2810,7 +3374,7 @@ async function carregarRelatorios() {
     const data = await resp.json();
     renderRelatorios(data.historico || []);
   } catch(e) {
-    container.innerHTML = `<div class="empty-state"><span class="icon">⚠️</span><h3>Erro ao carregar</h3><p>${e.message}</p></div>`;
+    container.innerHTML = `<div class="empty-v2"><svg class="icn icn-xl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg><h3>Erro ao carregar</h3><p>${e.message}</p></div>`;
   }
 }
 
