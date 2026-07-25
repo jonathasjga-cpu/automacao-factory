@@ -765,42 +765,69 @@
   .toolbar-v2 {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     flex-wrap: wrap;
     padding: 4px 0 16px;
     border-bottom: 1px solid transparent;
     margin-bottom: 16px;
   }
   .btn-group {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
+    gap: 8px;
   }
-  .btn-group-primary { background: rgba(79,142,247,0.06); border-color: rgba(79,142,247,0.20); }
-  .btn-group-utility { background: transparent; border-color: transparent; padding: 0; gap: 8px; }
-  .btn-divider { width: 1px; background: var(--border2); align-self: stretch; margin: 4px 0; }
-  .toolbar-v2 .btn {
+  .btn-group-primary { background: rgba(79,142,247,0.06); border: 1px solid rgba(79,142,247,0.20); padding: 4px; border-radius: 12px; }
+  .btn-group-utility { background: transparent; border: 0; padding: 0; gap: 8px; }
+  .btn-divider { width: 1px; height: 24px; background: var(--border2); }
+  /* Todos os controles da toolbar compartilham a MESMA anatomia:
+     36px de altura, mesmo raio, mesma fonte, mesmo padding-x.
+     Estilo visual muda por variante (ghost, primary, danger) mas o
+     tamanho é constante — sem quebra de linha visual. */
+  .toolbar-v2 .btn,
+  .toolbar-v2 select,
+  .toolbar-v2 .btn-ghost {
     height: 36px;
     padding: 0 14px;
     gap: 8px;
-    border-radius: 8px;
+    border-radius: 10px;
     font-size: 13px;
     font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    transition: all .15s;
+    line-height: 1;
   }
   .toolbar-v2 .btn-primary { box-shadow: 0 2px 8px rgba(79,142,247,.25); }
   .toolbar-v2 .btn-primary:not(:disabled):hover { box-shadow: 0 4px 12px rgba(79,142,247,.35); transform: translateY(-1px); }
-  .toolbar-v2 select, .toolbar-v2 .btn-ghost {
-    height: 36px; padding: 0 12px; border-radius: 8px;
-    font-size: 13px; font-weight: 500;
-    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
-    cursor: pointer; transition: all .15s;
-  }
   .toolbar-v2 select:hover, .toolbar-v2 .btn-ghost:hover {
     background: var(--surface); border-color: var(--border2);
+  }
+  .toolbar-v2 .btn-ghost.is-danger {
+    border-color: rgba(239, 68, 68, .35);
+    color: var(--red, #EF4444);
+    background: rgba(239, 68, 68, .06);
+  }
+  .toolbar-v2 .btn-ghost.is-danger:hover {
+    background: rgba(239, 68, 68, .12);
+    border-color: var(--red, #EF4444);
+  }
+  .toolbar-v2 .btn-ghost:disabled,
+  .toolbar-v2 .btn:disabled { opacity: .5; cursor: not-allowed; }
+  /* select precisa de mais padding-right pro chevron */
+  .toolbar-v2 select {
+    padding-right: 32px;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A0AEC0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 14px;
   }
   .toolbar-spacer { flex: 1 1 auto; min-width: 8px; }
   .count-badge-v2 {
@@ -1050,16 +1077,25 @@
   }
   .stepper-info {
     margin-left: auto;
-    display: inline-flex; align-items: center; gap: 8px;
+    display: inline-flex; align-items: center; gap: 10px;
     font-size: 12px; color: var(--text2);
   }
   .stepper-info .badge-info {
+    display: inline-flex; align-items: baseline; gap: 6px;
     padding: 4px 10px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    background: transparent;
+    border: 0;
+    border-left: 2px solid rgba(79,142,247,0.4);
     color: var(--text);
     font-weight: 500;
+    line-height: 1.2;
+  }
+  .stepper-info .badge-info .badge-label {
+    color: var(--muted);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .5px;
+    font-weight: 600;
   }
   .stepper-info .btn-reset {
     padding: 6px 12px;
@@ -1714,14 +1750,14 @@
     <div id="wizard-faturas" style="display:none">
       <div class="toolbar-v2">
         <div class="btn-group btn-group-utility">
-          <button class="btn-ghost" onclick="selecionarTodas()" title="Alterna seleção de todas"></button>
+          <button class="btn-ghost" id="btn-selecionar-todas" onclick="selecionarTodas()" title="Alterna seleção de todas"></button>
           <select id="filtro-filial" onchange="renderFaturas()">
             <option value="">Todas as filiais</option>
           </select>
-          <button class="btn-ghost" id="btn-excluir" onclick="excluirSelecionadas()" disabled
-            style="border-color: var(--red); color: var(--red)"></button>
         </div>
         <div class="toolbar-spacer"></div>
+        <button class="btn-ghost is-danger" id="btn-excluir" onclick="excluirSelecionadas()"
+          style="display:none"></button>
         <div class="count-badge-v2" id="count-badge">
           <span class="num">0</span> faturas
         </div>
@@ -1905,16 +1941,10 @@ function _popularToolbarUI() {
   setBtn('btn-carregar',  'arrow-down-tray', 'Carregar do GW');
   setBtn('btn-executar',  'play',            'Executar Selecionadas');
   setBtn('btn-baixar',    'archive',         'Apenas baixar arquivos');
-  setBtn('btn-excluir',   'trash',           'Excluir');
+  // btn-excluir: label e visibilidade sao definidos dinamicamente por
+  // updateContagem() conforme numero de selecionadas.
 
-  // Botao "Selecionar Todas" (dentro do btn-group-utility, sem id fixo)
-  const utilGroup = document.querySelector('.btn-group-utility');
-  if (utilGroup) {
-    const selBtn = utilGroup.querySelector('button:not(#btn-excluir)');
-    if (selBtn && !selBtn.querySelector('svg')) {
-      selBtn.innerHTML = icon('check') + '<span>Selecionar Todas</span>';
-    }
-  }
+  setBtn('btn-selecionar-todas', 'check', 'Selecionar Todas');
 
   // Empty state Faturas
   const emptyF = document.getElementById('empty-faturas');
@@ -2187,11 +2217,11 @@ function _renderStepper(atual) {
     const d = _wizardPeriodo;
     const fmt = s => s ? s.split('-').reverse().join('/') : '';
     const dt = d.inicial === d.final ? fmt(d.inicial) : `${fmt(d.inicial)} - ${fmt(d.final)}`;
-    infoBits.push(`<span class="badge-info">${dt}</span>`);
+    infoBits.push(`<span class="badge-info"><span class="badge-label">Período</span>${dt}</span>`);
   }
   if (_wizardModo) {
     const nomeModo = _wizardModo === 'completo' ? 'Operação Completa' : 'Salvar Arquivos';
-    infoBits.push(`<span class="badge-info">${nomeModo}</span>`);
+    infoBits.push(`<span class="badge-info"><span class="badge-label">Modo</span>${nomeModo}</span>`);
   }
   const info = infoBits.length
     ? `<div class="stepper-info">${infoBits.join('')}<button class="btn-reset" onclick="wizardReset()">${icon('arrow-path','icn-sm')} Recomeçar</button></div>`
@@ -3277,7 +3307,14 @@ function atualizarContador() {
   // Atualiza tambem o botao de acao do wizard
   if (typeof _atualizarBotaoAcao === 'function') _atualizarBotaoAcao();
   const btnExcluir = document.getElementById('btn-excluir');
-  if (btnExcluir) btnExcluir.disabled = selecionadas === 0;
+  if (btnExcluir) {
+    if (selecionadas > 0) {
+      btnExcluir.style.display = 'inline-flex';
+      btnExcluir.innerHTML = icon('trash') + `<span>Excluir ${selecionadas}</span>`;
+    } else {
+      btnExcluir.style.display = 'none';
+    }
+  }
 }
 
 function excluirSelecionadas() {
