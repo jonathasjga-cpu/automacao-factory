@@ -39,20 +39,33 @@ def _hoje_br() -> str:
 
 
 async def _encontrar_ou_abrir_pagina_gw(browser, base_gw: str):
-    """Tenta reusar aba ja aberta no GW. Se nao houver, abre em novo contexto."""
+    """Tenta reusar aba ja aberta no GW.
+    Estrategia:
+      1. Preferencia: aba GW ja logada (webtrans na URL, sem 'login').
+      2. Fallback: aba GW em tela de login — REUSA (o _garantir_logado
+         faz o login nela). Antes abriamos uma nova, o que resultava em
+         DUAS abas GW no Chrome do usuario.
+      3. Ultimo caso: nenhuma aba GW — abre uma nova.
+    """
     contexts = browser.contexts
     if not contexts:
         raise Exception(
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro "
             "e deixe a janela aberta."
         )
-    # Procura em qualquer contexto uma aba ja no GW
+    aba_login = None
     for ctx in contexts:
         for pg in ctx.pages:
             u = (pg.url or "").lower()
-            if "webtrans" in u and "login" not in u:
-                return ctx, pg
-    # Nao achou aba logada — abre nova aba no primeiro contexto
+            if "webtrans" not in u:
+                continue
+            if "login" not in u:
+                return ctx, pg           # aba logada — usa direto
+            if aba_login is None:
+                aba_login = (ctx, pg)    # guarda pra fallback
+    if aba_login is not None:
+        return aba_login                 # tinha aba GW mas na tela de login — reusa
+    # Nenhuma aba GW — abre nova no primeiro contexto
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)

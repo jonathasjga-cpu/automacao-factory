@@ -21,17 +21,25 @@ BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.co
 
 
 async def _encontrar_page_gw(browser, base_gw: str):
-    """Reusa aba GW ja logada, ou abre nova."""
+    """Reusa aba GW existente (preferindo aba logada; senao, reusa a de login).
+    So abre nova se nao existir NENHUMA aba webtrans no Chrome CDP."""
     contexts = browser.contexts
     if not contexts:
         raise Exception(
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro."
         )
+    aba_login = None
     for ctx in contexts:
         for pg in ctx.pages:
             u = (pg.url or "").lower()
-            if "webtrans" in u and "login" not in u:
+            if "webtrans" not in u:
+                continue
+            if "login" not in u:
                 return ctx, pg
+            if aba_login is None:
+                aba_login = (ctx, pg)
+    if aba_login is not None:
+        return aba_login
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
