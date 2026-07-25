@@ -1279,76 +1279,235 @@
     cursor: not-allowed;
   }
 
-  /* Flatpickr — melhorias no calendário embutido */
-  .flatpickr-calendar.inline {
+  /* ═══════════════════════════════════════════════════════════
+     FLATPICKR — calendario moderno (override completo)
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Wrapper do calendário */
+  .modal-flatpickr-host {
+    background: linear-gradient(180deg, var(--surface), var(--bg));
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
+  }
+
+  .flatpickr-calendar {
     background: transparent !important;
     box-shadow: none !important;
+    border: none !important;
     width: 100% !important;
-    max-width: 380px;
-    margin: 0 auto;
+    max-width: 100% !important;
+    padding: 0 !important;
+    font-family: 'Inter', system-ui, sans-serif !important;
+  }
+  .flatpickr-calendar.inline { display: block !important; }
+
+  /* Cabeçalho do mês */
+  .flatpickr-months {
+    padding: 4px 4px 14px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    background: transparent !important;
   }
   .flatpickr-months .flatpickr-month {
+    background: transparent !important;
     color: var(--text) !important;
     fill: var(--text) !important;
+    height: 40px !important;
+    line-height: 40px !important;
+    flex: 1;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: visible !important;
+  }
+  .flatpickr-current-month {
+    padding-top: 0 !important;
+    height: 40px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px;
+    font-size: 16px !important;
+    font-weight: 700 !important;
+    color: var(--text) !important;
+    position: static !important;
+    left: auto !important;
+    width: auto !important;
   }
   .flatpickr-current-month .flatpickr-monthDropdown-months,
   .flatpickr-current-month input.cur-year {
     color: var(--text) !important;
+    background: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    padding: 6px 12px !important;
+    font-size: 14px !important;
     font-weight: 700 !important;
+    height: 34px !important;
+    cursor: pointer;
+    transition: all .15s;
   }
-  .flatpickr-weekday {
+  .flatpickr-current-month .flatpickr-monthDropdown-months:hover,
+  .flatpickr-current-month input.cur-year:hover {
+    border-color: var(--accent) !important;
+    background: rgba(79,142,247,.10) !important;
+  }
+  .flatpickr-current-month .flatpickr-monthDropdown-months {
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    appearance: none !important;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23E2E8F0' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 8px center !important;
+    background-size: 14px !important;
+    padding-right: 30px !important;
+  }
+  .flatpickr-current-month input.cur-year {
+    min-width: 76px !important;
+    text-align: center !important;
+  }
+  .flatpickr-current-month .numInputWrapper span.arrowUp,
+  .flatpickr-current-month .numInputWrapper span.arrowDown { display: none !important; }
+  .flatpickr-current-month .numInputWrapper { width: auto !important; }
+
+  /* Setas prev/next */
+  .flatpickr-prev-month, .flatpickr-next-month {
+    color: var(--text2) !important;
+    fill: var(--text2) !important;
+    background: var(--surface2) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 10px !important;
+    width: 36px !important;
+    height: 36px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all .15s;
+    position: static !important;
+    top: auto !important;
+    flex-shrink: 0;
+  }
+  .flatpickr-prev-month svg, .flatpickr-next-month svg {
+    width: 16px !important; height: 16px !important;
+    fill: currentColor !important;
+  }
+  .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
+    background: rgba(79,142,247,.14) !important;
+    border-color: rgba(79,142,247,.35) !important;
+    color: var(--accent) !important;
+    transform: translateY(-1px);
+  }
+
+  /* Dias da semana (DOM/SEG/TER...) */
+  .flatpickr-weekdays {
+    background: transparent !important;
+    height: auto !important;
+    padding: 4px 0 8px !important;
+  }
+  .flatpickr-weekdaycontainer { display: flex; gap: 4px; }
+  span.flatpickr-weekday {
+    background: transparent !important;
     color: var(--muted) !important;
-    font-weight: 600 !important;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: .5px;
+    font-size: 10.5px !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .6px !important;
+    height: 28px !important;
+    line-height: 28px !important;
+    flex: 1;
+  }
+
+  /* Grid de dias */
+  .flatpickr-days { width: 100% !important; padding: 4px 0 0 !important; }
+  .dayContainer {
+    display: grid !important;
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 4px !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    justify-content: initial !important;
   }
   .flatpickr-day {
-    color: var(--text2) !important;
-    border-radius: 8px !important;
-    transition: all .15s;
-    font-weight: 500;
-  }
-  .flatpickr-day:hover:not(.selected):not(.startRange):not(.endRange):not(.inRange) {
-    background: var(--surface2) !important;
+    background: transparent !important;
     color: var(--text) !important;
-    border-color: transparent !important;
+    border: 1.5px solid transparent !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    height: 42px !important;
+    line-height: 40px !important;
+    max-width: 100% !important;
+    width: auto !important;
+    transition: all .18s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
   }
+  .flatpickr-day:hover:not(.selected):not(.startRange):not(.endRange):not(.inRange):not(.flatpickr-disabled) {
+    background: var(--surface2) !important;
+    color: var(--accent) !important;
+    border-color: var(--border2) !important;
+    transform: scale(1.02);
+  }
+
+  /* Hoje (destaque leve) */
+  .flatpickr-day.today {
+    color: var(--accent) !important;
+    font-weight: 800 !important;
+    border-color: rgba(79,142,247,.35) !important;
+    background: rgba(79,142,247,.06) !important;
+  }
+  .flatpickr-day.today::after {
+    content: '';
+    position: absolute;
+    bottom: 5px;
+    left: 50%; transform: translateX(-50%);
+    width: 4px; height: 4px; border-radius: 999px;
+    background: var(--accent);
+  }
+  .flatpickr-day.today.selected::after,
+  .flatpickr-day.today.startRange::after,
+  .flatpickr-day.today.endRange::after { background: white; }
+
+  /* Selecionado / início / fim do range */
   .flatpickr-day.selected,
   .flatpickr-day.startRange,
   .flatpickr-day.endRange {
-    background: var(--accent) !important;
-    border-color: var(--accent) !important;
-    color: white !important;
-    box-shadow: 0 4px 12px rgba(79,142,247,.4);
-  }
-  .flatpickr-day.inRange {
-    background: rgba(79,142,247,.14) !important;
+    background: linear-gradient(135deg, var(--accent), #6DA6FF) !important;
     border-color: transparent !important;
+    color: white !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 16px rgba(79,142,247,.4), 0 0 0 2px rgba(79,142,247,.15) !important;
+    z-index: 2;
+  }
+  .flatpickr-day.startRange { border-radius: 10px 4px 4px 10px !important; }
+  .flatpickr-day.endRange   { border-radius: 4px 10px 10px 4px !important; }
+  .flatpickr-day.startRange.endRange { border-radius: 10px !important; }
+
+  /* Dentro do range (entre início e fim) */
+  .flatpickr-day.inRange {
+    background: rgba(79,142,247,.16) !important;
     color: var(--text) !important;
+    border-color: transparent !important;
+    border-radius: 0 !important;
     box-shadow: none !important;
   }
-  .flatpickr-day.today {
-    border-color: rgba(79,142,247,.5) !important;
-    color: var(--accent) !important;
-    font-weight: 700 !important;
-  }
-  .flatpickr-day.flatpickr-disabled,
+
+  /* Dias de outro mês / desabilitados */
   .flatpickr-day.prevMonthDay,
   .flatpickr-day.nextMonthDay {
     color: var(--muted) !important;
-    opacity: .35 !important;
+    opacity: .3 !important;
   }
-  .flatpickr-prev-month, .flatpickr-next-month {
-    color: var(--text) !important;
-    fill: var(--text) !important;
-    border-radius: 8px;
-    transition: background .15s;
-  }
-  .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
-    background: var(--surface2) !important;
-    color: var(--accent) !important;
-  }
+  .flatpickr-day.flatpickr-disabled { color: var(--muted) !important; opacity: .25 !important; cursor: not-allowed; }
+
+  /* Ao selecionar range, junta os dias visualmente */
+  .flatpickr-day.selected.startRange + .flatpickr-day.endRange:not(:nth-child(7n+1)) { box-shadow: -10px 0 0 var(--accent) !important; }
+
 </style>
 </head>
 <body>
@@ -3686,7 +3845,7 @@ function renderConfig(creds) {
     <div id="extra-row-${f.id}">
       <div class="cred-row-header">
         <div style="display:flex;align-items:center;gap:14px">
-          <span style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${f.icone}</span>
+          <span style="width:36px;height:36px;flex-shrink:0;background:rgba(79,142,247,.12);border-radius:10px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent)">${_ICON_SVGS[f.icone] ? icon(f.icone) : icon('briefcase')}</span>
           <div>
             <div style="font-weight:600;font-size:14px;color:var(--text)">${f.nome}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">${f.url || 'Sem link cadastrado'}</div>
@@ -3841,7 +4000,7 @@ function _renderCredRow(s, cfg, hasDivider) {
     <div id="cred-row-${s.id}">
       <div class="cred-row-header">
         <div style="display:flex;align-items:center;gap:14px">
-          <span style="font-size:20px;width:28px;text-align:center;flex-shrink:0">${s.icone}</span>
+          <span style="width:36px;height:36px;flex-shrink:0;background:rgba(79,142,247,.12);border-radius:10px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent)">${icon(s.icone || 'building-office')}</span>
           <div>
             <div style="font-weight:600;font-size:14px;color:var(--text)">${s.nome}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:2px">
