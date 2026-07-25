@@ -21,6 +21,7 @@ Layout simplificado (todos os .py na raiz, exceto services/):
 Arquivos de texto (.bat/.txt) sao convertidos LF→CRLF: o servidor roda em
 Linux/LF, o Windows precisa CRLF nos .bat pra nao quebrar labels/goto.
 """
+import hashlib
 import io
 import json
 import zipfile
@@ -117,6 +118,47 @@ def _read(p: Path) -> str:
         return ""
 
 
+# ── VERSAO DO AGENTE ────────────────────────────────────────────
+# Hash SHA1 dos arquivos que compoem o agente. Se qualquer motor/service
+# mudar, o hash muda. Frontend compara com o hash reportado pelo agente
+# a cada ping — se diferente, mostra "Agente desatualizado".
+_ARQUIVOS_VERSAO = [
+    ("agente_bot.py",                    AGENTE_DIR / "agente_bot.py"),
+    ("motor_excel.py",                   AGENTE_DIR / "motor_excel.py"),
+    ("motor_documentos.py",              AGENTE_DIR / "motor_documentos.py"),
+    ("motor_factories.py",               AGENTE_DIR / "motor_factories.py"),
+    ("services/excel_processor.py",      SERVICES_DIR / "excel_processor.py"),
+    ("services/excel_processor_attach.py", SERVICES_DIR / "excel_processor_attach.py"),
+    ("services/documentos.py",           SERVICES_DIR / "documentos.py"),
+    ("services/documentos_attach.py",    SERVICES_DIR / "documentos_attach.py"),
+    ("services/firma_automation.py",     SERVICES_DIR / "firma_automation.py"),
+    ("services/fluxasset_automation.py", SERVICES_DIR / "fluxasset_automation.py"),
+    ("services/gc_automation.py",        SERVICES_DIR / "gc_automation.py"),
+    ("services/factories_attach.py",     SERVICES_DIR / "factories_attach.py"),
+]
+
+_versao_cache: dict = {"hash": None}
+
+
+def get_versao_agente() -> str:
+    """Retorna 8 primeiros chars do SHA1 dos arquivos do agente.
+    Cache-ado pra nao reler disco a cada request."""
+    if _versao_cache["hash"]:
+        return _versao_cache["hash"]
+    h = hashlib.sha1()
+    for nome, path in _ARQUIVOS_VERSAO:
+        h.update(nome.encode())
+        h.update(b"\0")
+        try:
+            h.update(path.read_bytes())
+        except FileNotFoundError:
+            pass
+        h.update(b"\0")
+    v = h.hexdigest()[:8]
+    _versao_cache["hash"] = v
+    return v
+
+
 def _crlf(txt: str) -> bytes:
     """Converte para CRLF (Windows) — Windows precisa disso em .bat/.txt."""
     return txt.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
@@ -132,6 +174,7 @@ def download(request: Request):
         "panel_url": panel_url,
         "token": token,
         "intervalo_poll_seg": 5,
+        "versao": get_versao_agente(),
     }
 
     buf = io.BytesIO()

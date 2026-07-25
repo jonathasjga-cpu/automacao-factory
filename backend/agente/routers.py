@@ -20,12 +20,18 @@ router = APIRouter(prefix="/api/agente", tags=["agente"])
 
 # ── Auth por token do agente ─────────────────────────────────────────────────
 
-def _verificar_token(authorization: Optional[str] = Header(None)) -> None:
+def _verificar_token(
+    authorization: Optional[str] = Header(None),
+    x_agente_versao: Optional[str] = Header(None),
+) -> None:
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization ausente")
     esperado = f"Bearer {token_mod.get_agente_token()}"
     if authorization != esperado:
         raise HTTPException(status_code=401, detail="Token do agente invalido")
+    # Guarda a versao reportada pelo agente
+    if x_agente_versao:
+        fila.registrar_ping(versao=x_agente_versao)
 
 
 # ── Endpoints usados pelo agente_bot ─────────────────────────────────────────
@@ -166,9 +172,15 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
 
 @router.get("/online", dependencies=[Depends(get_current_user)])
 def online():
+    from .download import get_versao_agente
+    versao_agente = fila.versao_reportada()
+    versao_atual = get_versao_agente()
     return {
         "online": fila.agente_online(),
         "ultimo_ping": fila.ultimo_ping_iso(),
+        "versao_agente": versao_agente,        # o que o agente reportou
+        "versao_atual": versao_atual,          # o que o backend tem no zip agora
+        "atualizado": bool(versao_agente) and versao_agente == versao_atual,
     }
 
 

@@ -1073,6 +1073,75 @@
   }
   .stepper-info .btn-reset:hover { border-color: var(--accent); color: var(--accent); }
 
+  /* Card de status do agente na tela inicial */
+  .agente-status-card {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 18px;
+    border-radius: 12px;
+    max-width: 520px;
+    margin-top: 24px;
+    font-size: 13px;
+    animation: fadeSlideIn .4s ease both;
+    animation-delay: .1s;
+    animation-fill-mode: both;
+  }
+  .agente-status-card.online-ok {
+    background: rgba(16,185,129,.08);
+    border: 1px solid rgba(16,185,129,.28);
+    color: var(--green);
+  }
+  .agente-status-card.online-outdated {
+    background: rgba(245,158,11,.08);
+    border: 1px solid rgba(245,158,11,.35);
+    color: #F59E0B;
+  }
+  .agente-status-card.offline {
+    background: rgba(239,68,68,.06);
+    border: 1px solid rgba(239,68,68,.28);
+    color: var(--red);
+  }
+  .agente-status-card .status-dot {
+    width: 10px; height: 10px; border-radius: 999px; background: currentColor; flex-shrink: 0;
+    box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 20%, transparent);
+  }
+  .agente-status-card.online-ok .status-dot,
+  .agente-status-card.online-outdated .status-dot { animation: statusPulse 2s ease-in-out infinite; }
+  @keyframes statusPulse {
+    0%, 100% { box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 20%, transparent); }
+    50%      { box-shadow: 0 0 0 8px color-mix(in srgb, currentColor 5%, transparent); }
+  }
+  .agente-status-card .status-content { flex: 1; }
+  .agente-status-card .status-title { font-weight: 700; color: var(--text); font-size: 13px; }
+  .agente-status-card .status-detail { color: var(--text2); font-size: 12px; margin-top: 2px; }
+  .agente-status-card .status-btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+    border: 1px solid currentColor;
+    background: transparent;
+    color: currentColor;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: all .15s;
+  }
+  .agente-status-card .status-btn:hover { background: currentColor; color: white; }
+  .agente-status-card.online-ok .status-btn:hover { color: white; }
+
+  /* Botão iniciar operação desabilitado quando offline */
+  .btn-iniciar-op:disabled,
+  .btn-iniciar-op.disabled {
+    opacity: .55;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    filter: grayscale(.3);
+  }
+  .btn-iniciar-op:disabled:hover,
+  .btn-iniciar-op.disabled:hover { transform: none; }
+
+  /* Badge do topbar (agente) — reduzido no novo design */
+  #agente-badge { display: none !important; } /* escondido — status agora fica na tela inicial */
+
   /* Etapa Start — botão gigante centralizado */
   .wizard-start {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -1613,10 +1682,12 @@
     <div id="wizard-start" class="wizard-start">
       <h1>Bem-vindo</h1>
       <p>Clique no botão abaixo para começar uma nova operação de factoring. Vou te guiar em 4 passos rápidos.</p>
-      <button class="btn-iniciar-op" onclick="wizardIniciar()">
+      <button class="btn-iniciar-op" id="btn-iniciar-op" onclick="wizardIniciar()">
         <span id="btn-iniciar-icon"></span>
         <span>Iniciar operação</span>
       </button>
+      <!-- Card de status do agente logo abaixo -->
+      <div id="agente-status-card" class="agente-status-card" style="display:none"></div>
     </div>
 
     <!-- ETAPA 3: Escolher modo -->
@@ -2128,8 +2199,23 @@ function _renderStepper(atual) {
   el.innerHTML = parts.join('') + info;
 }
 
-function wizardIniciar() {
-  // ETAPA 1 -> abre modal do calendário. Confirmar leva pra 'modo'
+async function wizardIniciar() {
+  // ETAPA 1 -> se modo agente, valida antes de avancar
+  if (window.AGENTE_ATIVO) {
+    // Refresca status atual do agente antes de decidir
+    await _pingAgente();
+    if (!window.AGENTE_ONLINE) {
+      alert('Agente Local offline.\n\nBaixe e inicie o agente na sua máquina antes de operar.');
+      return;
+    }
+    if (!window.AGENTE_ATUALIZADO) {
+      const msg = 'O agente na sua máquina está desatualizado.\n\n' +
+        `Sua versão: ${window.AGENTE_VERSAO_LOCAL || '?'}\n` +
+        `Versão atual: ${window.AGENTE_VERSAO_ATUAL}\n\n` +
+        'Recomendamos baixar a versão nova antes de operar.\n\nDeseja seguir mesmo assim?';
+      if (!confirm(msg)) return;
+    }
+  }
   abrirPeriodoModal();
 }
 
@@ -2351,7 +2437,6 @@ async function _bootstrapAgente() {
     const cfg = await r.json();
     window.AGENTE_ATIVO = !!cfg.agente_ativo;
     if (window.AGENTE_ATIVO) {
-      document.getElementById('agente-badge').style.display = 'inline-flex';
       _pingAgente();
       if (_agentePollId) clearInterval(_agentePollId);
       _agentePollId = setInterval(_pingAgente, 10000);
@@ -2360,24 +2445,90 @@ async function _bootstrapAgente() {
 }
 
 async function _pingAgente() {
+  let dados = { online: false, atualizado: false, versao_agente: '', versao_atual: '' };
   try {
     const r = await fetch(`${API}/agente/online`);
-    if (!r.ok) throw 0;
-    const j = await r.json();
-    window.AGENTE_ONLINE = !!j.online;
-  } catch (_) {
-    window.AGENTE_ONLINE = false;
+    if (r.ok) dados = await r.json();
+  } catch (_) { /* offline */ }
+  window.AGENTE_ONLINE = !!dados.online;
+  window.AGENTE_ATUALIZADO = !!dados.atualizado;
+  window.AGENTE_VERSAO_ATUAL = dados.versao_atual || '';
+  window.AGENTE_VERSAO_LOCAL = dados.versao_agente || '';
+  _renderAgenteStatusCard();
+  _atualizarBotaoIniciar();
+  // Se o usuario estava numa etapa avancada e o agente caiu, volta pra tela inicial
+  if (!window.AGENTE_ONLINE && _estaEmEtapaAvancada() && !_operandoAgora()) {
+    console.log('[agente] ficou offline durante uso — voltando pra tela inicial');
+    wizardReset();
   }
-  const dot = document.getElementById('agente-dot');
-  const txt = document.getElementById('agente-txt');
-  if (window.AGENTE_ONLINE) {
-    dot.style.background = 'var(--green, #10B981)';
-    dot.style.boxShadow = '0 0 0 3px rgba(16,185,129,.18)';
-    txt.textContent = 'Agente online';
+}
+
+function _estaEmEtapaAvancada() {
+  // Retorna true se usuario esta em modo/faturas (nao em start)
+  const start = document.getElementById('wizard-start');
+  return start && start.style.display === 'none';
+}
+
+function _operandoAgora() {
+  // True se tem operação rodando (não interromper voltando à inicial)
+  return typeof poolingInterval !== 'undefined' && poolingInterval != null;
+}
+
+function _renderAgenteStatusCard() {
+  const card = document.getElementById('agente-status-card');
+  if (!card) return;
+  // So mostra o card se modo agente esta ativo
+  if (!window.AGENTE_ATIVO) { card.style.display = 'none'; return; }
+  card.style.display = 'flex';
+
+  if (window.AGENTE_ONLINE && window.AGENTE_ATUALIZADO) {
+    card.className = 'agente-status-card online-ok';
+    card.innerHTML = `
+      <span class="status-dot"></span>
+      <div class="status-content">
+        <div class="status-title">Agente conectado e atualizado</div>
+        <div class="status-detail">Tudo pronto para começar. Versão ${window.AGENTE_VERSAO_LOCAL || ''}</div>
+      </div>
+    `;
+  } else if (window.AGENTE_ONLINE && !window.AGENTE_ATUALIZADO) {
+    card.className = 'agente-status-card online-outdated';
+    card.innerHTML = `
+      <span class="status-dot"></span>
+      <div class="status-content">
+        <div class="status-title">Agente desatualizado</div>
+        <div class="status-detail">Sua versão: ${window.AGENTE_VERSAO_LOCAL || '?'} · Última: ${window.AGENTE_VERSAO_ATUAL}. Recomendamos baixar a nova versão.</div>
+      </div>
+      <button class="status-btn" onclick="abrirModalAgente()">${icon('arrow-down-tray','icn-sm')} Baixar nova versão</button>
+    `;
   } else {
-    dot.style.background = '#64748B';
-    dot.style.boxShadow = '0 0 0 3px rgba(100,116,139,.15)';
-    txt.textContent = 'Agente offline';
+    card.className = 'agente-status-card offline';
+    card.innerHTML = `
+      <span class="status-dot"></span>
+      <div class="status-content">
+        <div class="status-title">Agente offline</div>
+        <div class="status-detail">Baixe o agente e execute na sua máquina para poder iniciar operações.</div>
+      </div>
+      <button class="status-btn" onclick="abrirModalAgente()">${icon('arrow-down-tray','icn-sm')} Baixar agente</button>
+    `;
+  }
+}
+
+function _atualizarBotaoIniciar() {
+  const btn = document.getElementById('btn-iniciar-op');
+  if (!btn) return;
+  if (!window.AGENTE_ATIVO) {
+    btn.disabled = false;
+    btn.classList.remove('disabled');
+    return;
+  }
+  if (!window.AGENTE_ONLINE) {
+    btn.disabled = true;
+    btn.classList.add('disabled');
+    btn.title = 'Baixe e inicie o agente antes de operar';
+  } else {
+    btn.disabled = false;
+    btn.classList.remove('disabled');
+    btn.title = '';
   }
 }
 

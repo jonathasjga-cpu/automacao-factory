@@ -9,7 +9,7 @@ from typing import Optional
 
 # Estado global (processo unico — backend precisa rodar com 1 worker)
 _ordens: dict = {}          # {ordem_id: dict}
-_ultimo_ping: dict = {"ts": 0.0}
+_ultimo_ping: dict = {"ts": 0.0, "versao": ""}
 LATENCIA_ONLINE_MS = 60_000  # 60s sem ping = agente offline
 # Aumentado de 25s pra 60s: Railway tem timeouts intermitentes de 15-30s.
 # O agente polla a cada 5s; 60s tolera 2-3 falhas seguidas antes de marcar
@@ -20,8 +20,14 @@ def _agora() -> float:
     return time.time()
 
 
-def registrar_ping() -> None:
+def registrar_ping(versao: str = "") -> None:
     _ultimo_ping["ts"] = _agora()
+    if versao:
+        _ultimo_ping["versao"] = versao
+
+
+def versao_reportada() -> str:
+    return _ultimo_ping.get("versao", "")
 
 
 def agente_online() -> bool:

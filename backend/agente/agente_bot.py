@@ -32,6 +32,9 @@ def _load_config() -> dict:
     return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
 
 
+_VERSAO_LOCAL = ""  # setado no main() a partir de agente_config.json
+
+
 def _ssl_context() -> ssl.SSLContext:
     """SSL context tolerante a Windows sem CA store atualizado."""
     try:
@@ -45,11 +48,13 @@ CTX = _ssl_context()
 
 
 def _http(method: str, url: str, token: str, body: dict | None = None,
-          timeout: int = 30, tentativas: int = 3) -> dict:
+          timeout: int = 30, tentativas: int = 3, incluir_versao: bool = True) -> dict:
     """HTTP com retry em timeouts/502/503/504. Rede intermitente do Railway
     (~2-3 timeouts por hora) nao pode virar 'agente offline' cada vez."""
     data = None
     headers = {"Authorization": f"Bearer {token}"}
+    if incluir_versao and _VERSAO_LOCAL:
+        headers["X-Agente-Versao"] = _VERSAO_LOCAL
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -215,6 +220,9 @@ def main():
     panel = cfg["panel_url"].rstrip("/")
     token = cfg["token"]
     intervalo = int(cfg.get("intervalo_poll_seg", 5))
+    global _VERSAO_LOCAL
+    _VERSAO_LOCAL = cfg.get("versao", "")
+    print(f" Versao agente: {_VERSAO_LOCAL or '(nao definida)'}")
 
     print("=" * 60)
     print(f" AutoFactory - Agente Local")
