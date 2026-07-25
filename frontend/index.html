@@ -1442,7 +1442,7 @@
     border: 1px solid var(--border2);
     border-radius: 18px;
     box-shadow: 0 24px 60px rgba(0,0,0,.5), 0 0 0 1px rgba(79,142,247,.08);
-    max-width: 640px;
+    max-width: 460px;
     width: calc(100% - 40px);
     animation: modalCardIn .25s cubic-bezier(0.4, 0, 0.2, 1) both;
   }
@@ -1536,7 +1536,7 @@
     background: linear-gradient(180deg, var(--surface), var(--bg));
     border: 1px solid var(--border);
     border-radius: 14px;
-    padding: 22px;
+    padding: 16px;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.02);
   }
 
@@ -1573,12 +1573,12 @@
   }
   .flatpickr-current-month {
     padding-top: 0 !important;
-    height: 44px !important;
+    height: 40px !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
-    gap: 12px;
-    font-size: 18px !important;
+    gap: 10px;
+    font-size: 16px !important;
     font-weight: 700 !important;
     color: var(--text) !important;
     position: static !important;
@@ -1590,11 +1590,11 @@
     color: var(--text) !important;
     background: var(--surface2) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 10px !important;
-    padding: 8px 14px !important;
-    font-size: 16px !important;
+    border-radius: 8px !important;
+    padding: 6px 12px !important;
+    font-size: 14px !important;
     font-weight: 700 !important;
-    height: 40px !important;
+    height: 34px !important;
     cursor: pointer;
     transition: all .15s;
   }
@@ -1627,9 +1627,9 @@
     fill: var(--text2) !important;
     background: var(--surface2) !important;
     border: 1px solid var(--border) !important;
-    border-radius: 12px !important;
-    width: 44px !important;
-    height: 44px !important;
+    border-radius: 10px !important;
+    width: 36px !important;
+    height: 36px !important;
     padding: 0 !important;
     display: inline-flex !important;
     align-items: center !important;
@@ -1640,7 +1640,7 @@
     flex-shrink: 0;
   }
   .flatpickr-prev-month svg, .flatpickr-next-month svg {
-    width: 18px !important; height: 18px !important;
+    width: 16px !important; height: 16px !important;
     fill: currentColor !important;
   }
   .flatpickr-prev-month:hover, .flatpickr-next-month:hover {
@@ -1656,21 +1656,36 @@
     height: auto !important;
     padding: 4px 0 8px !important;
   }
-  .flatpickr-weekdaycontainer { display: flex; gap: 6px; }
+  .flatpickr-weekdaycontainer {
+    display: flex !important;
+    gap: 4px;
+    width: 100% !important;
+  }
   span.flatpickr-weekday {
     background: transparent !important;
     color: var(--muted) !important;
-    font-size: 12px !important;
+    font-size: 10.5px !important;
     font-weight: 700 !important;
     text-transform: uppercase !important;
     letter-spacing: .6px !important;
-    height: 32px !important;
-    line-height: 32px !important;
-    flex: 1;
+    height: 28px !important;
+    line-height: 28px !important;
+    flex: 1 1 0;
+    text-align: center;
+    min-width: 0;
   }
 
-  /* Grid de dias */
-  .flatpickr-days { width: 100% !important; padding: 4px 0 0 !important; }
+  /* Containers internos — flatpickr define width inline via JS, forçamos preencher */
+  .flatpickr-innerContainer,
+  .flatpickr-rContainer {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .flatpickr-days {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 4px 0 0 !important;
+  }
   .dayContainer {
     display: grid !important;
     grid-template-columns: repeat(7, 1fr) !important;
@@ -1679,19 +1694,21 @@
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
-    justify-content: initial !important;
+    justify-content: stretch !important;
   }
   .flatpickr-day {
     background: transparent !important;
     color: var(--text) !important;
     border: 1.5px solid transparent !important;
-    border-radius: 12px !important;
-    font-size: 15px !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
     font-weight: 600 !important;
-    height: 56px !important;
-    line-height: 54px !important;
+    height: 42px !important;
+    line-height: 40px !important;
     max-width: 100% !important;
     width: auto !important;
+    flex-basis: auto !important;
+    min-width: 0 !important;
     transition: all .18s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
   }
