@@ -191,12 +191,30 @@ class EnfileirarFaturasBody(BaseModel):
 
 @router.post("/enfileirar-faturas")
 def enfileirar_faturas(body: EnfileirarFaturasBody, current_user = Depends(get_current_user)):
-    """Enfileira uma ordem 'carregar_faturas' pro agente executar."""
+    """Enfileira uma ordem 'carregar_faturas' pro agente executar.
+    Inclui credenciais GW pro agente logar automaticamente se a sessao
+    tiver expirado."""
+    # Coleta credencial GW do usuario logado (fallback: credenciais globais)
+    credenciais_por_sistema = {}
+    try:
+        from config_manager import get_credencial, carregar_credenciais
+        uid = getattr(current_user, "id", None)
+        c = get_credencial("gw", user_id=uid) if uid else carregar_credenciais().get("gw", {})
+        if c and (c.get("usuario") or c.get("senha")):
+            credenciais_por_sistema["gw"] = {
+                "usuario": c.get("usuario", ""),
+                "senha": c.get("senha", ""),
+                "url": c.get("url", ""),
+            }
+    except Exception:
+        pass
+
     ordem_id = fila.enfileirar(
         tipo="carregar_faturas",
         itens={
             "data_inicial": body.data_inicial,
             "data_final": body.data_final,
+            "credenciais_por_sistema": credenciais_por_sistema,
         },
         usuario=current_user.login,
     )

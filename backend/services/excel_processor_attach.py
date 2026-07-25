@@ -59,8 +59,37 @@ async def _encontrar_ou_abrir_pagina_gw(browser, base_gw: str):
     return ctx, page
 
 
+async def _fazer_login_gw(page, base_gw: str) -> None:
+    """Loga no GW usando credenciais do config_manager.
+    O stub config_manager.py do agente le _agente_credenciais_atuais.json,
+    escrito pelo motor_excel.py a partir do payload da ordem."""
+    from config_manager import get_credencial
+    creds = get_credencial("gw") or {}
+    usuario = creds.get("usuario") or ""
+    senha = creds.get("senha") or ""
+    if not usuario or not senha:
+        raise Exception(
+            "Credenciais GW nao configuradas no painel. Acesse Configuracoes > GW "
+            "e salve usuario/senha antes de operar."
+        )
+    await page.goto(f"{base_gw}/login", wait_until="domcontentloaded", timeout=60000)
+    await page.wait_for_selector('#login', timeout=15000)
+    await page.fill('#login', usuario)
+    await page.fill('#senha', senha)
+    await page.click('.button-login')
+    await page.wait_for_load_state("load", timeout=60000)
+    await page.wait_for_timeout(2500)
+    # Volta pra home pra estabilizar a sessao
+    try:
+        await page.goto(f"{base_gw}/home", wait_until="load", timeout=30000)
+        await page.wait_for_timeout(1500)
+    except Exception:
+        pass
+
+
 async def _garantir_logado(page, base_gw: str, report: Optional[Callable] = None):
-    """Verifica que a sessao esta ativa. Se cair pra tela de login, orienta."""
+    """Verifica que a sessao esta ativa. Se cair pra tela de login OU 403,
+    tenta logar automaticamente usando credenciais salvas no painel."""
     try:
         # Deixa 2s pra qualquer redirect pos-navegacao terminar
         await page.wait_for_load_state("load", timeout=15000)
@@ -72,18 +101,28 @@ async def _garantir_logado(page, base_gw: str, report: Optional[Callable] = None
         titulo = (await page.title() or "").lower()
     except Exception:
         pass
-    if "login" in url or "login" in titulo:
-        raise Exception(
-            "Chrome esta na tela de login do GW. Faca login manualmente na aba "
-            "que abriu com '2 - ABRIR CHROME.bat' e reenvie a operacao."
-        )
-    if "403" in titulo or "403" in url:
-        raise Exception(
-            "GW retornou 403 nesta sessao. Faca logout+login manualmente no "
-            "Chrome aberto e reenvie a operacao."
-        )
-    if report:
-        report(1, 3, f"sessao GW OK: {page.url[:80]}")
+    precisa_login = ("login" in url) or ("login" in titulo) or ("403" in titulo) or ("403" in url)
+    if precisa_login:
+        if report:
+            report(1, 3, "sessao GW expirada — logando automaticamente...")
+        await _fazer_login_gw(page, base_gw)
+        # Rechecagem apos login
+        try:
+            titulo2 = (await page.title() or "").lower()
+        except Exception:
+            titulo2 = ""
+        url2 = (page.url or "").lower()
+        if ("login" in url2) or ("403" in titulo2) or ("403" in url2):
+            raise Exception(
+                "GW retornou 403 mesmo apos re-login. Possiveis causas: credenciais "
+                "sem permissao no modulo webtrans, rate-limit do GW ou IP do servidor "
+                "bloqueado. Tente em alguns minutos ou verifique as credenciais no painel."
+            )
+        if report:
+            report(1, 3, "login GW OK — prosseguindo...")
+    else:
+        if report:
+            report(1, 3, f"sessao GW OK: {page.url[:80]}")
 
 
 async def carregar_faturas_attach(

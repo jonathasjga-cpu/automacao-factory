@@ -42,6 +42,19 @@ def main():
     data_ini_br = _iso_para_br(itens.get("data_inicial"))
     data_fim_br = _iso_para_br(itens.get("data_final"))
 
+    # Grava credenciais recebidas do backend num arquivo temp que o stub
+    # config_manager.py do agente le. Necessario pro auto-login do GW quando
+    # a sessao expira (403).
+    creds = itens.get("credenciais_por_sistema") or {}
+    if creds:
+        try:
+            (RAIZ / "_agente_credenciais_atuais.json").write_text(
+                json.dumps(creds, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
     def report(feito: int, total: int, desc: str):
         try:
             prog_file.write_text(
