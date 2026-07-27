@@ -1020,15 +1020,19 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     _salvar_arquivo_seguro(status, nome_arquivo, pdf_bytes, log)
                     log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
 
-                    # ── Separa o PDF agrupado em PDFs INDIVIDUAIS por fatura ──
+                    # ── Separa o PDF agrupado em PDFs INDIVIDUAIS e empacota num ZIP ──
+                    # Cada fatura vira um PDF proprio dentro do ZIP — mesmo padrao dos CTes.
                     pdfs_individuais = _separar_pdf_por_fatura(pdf_bytes, nums_marcados, log)
-                    individuais_salvos: list[str] = []
-                    for num, pdf_ind in pdfs_individuais.items():
-                        nome_ind = f"Fatura - {num}.pdf"
-                        _salvar_arquivo_seguro(status, nome_ind, pdf_ind, log)
-                        individuais_salvos.append(nome_ind)
-                    if individuais_salvos:
-                        log(f"  ✅ {len(individuais_salvos)} PDF(s) individual(is) salvos: {individuais_salvos[:3]}{' ...' if len(individuais_salvos) > 3 else ''}")
+                    zip_individuais_nome = None
+                    if pdfs_individuais:
+                        zip_individuais_nome = f"Faturas separadas - {nome_factory} - {_hoje_fmt()}.zip"
+                        buf_ind = io.BytesIO()
+                        with zipfile.ZipFile(buf_ind, "w", zipfile.ZIP_DEFLATED) as zf_ind:
+                            for num, pdf_ind in pdfs_individuais.items():
+                                zf_ind.writestr(f"Fatura - {num}.pdf", pdf_ind)
+                        zip_ind_bytes = buf_ind.getvalue()
+                        _salvar_arquivo_seguro(status, zip_individuais_nome, zip_ind_bytes, log)
+                        log(f"  📦 ZIP faturas separadas: {zip_individuais_nome} ({len(pdfs_individuais)} PDF(s))")
 
                     rd["fatura_pdf"] = {
                         "ok": True,
@@ -1036,7 +1040,8 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         "qtd": marcadas,
                         "faturas_marcadas": sorted(nums_marcados),
                         "faturas_faltando": faltando,
-                        "individuais": individuais_salvos,
+                        "zip_individuais": zip_individuais_nome,
+                        "individuais_qtd": len(pdfs_individuais),
                     }
 
                 except Exception as e:
