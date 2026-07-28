@@ -74,15 +74,22 @@ async def _login_gw_se_precisar(page, base_gw: str, status: dict) -> None:
         log(f"  ⚠️ [GW] Falha ao logar: {e}")
 
 
-async def _abrir_aba_automacao(browser, url_home: str):
-    """SEMPRE abre uma aba nova pra automacao — nao toca em abas do usuario.
-    Compartilha cookies com as outras abas do mesmo Chrome (mesmo contexto CDP),
-    mas as factories sempre forçam login no início entao isso nao importa.
-    Deve ser fechada com `_fechar_aba_automacao` ao fim."""
+async def _abrir_aba_automacao(browser, url_marker: str, url_home: str):
+    """Estrategia:
+      1. Se existe aba no dominio, REUSA ela (herda sessionStorage — importante
+         pro GW, cujo login depende de sessionStorage e nao so de cookies).
+      2. Senao abre uma aba nova.
+    Retorna (ctx, page, nova) — 'nova' indica se abrimos uma aba (True), pra
+    que o chamador feche no finally SEM tocar em abas do usuario.
+    """
+    for ctx in browser.contexts:
+        for pg in ctx.pages:
+            if url_marker in (pg.url or "").lower():
+                return ctx, pg, False
     ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
     page = await ctx.new_page()
     await page.goto(url_home, wait_until="load", timeout=60000)
-    return ctx, page
+    return ctx, page, True
 
 
 async def _fechar_aba_automacao(page):
@@ -116,16 +123,18 @@ async def executar_factory_attach(
                 f"'2 - ABRIR CHROME.bat' primeiro. Detalhe: {str(e)[:150]}"
             )
 
-        # Abas criadas pra automacao — vao ser fechadas no finally, garantindo
-        # que nao acumulam nem interferem com abas do usuario.
-        abas_automacao: list = []
+        # Abas que a automacao ABRIU (nao as que reusou) — fechadas no finally
+        # pra nao acumular. As abas do usuario permanecem intocadas.
+        abas_criadas: list = []
         try:
             if sistema.startswith("firma"):
-                ctx, page = await _abrir_aba_automacao(
+                ctx, page, nova = await _abrir_aba_automacao(
                     browser,
+                    "firmasa.com",
                     "https://intrafac777.firmasa.com/Factadebentures/login",
                 )
-                abas_automacao.append(page)
+                if nova:
+                    abas_criadas.append(page)
                 # SEMPRE loga forcado — garante credencial correta por filial.
                 # Firma Matriz e Firma SP usam mesmo dominio (cookies compartilhados
                 # no CDP), entao sessao aberta pode nao ser a do sistema atual.
@@ -135,11 +144,13 @@ async def executar_factory_attach(
                 await _core_executar_firma(page, faturas_selecao, sistema, status)
 
             elif sistema.startswith("fluxasset"):
-                ctx, page = await _abrir_aba_automacao(
+                ctx, page, nova = await _abrir_aba_automacao(
                     browser,
+                    "fluxasset.com.br",
                     "https://portal.fluxasset.com.br/Factaconsult/login",
                 )
-                abas_automacao.append(page)
+                if nova:
+                    abas_criadas.append(page)
                 log(f"  [LOGIN] FluxAsset {sistema} — forcando login com credencial da filial (pode pedir Cloudflare)...")
                 await fazer_login_fluxasset(page, sistema, status)
                 report(0, 1, f"executando FluxAsset {sistema}...")
@@ -147,11 +158,13 @@ async def executar_factory_attach(
 
             elif sistema.startswith("gc"):
                 # GC precisa de 2 etapas: gerar .rem no GW + operar no portal GC
-                # Etapa 1 — aba propria pro GW (sem tocar em abas do usuario)
-                ctx_gw, page_gw = await _abrir_aba_automacao(
-                    browser, f"{base_gw}/home",
+                # Etapa 1 — reusa aba GW ja logada do usuario (sessionStorage
+                # do GW mora na aba; abrir aba nova cai na tela de login).
+                ctx_gw, page_gw, nova_gw = await _abrir_aba_automacao(
+                    browser, "webtrans", f"{base_gw}/home",
                 )
-                abas_automacao.append(page_gw)
+                if nova_gw:
+                    abas_criadas.append(page_gw)
                 # Se GW nao esta logado, faz login usando credenciais salvas
                 await _login_gw_se_precisar(page_gw, base_gw, status)
                 report(0, 3, f"GC {sistema} — gerando .rem no GW...")
@@ -161,12 +174,14 @@ async def executar_factory_attach(
                 if not caminho_rem:
                     status.setdefault("erros", []).append(f"GC {sistema}: falha ao gerar .rem")
                     return {"sistema": sistema}
-                # Etapa 2 — portal GC (outra aba propria)
-                ctx_gc, page_gc = await _abrir_aba_automacao(
+                # Etapa 2 — portal GC
+                ctx_gc, page_gc, nova_gc = await _abrir_aba_automacao(
                     browser,
+                    "gcrecursos.dyndns.org",
                     "http://gcrecursos.dyndns.org:9000/FactaConsult",
                 )
-                abas_automacao.append(page_gc)
+                if nova_gc:
+                    abas_criadas.append(page_gc)
                 # SEMPRE loga forcado no GC — Matriz e SP usam mesmo dominio
                 log(f"  [LOGIN] GC {sistema} — forcando login com credencial da filial...")
                 await fazer_login_gc(page_gc, sistema)
@@ -179,8 +194,8 @@ async def executar_factory_attach(
                 raise Exception(f"Sistema desconhecido: {sistema}")
 
         finally:
-            # Fecha abas que a automacao criou — nunca mexe em abas do usuario.
-            for p in abas_automacao:
+            # Fecha SO as abas que a automacao criou.
+            for p in abas_criadas:
                 await _fechar_aba_automacao(p)
 
     return {"sistema": sistema}

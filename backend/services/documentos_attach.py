@@ -21,18 +21,21 @@ BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.co
 
 
 async def _abrir_aba_automacao_gw(browser, base_gw: str):
-    """SEMPRE abre uma aba nova pra automacao. Nao mexe nas abas do usuario.
-    Fica no mesmo contexto (mesmos cookies/sessao) — herda o login que o
-    usuario ja fez no GW. Deve ser fechada com `_fechar_aba_automacao` ao fim."""
+    """Prefere REUSAR aba GW existente (herda sessionStorage do login).
+    So abre nova se nao houver nenhuma. Retorna (ctx, page, nova)."""
     contexts = browser.contexts
     if not contexts:
         raise Exception(
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro."
         )
+    for ctx in contexts:
+        for pg in ctx.pages:
+            if "webtrans" in (pg.url or "").lower():
+                return ctx, pg, False
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
-    return ctx, page
+    return ctx, page, True
 
 
 async def _fechar_aba_automacao(page):
@@ -113,7 +116,7 @@ async def baixar_documentos_attach(
                 f"Rode '2 - ABRIR CHROME.bat' primeiro. Detalhe: {str(e)[:200]}"
             )
 
-        ctx, page = await _abrir_aba_automacao_gw(browser, base_gw)
+        ctx, page, nova = await _abrir_aba_automacao_gw(browser, base_gw)
         try:
             await _garantir_logado(page, report, base_gw=base_gw, status=status)
 
@@ -142,4 +145,6 @@ async def baixar_documentos_attach(
             log(f"✅ {total_arquivos} arquivo(s) prontos")
             return status
         finally:
-            await _fechar_aba_automacao(page)
+            # So fecha se ABRIU a aba — tabs do usuario continuam intocadas.
+            if nova:
+                await _fechar_aba_automacao(page)

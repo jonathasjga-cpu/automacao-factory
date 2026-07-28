@@ -39,25 +39,26 @@ def _hoje_br() -> str:
 
 
 async def _abrir_aba_automacao_gw(browser, base_gw: str):
-    """SEMPRE abre uma aba nova pra automacao — nao toca nas abas do usuario.
-    A aba fica no mesmo contexto (mesmos cookies/sessao) que as outras abas
-    do Chrome CDP, entao herda o login que o usuario ja fez no GW. No fim do
-    fluxo, `_fechar_aba_automacao` fecha essa aba pra nao acumular no Chrome.
-    """
+    """Prefere REUSAR aba GW existente (herda sessionStorage do login manual).
+    So abre nova se nao houver aba webtrans. Retorna (ctx, page, nova) — se
+    nova=True o chamador fecha no finally; se nova=False deixa (é do usuario)."""
     contexts = browser.contexts
     if not contexts:
         raise Exception(
             "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro "
             "e deixe a janela aberta."
         )
+    for ctx in contexts:
+        for pg in ctx.pages:
+            if "webtrans" in (pg.url or "").lower():
+                return ctx, pg, False
     ctx = contexts[0]
     page = await ctx.new_page()
     await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
-    return ctx, page
+    return ctx, page, True
 
 
 async def _fechar_aba_automacao(page):
-    """Fecha a aba que _abrir_aba_automacao_gw criou. Silencioso se falhar."""
     try:
         await page.close()
     except Exception:
@@ -158,7 +159,7 @@ async def carregar_faturas_attach(
                 "Rode '2 - ABRIR CHROME.bat' primeiro. Detalhe: {}".format(str(e)[:200])
             )
 
-        ctx, page = await _abrir_aba_automacao_gw(browser, base_gw)
+        ctx, page, nova = await _abrir_aba_automacao_gw(browser, base_gw)
         try:
             await _garantir_logado(page, base_gw, report)
 
@@ -192,4 +193,5 @@ async def carregar_faturas_attach(
             faturas = processar_dataframes(arquivo1, arquivo2)
             return faturas
         finally:
-            await _fechar_aba_automacao(page)
+            if nova:
+                await _fechar_aba_automacao(page)
