@@ -108,12 +108,31 @@ async def fazer_login_firma(page: Page, sistema: str):
     raise Exception(f"Login Firma falhou apos 3 tentativas: {last_exc}")
 
 async def navegar_para_digitacao(page: Page):
-    await page.evaluate(
-        "() => { const a = document.querySelector('a[href*=\"/operacao/digitacao\"]'); if(a) a.click(); }"
-    )
-    await page.wait_for_load_state("networkidle")
-    # Confirma que a página de digitação carregou (botão Novo visível)
-    await page.locator('button:has-text("Novo")').first.wait_for(state="visible", timeout=10000)
+    """Navega pra tela de Digitacao.
+
+    Antes: dependia de um link do menu (`a[href*="/operacao/digitacao"]`) que
+    nem sempre esta no DOM (menu colapsado, mudou de layout, etc). Quando o
+    link nao aparecia, o click era um no-op e o wait pelo botao Novo estourava
+    o timeout — que era exatamente o erro reportado.
+
+    Agora: 1) tenta click no link (rapido, mantem historico do menu). 2) se
+    o botao Novo nao aparecer, faz goto direto pra URL da digitacao — nao
+    depende de estrutura do menu.
+    """
+    url_digitacao = f"{FIRMA_URL}/operacao/digitacao"
+    try:
+        await page.evaluate(
+            "() => { const a = document.querySelector('a[href*=\"/operacao/digitacao\"]'); if(a) a.click(); }"
+        )
+        await page.wait_for_load_state("networkidle", timeout=15000)
+        await page.locator('button:has-text("Novo")').first.wait_for(state="visible", timeout=6000)
+        return
+    except Exception:
+        pass  # cai no fallback goto direto abaixo
+    # Fallback: navegacao direta — nao depende de link/menu
+    await page.goto(url_digitacao, wait_until="load", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=15000)
+    await page.locator('button:has-text("Novo")').first.wait_for(state="visible", timeout=15000)
 
 async def aguardar_lookup_sacado(page: Page, cnpj_limpo: str) -> bool:
     """
