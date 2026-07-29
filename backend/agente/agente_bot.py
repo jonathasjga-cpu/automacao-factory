@@ -12,6 +12,7 @@ Loop:
 Uso: python agente_bot.py
 """
 import json
+import shutil
 import ssl
 import subprocess
 import sys
@@ -83,6 +84,39 @@ def _http(method: str, url: str, token: str, body: dict | None = None,
     return ultimo_erro
 
 
+def _garantir_dependencias() -> None:
+    """Auto-instala dependencias faltantes (pip) no boot do agente.
+
+    Motivo: o install.ps1 antigo nao instalava `pypdf`, e sem ele a separacao
+    do PDF agrupado em faturas individuais falha SILENCIOSAMENTE (o ZIP
+    'Faturas separadas' simplesmente nao e' gerado). Em vez de depender do
+    usuario rodar '1 - INSTALAR.bat' de novo, o agente se conserta sozinho.
+    """
+    faltando = []
+    for modulo, pacote in (("pypdf", "pypdf"), ("pandas", "pandas"),
+                           ("openpyxl", "openpyxl"), ("playwright", "playwright")):
+        try:
+            __import__(modulo)
+        except ImportError:
+            faltando.append(pacote)
+    if not faltando:
+        return
+    print(f"[AGENTE] Dependencias faltando: {', '.join(faltando)} — instalando...", flush=True)
+    for pacote in faltando:
+        for args in ([sys.executable, "-m", "pip", "install", "--upgrade", pacote],
+                     [sys.executable, "-m", "pip", "install", "--upgrade", "--user", pacote]):
+            try:
+                r = subprocess.run(args, capture_output=True, timeout=300)
+                if r.returncode == 0:
+                    print(f"[AGENTE] {pacote} instalado com sucesso", flush=True)
+                    break
+            except Exception as e:
+                print(f"[AGENTE] pip {pacote} falhou: {e}", flush=True)
+        else:
+            print(f"[AGENTE] ATENCAO: nao consegui instalar '{pacote}'. "
+                  f"Rode '1 - INSTALAR.bat' novamente.", flush=True)
+
+
 def _erro_indica_chrome_travado(erro: str | None, resultado: dict | None) -> bool:
     """Detecta padroes de trava do Chrome/CDP (Chrome 150 tem bug conhecido)."""
     textos = [erro or ""]
@@ -106,11 +140,21 @@ def _recuperar_chrome() -> bool:
     """Mata Chrome CDP travado e reabre via 2-ABRIR CHROME.bat.
     Retorna True se CDP voltou a responder em ate 20s."""
     print("[AGENTE] Chrome travado detectado — recuperando...", flush=True)
+    # Mata SOMENTE a instancia CDP da automacao (perfil cdp_profile / porta 9222).
+    # Antes usava `taskkill /F /IM chrome.exe`, que derrubava tambem o Chrome
+    # PESSOAL do usuario com todas as abas e sessoes abertas.
+    ps_cmd = (
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*cdp_profile*' -or "
+        "$_.CommandLine -like '*remote-debugging-port=9222*' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+    )
     try:
-        subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
-                       capture_output=True, timeout=15)
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd],
+                       capture_output=True, timeout=20)
+        print("[AGENTE] Chrome da automacao encerrado (Chrome pessoal preservado)", flush=True)
     except Exception as e:
-        print(f"[AGENTE] taskkill falhou: {e}", flush=True)
+        print(f"[AGENTE] kill filtrado falhou: {e}", flush=True)
     time.sleep(3)
 
     # Acha o .bat "2 - ABRIR CHROME.bat" — pode estar na raiz do zip
@@ -178,40 +222,54 @@ def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, s
         "--resultado", str(res_file),
     ]
     print(f"[AGENTE] executando: {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd, cwd=str(RAIZ))
-
-    ultimo_prog = ""
-    while proc.poll() is None:
-        time.sleep(1.0)
-        try:
-            if prog_file.exists():
-                raw = prog_file.read_text(encoding="utf-8").strip()
-                if raw:
-                    p = json.loads(raw)
-                    key = f'{p.get("feito")}/{p.get("total")}: {p.get("desc")}'
-                    if key != ultimo_prog:
-                        _http("POST", f"{panel_url}/api/agente/progresso/{ordem['id']}",
-                              token, body={
-                                  "feito": int(p.get("feito", 0)),
-                                  "total": int(p.get("total", 0)),
-                                  "desc": str(p.get("desc", "")),
-                              })
-                        ultimo_prog = key
-        except Exception as e:
-            print(f"[AGENTE] leitura progresso falhou: {e}")
 
     resultado = None
     erro = None
-    if res_file.exists():
+    try:
+        proc = subprocess.Popen(cmd, cwd=str(RAIZ))
+
+        ultimo_prog = ""
+        while proc.poll() is None:
+            time.sleep(1.0)
+            try:
+                if prog_file.exists():
+                    raw = prog_file.read_text(encoding="utf-8").strip()
+                    if raw:
+                        p = json.loads(raw)
+                        key = f'{p.get("feito")}/{p.get("total")}: {p.get("desc")}'
+                        if key != ultimo_prog:
+                            _http("POST", f"{panel_url}/api/agente/progresso/{ordem['id']}",
+                                  token, body={
+                                      "feito": int(p.get("feito", 0)),
+                                      "total": int(p.get("total", 0)),
+                                      "desc": str(p.get("desc", "")),
+                                  })
+                            ultimo_prog = key
+            except Exception as e:
+                print(f"[AGENTE] leitura progresso falhou: {e}")
+
+        if res_file.exists():
+            try:
+                resultado = json.loads(res_file.read_text(encoding="utf-8"))
+                if isinstance(resultado, dict) and resultado.get("erro"):
+                    erro = resultado.get("erro")
+                    # Mantem resultado inteiro (com traceback) pro painel exibir
+            except Exception as e:
+                erro = f"Falha ao ler _resultado.json: {e}"
+        else:
+            erro = f"Motor terminou sem gerar _resultado.json (exitcode={proc.returncode})"
+    finally:
+        # Higiene: job.json carrega SENHAS em claro. Apaga o tempdir e o
+        # arquivo de credenciais da ordem — sem isso a proxima ordem que
+        # chegasse sem credenciais herdaria as do usuario anterior.
         try:
-            resultado = json.loads(res_file.read_text(encoding="utf-8"))
-            if isinstance(resultado, dict) and resultado.get("erro"):
-                erro = resultado.get("erro")
-                # Mantem resultado inteiro (com traceback) pro painel exibir
-        except Exception as e:
-            erro = f"Falha ao ler _resultado.json: {e}"
-    else:
-        erro = f"Motor terminou sem gerar _resultado.json (exitcode={proc.returncode})"
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+        try:
+            (RAIZ / "_agente_credenciais_atuais.json").unlink(missing_ok=True)
+        except Exception:
+            pass
     return resultado, erro
 
 
@@ -229,6 +287,8 @@ def main():
     print(f" Painel: {panel}")
     print(f" Poll:   {intervalo}s")
     print("=" * 60)
+
+    _garantir_dependencias()
 
     ocioso_desde = time.time()
     while True:

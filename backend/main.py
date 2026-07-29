@@ -18,7 +18,7 @@ from services.firma_automation import executar_firma
 from services.fluxasset_automation import executar_fluxasset
 from services.gc_automation import executar_gc
 from services.documentos import executar_salvamento_documentos
-from config_manager import salvar_credenciais, carregar_credenciais
+from config_manager import salvar_credenciais, carregar_credenciais, get_credencial
 from historico_manager import carregar_historico, salvar_operacao
 from factory_manager import carregar_factories_extras, salvar_factory_extra, remover_factory_extra, gerar_id
 from db import init_db, User
@@ -471,7 +471,19 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
             for sist in sistemas_necessarios:
                 try:
                     if sist == "gw":
-                        c = get_credencial("gw", user_id=uid) if uid else carregar_credenciais().get("gw", {})
+                        # 1o tenta credencial PESSOAL do usuario; se nao tem
+                        # (get_credencial levanta ValueError) ou veio vazia,
+                        # cai pra credencial GLOBAL de Configuracoes. Sem esse
+                        # fallback a ordem ia SEM credencial GW e o agente nao
+                        # conseguia relogar quando a sessao expirava.
+                        c = {}
+                        if uid:
+                            try:
+                                c = get_credencial("gw", user_id=uid) or {}
+                            except Exception:
+                                c = {}
+                        if not (c.get("usuario") or c.get("senha")):
+                            c = carregar_credenciais().get("gw", {}) or {}
                     else:
                         c = carregar_credenciais().get(sist, {})
                     if c and (c.get("usuario") or c.get("senha")):
@@ -482,6 +494,29 @@ async def executar_automacao(op_id: str, faturas: List[FaturaSelecao]):
                         }
                 except Exception as _e:
                     pass
+
+            # Falha RAPIDO e com mensagem clara se uma factory da operacao nao
+            # tem credencial cadastrada. Antes a ordem seguia, o agente tentava
+            # logar com usuario/senha vazios e o erro que chegava era
+            # "Login Firma falhou apos 3 tentativas" — sem dizer o motivo real.
+            # 'gw' fica fora da checagem: a sessao do Chrome do usuario pode
+            # estar viva e o login GW e' condicional.
+            if not status.get("apenas_documentos"):
+                faltando_cred = sorted(
+                    s for s in sistemas_necessarios
+                    if s != "gw" and s not in credenciais_por_sistema
+                )
+                if faltando_cred:
+                    nomes = ", ".join(FACTORY_NAMES.get(s, s) for s in faltando_cred)
+                    status["status"] = "concluido_com_erros"
+                    status["erros"] = [
+                        f"Credenciais nao cadastradas para: {nomes}. "
+                        f"Acesse Configuracoes e salve usuario/senha antes de operar."
+                    ]
+                    status["logs"].append(f"❌ Sem credencial cadastrada: {nomes}")
+                    status["fim"] = datetime.now().isoformat()
+                    salvar_operacao(op_id, status)
+                    return
 
             if status.get("apenas_documentos"):
                 ordem_id = agente_fila.enfileirar(

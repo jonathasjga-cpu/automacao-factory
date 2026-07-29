@@ -123,10 +123,14 @@ def _read(p: Path) -> str:
 # mudar, o hash muda. Frontend compara com o hash reportado pelo agente
 # a cada ping — se diferente, mostra "Agente desatualizado".
 _ARQUIVOS_VERSAO = [
+    # install.ps1 entra no hash: quando as dependencias mudam (ex: pypdf), o
+    # painel precisa avisar pra baixar o pacote novo e rodar '1 - INSTALAR'.
+    ("pacote/install.ps1",               PACOTE_DIR / "install.ps1"),
     ("agente_bot.py",                    AGENTE_DIR / "agente_bot.py"),
     ("motor_excel.py",                   AGENTE_DIR / "motor_excel.py"),
     ("motor_documentos.py",              AGENTE_DIR / "motor_documentos.py"),
     ("motor_factories.py",               AGENTE_DIR / "motor_factories.py"),
+    ("services/cdp_tabs.py",             SERVICES_DIR / "cdp_tabs.py"),
     ("services/excel_processor.py",      SERVICES_DIR / "excel_processor.py"),
     ("services/excel_processor_attach.py", SERVICES_DIR / "excel_processor_attach.py"),
     ("services/documentos.py",           SERVICES_DIR / "documentos.py"),
@@ -199,6 +203,8 @@ def download(request: Request):
 
         # ── services/ ──
         zf.writestr("services/__init__.py", "")
+        zf.writestr("services/cdp_tabs.py",
+                    _read(SERVICES_DIR / "cdp_tabs.py"))
         zf.writestr("services/excel_processor.py",
                     _read(SERVICES_DIR / "excel_processor.py"))
         zf.writestr("services/excel_processor_attach.py",

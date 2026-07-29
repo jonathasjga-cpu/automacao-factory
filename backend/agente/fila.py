@@ -4,6 +4,7 @@ Comportamento alinhado com status_operacoes: se o backend reinicia, a fila
 zera. Isso eh aceitavel — o agente puxa novas ordens quando existirem.
 """
 import time
+import uuid
 from typing import Optional
 
 
@@ -44,7 +45,9 @@ def ultimo_ping_iso() -> str:
 
 def enfileirar(tipo: str, itens: dict, usuario: str = "") -> str:
     """Cria nova ordem pendente e retorna seu id."""
-    ordem_id = f"ord_{int(_agora() * 1000)}"
+    # Sufixo aleatorio: dois enfileiramentos no mesmo milissegundo (threadpool
+    # do FastAPI + enqueue encadeado) colidiam e a 2a ordem sobrescrevia a 1a.
+    ordem_id = f"ord_{int(_agora() * 1000)}_{uuid.uuid4().hex[:6]}"
     _ordens[ordem_id] = {
         "id": ordem_id,
         "tipo": tipo,

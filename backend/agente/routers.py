@@ -96,7 +96,14 @@ def resultado(ordem_id: str, body: ResultadoBody, _=Depends(_verificar_token)):
     # Pos-processamento por tipo — mescla resultado em status_operacoes se
     # a ordem foi amarrada a uma operacao_id no enfileirar.
     try:
-        _injetar_resultado_em_operacao(ordem_id, body.resultado or {})
+        # Mescla body.erro no payload: quando o motor morre sem gravar
+        # _resultado.json, resultado vem None e o erro fatal ficava SO na fila
+        # (que o frontend nao consulta) — a operacao aparecia como 'concluido'
+        # com zero arquivos (falso sucesso).
+        payload = dict(body.resultado or {})
+        if body.erro and not payload.get("erro"):
+            payload["erro"] = body.erro
+        _injetar_resultado_em_operacao(ordem_id, payload)
     except Exception:
         import traceback
         traceback.print_exc()  # nao propaga; agente ja recebeu OK
@@ -158,14 +165,17 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
             salvar_pacote(op_id, arquivos, titulo=op.get("titulo") or "Agente", usuario=op.get("usuario") or "")
         except Exception:
             pass
+        _persistir_historico(op_id, op, itens)
 
     elif tipo == "executar_factories":
         # Acumula faturas_salvas e concluidas
         for n in resultado.get("faturas_salvas", []):
             op.setdefault("faturas_salvas", []).append(n)
         op["concluidas"] = op.get("concluidas", 0) + int(resultado.get("concluidas", 0))
-        # Se pediu pra encadear e nao teve erro fatal, enfileira baixar_documentos
-        if itens.get("_encadear_baixar_documentos"):
+        # Erro FATAL da ordem (motor morreu / Chrome nao recuperou) — nao faz
+        # sentido encadear o download de documentos: a operacao acabou aqui.
+        erro_fatal = o.get("erro") or resultado.get("erro")
+        if itens.get("_encadear_baixar_documentos") and not erro_fatal:
             op["status"] = "salvando_documentos"
             op.setdefault("logs", []).append("📥 Factories concluidas — enfileirando baixar documentos...")
             fila.enfileirar(
@@ -173,14 +183,46 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
                 itens={
                     "faturas_por_factory": itens.get("faturas_por_factory") or op.get("faturas_por_factory") or {},
                     "pasta_destino": op.get("pasta_destino") or "",
+                    # Repassa as credenciais da ordem original — sem isso a ordem
+                    # encadeada ia sem credencial GW e o auto-login falhava
+                    # ("Chrome esta na tela de login do GW e nao consegui logar").
+                    "credenciais_por_sistema": itens.get("credenciais_por_sistema") or {},
                     "_operacao_id": op_id,
                 },
                 usuario=op.get("usuario", ""),
             )
         else:
-            op["status"] = "concluido"
             from datetime import datetime
+            if erro_fatal:
+                op.setdefault("logs", []).append(
+                    "❌ Factories falharam — download de documentos NAO foi enfileirado."
+                )
+                op["status"] = "concluido_com_erros"
+            else:
+                op["status"] = "concluido" if not op.get("erros") else "concluido_com_erros"
             op["fim"] = op.get("fim") or datetime.now().isoformat()
+            _persistir_historico(op_id, op, itens)
+
+
+def _persistir_historico(op_id: str, op: dict, itens: dict) -> None:
+    """Salva a operacao no historico. No modo agente, executar_automacao
+    retorna logo apos enfileirar — sem isso a operacao nunca aparecia na
+    aba 'Relatorios'/'Historico de Operacoes'."""
+    try:
+        # historico usa faturas_salvas pra calcular qtd/valor; no fluxo
+        # 'apenas documentos' ninguem preenche, entao deriva do payload.
+        if not op.get("faturas_salvas"):
+            numeros = []
+            for _sist, lst in (itens.get("faturas_por_factory") or {}).items():
+                for f in (lst or []):
+                    if isinstance(f, dict) and f.get("numero"):
+                        numeros.append(f["numero"])
+            if numeros:
+                op["faturas_salvas"] = numeros
+        from historico_manager import salvar_operacao
+        salvar_operacao(op_id, op)
+    except Exception:
+        pass
 
 
 # ── Endpoints usados pelo frontend (JWT do usuario) ──────────────────────────
@@ -204,32 +246,42 @@ class EnfileirarFaturasBody(BaseModel):
     data_final: Optional[str] = None
 
 
+def _credenciais_gw(current_user) -> dict:
+    """Coleta credencial GW: 1o a pessoal do usuario, senao a global de
+    Configuracoes. Retorna {} ou {"gw": {...}} pronto pro payload da ordem."""
+    try:
+        from config_manager import get_credencial, carregar_credenciais
+        uid = getattr(current_user, "id", None)
+        c = {}
+        if uid:
+            try:
+                c = get_credencial("gw", user_id=uid) or {}
+            except Exception:
+                c = {}  # usuario sem credencial pessoal — cai pra global
+        if not (c.get("usuario") or c.get("senha")):
+            c = carregar_credenciais().get("gw", {}) or {}
+        if c.get("usuario") or c.get("senha"):
+            return {"gw": {
+                "usuario": c.get("usuario", ""),
+                "senha": c.get("senha", ""),
+                "url": c.get("url", ""),
+            }}
+    except Exception:
+        pass
+    return {}
+
+
 @router.post("/enfileirar-faturas")
 def enfileirar_faturas(body: EnfileirarFaturasBody, current_user = Depends(get_current_user)):
     """Enfileira uma ordem 'carregar_faturas' pro agente executar.
     Inclui credenciais GW pro agente logar automaticamente se a sessao
     tiver expirado."""
-    # Coleta credencial GW do usuario logado (fallback: credenciais globais)
-    credenciais_por_sistema = {}
-    try:
-        from config_manager import get_credencial, carregar_credenciais
-        uid = getattr(current_user, "id", None)
-        c = get_credencial("gw", user_id=uid) if uid else carregar_credenciais().get("gw", {})
-        if c and (c.get("usuario") or c.get("senha")):
-            credenciais_por_sistema["gw"] = {
-                "usuario": c.get("usuario", ""),
-                "senha": c.get("senha", ""),
-                "url": c.get("url", ""),
-            }
-    except Exception:
-        pass
-
     ordem_id = fila.enfileirar(
         tipo="carregar_faturas",
         itens={
             "data_inicial": body.data_inicial,
             "data_final": body.data_final,
-            "credenciais_por_sistema": credenciais_por_sistema,
+            "credenciais_por_sistema": _credenciais_gw(current_user),
         },
         usuario=current_user.login,
     )
@@ -266,6 +318,8 @@ def enfileirar_documentos(body: EnfileirarDocumentosBody, current_user = Depends
         itens={
             "faturas_por_factory": fpf,
             "pasta_destino": pasta,
+            # Credencial GW pro auto-login se a sessao expirar no meio
+            "credenciais_por_sistema": _credenciais_gw(current_user),
             # Amarra ordem <-> operacao_id pra injetar arquivos ao concluir
             "_operacao_id": body.operacao_id or "",
         },

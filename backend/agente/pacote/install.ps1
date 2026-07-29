@@ -156,9 +156,11 @@ try {
 # PASSO 3: Instalar dependencias
 # ========================================================================
 Log ""
-Log "PASSO 3/5: Instalando dependencias (playwright, pandas, openpyxl, httpx, certifi)..."
+Log "PASSO 3/5: Instalando dependencias (playwright, pandas, openpyxl, httpx, certifi, pypdf)..."
 Log "  NAO CLIQUE dentro da janela - Windows pausa o processo se voce clicar."
-$deps = @("playwright", "pandas", "openpyxl", "httpx", "certifi")
+# pypdf e' obrigatorio: sem ele a separacao do PDF agrupado em faturas
+# individuais falha silenciosamente e o ZIP 'Faturas separadas' nao e' gerado.
+$deps = @("playwright", "pandas", "openpyxl", "httpx", "certifi", "pypdf")
 
 # Upgrade pip primeiro (silencioso)
 & $py -m pip install --upgrade pip 2>&1 | Out-Null
@@ -185,7 +187,7 @@ Log ""
 Log "PASSO 4/5: Verificando imports..."
 $tmpPy = Join-Path $env:TEMP "autof_verifica.py"
 $sb = New-Object System.Text.StringBuilder
-[void]$sb.AppendLine('import pandas, openpyxl, playwright, httpx, certifi')
+[void]$sb.AppendLine('import pandas, openpyxl, playwright, httpx, certifi, pypdf')
 [void]$sb.AppendLine('print("OK")')
 [IO.File]::WriteAllText($tmpPy, $sb.ToString(), [Text.UTF8Encoding]::new($false))
 $saida = & $py $tmpPy 2>&1

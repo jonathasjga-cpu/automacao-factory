@@ -43,15 +43,15 @@ def main():
     pasta_destino = itens.get("pasta_destino") or ""
 
     # Salva credenciais recebidas em arquivo temp lido pelo stub config_manager
+    # SEMPRE grava (mesmo vazio) — ver comentario em motor_factories.py
     creds = itens.get("credenciais_por_sistema") or {}
-    if creds:
-        try:
-            (RAIZ / "_agente_credenciais_atuais.json").write_text(
-                json.dumps(creds, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+    try:
+        (RAIZ / "_agente_credenciais_atuais.json").write_text(
+            json.dumps(creds, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     def report(feito: int, total: int, desc: str):
         try:

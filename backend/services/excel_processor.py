@@ -136,17 +136,27 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
     except Exception:
         pass  # 403/tela diferente: bloco seguinte vai detectar
 
-    # Se GW retornou 403, a sessão pode ter expirado — tenta refazer login uma vez
+    # Se GW retornou 403 OU redirecionou pro login, a sessão expirou — refaz
+    # login uma vez. O check de 'login' na URL é essencial: sessão caída
+    # redireciona pro login e antes o código seguia em frente, falhando depois
+    # com "Radio não encontrado na lista do GW" (erro enganoso).
     titulo = await page.title()
-    if "403" in titulo or "403" in page.url:
-        _prog_log("⚠️ GW retornou 403 — refazendo login e tentando de novo...")
+    if "403" in titulo or "403" in page.url or "login" in page.url.lower():
+        _prog_log("⚠️ GW sem sessão válida (403/login) — refazendo login e tentando de novo...")
         try:
             # Re-login (mesmo fluxo do baixar_relatorios_gw)
-            creds = get_credencial("gw")
+            creds = get_credencial("gw") or {}
+            _usr = creds.get("usuario") or ""
+            _sen = creds.get("senha") or ""
+            if not _usr or not _sen:
+                raise Exception(
+                    "Credenciais GW nao configuradas no painel. Acesse "
+                    "Configuracoes > Meu acesso GW e salve usuario/senha."
+                )
             await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_selector('#login', timeout=15000)
-            await page.fill('#login', creds["usuario"])
-            await page.fill('#senha', creds["senha"])
+            await page.fill('#login', _usr)
+            await page.fill('#senha', _sen)
             await page.click('.button-login')
             await page.wait_for_load_state("load", timeout=60000)
             await page.wait_for_timeout(3000)
@@ -157,15 +167,16 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             await page.goto(url_rel, wait_until="load", timeout=60000)
             await page.wait_for_timeout(1500)
             titulo2 = await page.title()
-            if "403" in titulo2 or "403" in page.url:
+            if "403" in titulo2 or "403" in page.url or "login" in page.url.lower():
                 raise Exception(
-                    "GW retornou 403 mesmo apos re-login. Possiveis causas: "
-                    "credenciais sem permissao no modulo webtrans, rate-limit do GW, "
-                    "ou IP do servidor bloqueado. Tente em alguns minutos."
+                    "GW nao autorizou mesmo apos re-login. Possiveis causas: "
+                    "credenciais sem permissao no modulo webtrans, senha alterada, "
+                    "rate-limit do GW ou IP bloqueado. Confira as credenciais em "
+                    "Configuracoes > Meu acesso GW."
                 )
             _prog_log("✓ Re-login OK, prosseguindo...")
         except Exception as e:
-            raise Exception(f"GW retornou 403 (sessão expirada). Re-login falhou: {e}")
+            raise Exception(f"GW sem sessão válida. Re-login falhou: {e}")
 
     # Clica na aba "Relatórios Personalizados"
     await page.evaluate("""
@@ -418,6 +429,7 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
 
     # Clica em "Gerar Relatório" e aguarda nova aba com o download
     if context:
+        popup = None
         try:
             async with context.expect_page(timeout=15000) as popup_info:
                 await _clicar_gerar()
@@ -447,12 +459,20 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
             except Exception as _e:
                 try: log(f"  ⚠️  [expect_download] falhou silenciosamente: {_e}")
                 except Exception: pass  # noqa
-            try:
-                await popup.close()
-            except Exception:
-                pass
         except Exception:
-            await _clicar_gerar()
+            # Só re-clica se NENHUM popup abriu. Se o popup abriu, o clique
+            # original funcionou — re-clicar geraria relatório duplicado no GW
+            # e deixaria uma segunda aba órfã.
+            if popup is None:
+                await _clicar_gerar()
+        finally:
+            # Fecha SEMPRE — antes o close ficava no caminho felizo e um timeout
+            # no wait_for_load_state deixava a aba órfã acumulando no Chrome.
+            if popup is not None:
+                try:
+                    await popup.close()
+                except Exception:
+                    pass
     else:
         await _clicar_gerar()
 

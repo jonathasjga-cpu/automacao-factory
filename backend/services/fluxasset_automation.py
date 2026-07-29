@@ -177,8 +177,27 @@ async def fazer_login_fluxasset(page: Page, sistema: str, status: dict | None = 
     """
     from browser_config import IS_RAILWAY
     log = (lambda msg: status["logs"].append(msg)) if status else (lambda msg: None)
-    creds = get_credencial(sistema)
+    creds = get_credencial(sistema) or {}
+    if not (creds.get("usuario") or "").strip() or not (creds.get("senha") or ""):
+        raise Exception(
+            f"Credenciais da FluxAsset ({sistema}) nao cadastradas. Acesse "
+            f"Configuracoes e salve usuario/senha antes de operar."
+        )
     await page.goto(f"{FLUXASSET_URL}/login", wait_until="domcontentloaded", timeout=60000)
+
+    # Sessao persistida (cdp_profile) pode redirecionar /login pro dashboard —
+    # o form nunca aparece e o fill estoura timeout. FluxAsset Matriz e SP
+    # compartilham dominio: limpa a sessao e volta pro /login limpo pra garantir
+    # login com a credencial da filial certa.
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+    if "login" not in (page.url or "").lower():
+        log("  [LOGIN] FluxAsset ja tinha sessao ativa — limpando pra logar com a filial certa...")
+        from services.cdp_tabs import limpar_sessao_dominio
+        await limpar_sessao_dominio(page, "fluxasset.com.br")
+        await page.goto(f"{FLUXASSET_URL}/login", wait_until="domcontentloaded", timeout=60000)
 
     if IS_RAILWAY:
         # ── ESTRATÉGIA RAILWAY: usuário resolve captcha NO FRONTEND do AutoFactory ──

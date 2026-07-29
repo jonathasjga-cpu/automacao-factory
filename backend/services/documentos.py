@@ -66,6 +66,17 @@ def _normalizar(num: str) -> str:
     return str(num).lstrip("0") or "0"
 
 
+async def _marcar_aba_automacao(page) -> None:
+    """Marca popups/abas que a automacao abriu, pra que o gestor de abas
+    (cdp_tabs) possa limpar orfaos deixados por kill duro. Sem a marca, uma
+    aba nunca e' fechada automaticamente — abas do usuario ficam intactas."""
+    try:
+        from services.cdp_tabs import _marcar_como_automacao
+        await _marcar_como_automacao(page)
+    except Exception:
+        pass  # modo launch/standalone sem cdp_tabs — segue normal
+
+
 def _salvar_arquivo_seguro(status: dict, nome: str, dados: bytes, log) -> None:
     """Salva o arquivo em 3 lugares (redundancia contra crash mid-flow):
     1. status["arquivos"][nome] — memoria (usado pelo /api/download)
@@ -893,6 +904,8 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
 
                     # Instala route no contexto antes do clique — cobre popup desde o primeiro request
                     await context.route("**/*", _ctx_rota_fat)
+                    popup_fat = None
+                    popup_url_fat = ""
                     try:
                         # Hook NÃO-BLOQUEANTE: captura a URL E chama window.open original.
                         # Assim o popup abre normalmente (quando possível) e temos fallback.
@@ -911,8 +924,6 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         }""")
 
                         # Estratégia 1: expect_page pro caso do popup funcionar (fluxo original)
-                        popup_fat = None
-                        popup_url_fat = ""
                         try:
                             async with context.expect_page(timeout=8000) as _popup_fat_info:
                                 if _click_sel_fat:
@@ -924,6 +935,7 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                                     )
                                     log("  Clique: popFatura JS (fallback)")
                             popup_fat = await _popup_fat_info.value
+                            await _marcar_aba_automacao(popup_fat)
                             try:
                                 await popup_fat.wait_for_url(
                                     lambda u: u not in ("about:blank", ""),
@@ -964,8 +976,10 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                                 abs_url = f"{BASE_GW}/{abs_url}"
 
                             # Estratégia 2: abre uma aba nova e navega — equivalente ao popup
+                            aba_pdf = None
                             try:
                                 aba_pdf = await context.new_page()
+                                await _marcar_aba_automacao(aba_pdf)
                                 try:
                                     await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
                                 except Exception:
@@ -977,9 +991,16 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                                 pdf_bytes = _pdf_fat_holder.get("bytes")
                                 if pdf_bytes:
                                     log(f"  ✅ PDF via nova aba: {len(pdf_bytes):,} bytes")
-                                await aba_pdf.close()
                             except Exception as e:
                                 log(f"  Erro aba nova: {e}")
+                            finally:
+                                # Fecha SEMPRE — exceção no meio deixava a aba órfã
+                                # acumulando no Chrome do usuário.
+                                if aba_pdf is not None:
+                                    try:
+                                        await aba_pdf.close()
+                                    except Exception:
+                                        pass
 
                             # Estratégia 3: fetch direto (último recurso)
                             if not pdf_bytes:
@@ -993,15 +1014,16 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                                 except Exception as e:
                                     log(f"  context.request: {e}")
 
+                    except Exception as e:
+                        log(f"  Erro capturando fatura PDF: {e}")
+                    finally:
+                        # Fecha o popup SEMPRE (antes fechava só no caminho feliz —
+                        # exceção deixava a aba órfã acumulando no Chrome).
                         if popup_fat:
                             try:
                                 await popup_fat.close()
                             except Exception:
                                 pass
-
-                    except Exception as e:
-                        log(f"  Erro capturando fatura PDF: {e}")
-                    finally:
                         await context.unroute("**/*", _ctx_rota_fat)
 
                     if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
@@ -1293,12 +1315,14 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
 
                         # Instala no CONTEXTO antes do clique
                         await context.route("**/*", _ctx_rota_cte)
+                        popup_cte = None
                         try:
                             async with context.expect_page(timeout=15000) as _popup_cte_info:
                                 await page.locator("#img_imprimir").click()
                                 log(f"    Clicou #img_imprimir")
 
                             popup_cte = await _popup_cte_info.value
+                            await _marcar_aba_automacao(popup_cte)
 
                             # Estratégia adaptativa:
                             # - Faturas pequenas (<= 50 CT-es): popup geralmente devolve o PDF direto.
@@ -1384,14 +1408,15 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                                 except Exception as e:
                                     log(f"    DOM fallback: {e}")
 
-                            try:
-                                await popup_cte.close()
-                            except Exception:
-                                pass
-
                         except Exception as e:
                             log(f"    Popup nao abriu: {e}")
                         finally:
+                            # Fecha o popup SEMPRE — exceção no meio deixava aba órfã
+                            if popup_cte is not None:
+                                try:
+                                    await popup_cte.close()
+                                except Exception:
+                                    pass
                             await context.unroute("**/*", _ctx_rota_cte)
 
                         # Fallback final: Meus Relatórios. Quando a fatura tem muitos

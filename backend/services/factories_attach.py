@@ -40,6 +40,15 @@ def _sistema_para_url(sistema: str) -> str:
 
 async def _login_gw_se_precisar(page, base_gw: str, status: dict) -> None:
     """Loga no GW se a aba estiver em /login OU se responder 401 (sessao expirada)."""
+    # A aba reusada carrega um snapshot ANTIGO — se a sessao expirou no servidor
+    # enquanto a aba ficava parada em /home, nada na pagina indica isso. Uma
+    # navegacao leve exercita a sessao: valida -> /home carrega; expirada ->
+    # redireciona pro login e o bloco abaixo detecta. Navegar na MESMA aba
+    # preserva o sessionStorage de que o login do GW depende.
+    try:
+        await page.goto(f"{base_gw}/home", wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        pass
     url_atual = (page.url or "").lower()
     precisa_login = "login" in url_atual
     # Se URL parece OK, verifica se a pagina tem 401 no title/body (sessao expirou)
@@ -74,29 +83,7 @@ async def _login_gw_se_precisar(page, base_gw: str, status: dict) -> None:
         log(f"  ⚠️ [GW] Falha ao logar: {e}")
 
 
-async def _abrir_aba_automacao(browser, url_marker: str, url_home: str):
-    """Estrategia:
-      1. Se existe aba no dominio, REUSA ela (herda sessionStorage — importante
-         pro GW, cujo login depende de sessionStorage e nao so de cookies).
-      2. Senao abre uma aba nova.
-    Retorna (ctx, page, nova) — 'nova' indica se abrimos uma aba (True), pra
-    que o chamador feche no finally SEM tocar em abas do usuario.
-    """
-    for ctx in browser.contexts:
-        for pg in ctx.pages:
-            if url_marker in (pg.url or "").lower():
-                return ctx, pg, False
-    ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-    page = await ctx.new_page()
-    await page.goto(url_home, wait_until="load", timeout=60000)
-    return ctx, page, True
-
-
-async def _fechar_aba_automacao(page):
-    try:
-        await page.close()
-    except Exception:
-        pass
+from services.cdp_tabs import achar_aba as _abrir_aba_automacao, fechar_aba_criada as _fechar_aba_automacao
 
 
 async def executar_factory_attach(
@@ -182,6 +169,36 @@ async def executar_factory_attach(
                 )
                 if nova_gc:
                     abas_criadas.append(page_gc)
+                # Matriz e SP compartilham dominio: se a sessao da unidade
+                # anterior ainda esta viva, /login redireciona pro sistema e o
+                # fazer_login_gc estoura timeout esperando o campo #Email.
+                # Limpa a sessao ANTES (mesmo tratamento da Firma). Nao mexe em
+                # gc_automation.py — a logica de operacao da GC fica intacta.
+                try:
+                    await page_gc.goto(
+                        "http://gcrecursos.dyndns.org:9000/FactaConsult/login",
+                        wait_until="domcontentloaded", timeout=90000,
+                    )
+                    await page_gc.wait_for_load_state("networkidle", timeout=10000)
+                except Exception:
+                    pass
+                if "login" not in (page_gc.url or "").lower():
+                    log(f"  [LOGIN] GC ja tinha sessao ativa — limpando pra logar como {sistema}...")
+                    from services.cdp_tabs import limpar_sessao_dominio
+                    await limpar_sessao_dominio(page_gc, "gcrecursos.dyndns.org")
+                # Guard de credencial AQUI (nao dentro de gc_automation.py, pra
+                # nao tocar na logica da operacao da GC): erro claro em vez de
+                # timeout obscuro esperando o campo #Email.
+                try:
+                    from config_manager import get_credencial as _gc_cred
+                    _c = _gc_cred(sistema) or {}
+                    if not (_c.get("usuario") or "").strip() or not (_c.get("senha") or ""):
+                        raise Exception(
+                            f"Credenciais da GC ({sistema}) nao cadastradas. Acesse "
+                            f"Configuracoes e salve usuario/senha antes de operar."
+                        )
+                except ImportError:
+                    pass
                 # SEMPRE loga forcado no GC — Matriz e SP usam mesmo dominio
                 log(f"  [LOGIN] GC {sistema} — forcando login com credencial da filial...")
                 await fazer_login_gc(page_gc, sistema)
@@ -211,15 +228,34 @@ async def executar_factories_attach(
     """
     if report is None:
         report = lambda *_: None
+    status.setdefault("logs", [])
+    status.setdefault("erros", [])
+    status.setdefault("faturas_salvas", set())
+    status["concluidas"] = status.get("concluidas", 0)
     total = len(faturas_por_factory_selecao)
     idx = 0
     for sistema, sel_list in faturas_por_factory_selecao.items():
         idx += 1
         report(idx - 1, total, f"iniciando {sistema}...")
+        # Sub-status POR SISTEMA: compartilha logs/erros/arquivos/faturas_cache
+        # (mesmas referencias), mas faturas_salvas e concluidas sao proprios.
+        # Antes o set global acumulava faturas de TODAS as unidades e a
+        # validacao de valor da 2a unidade somava faturas da 1a -> divergencia
+        # falsa ("valor da operacao nao confere") e a operacao era abortada.
+        sub = dict(status)
+        sub["faturas_salvas"] = set()
+        sub["concluidas"] = 0
         try:
-            await executar_factory_attach(sistema, sel_list, status, report=lambda f,t,d: report(idx-1, total, f"{sistema}: {d}"))
+            await executar_factory_attach(sistema, sel_list, sub, report=lambda f,t,d: report(idx-1, total, f"{sistema}: {d}"))
         except Exception as e:
-            status.setdefault("logs", []).append(f"❌ {sistema} falhou: {e}")
-            status.setdefault("erros", []).append(f"{sistema}: {e}")
+            status["logs"].append(f"❌ {sistema} falhou: {e}")
+            status["erros"].append(f"{sistema}: {e}")
+        finally:
+            # Mescla de volta os contadores do sistema no total da operacao
+            status["concluidas"] += int(sub.get("concluidas", 0) or 0)
+            try:
+                status["faturas_salvas"] |= set(sub.get("faturas_salvas") or set())
+            except Exception:
+                pass
         report(idx, total, f"{sistema} concluida")
     return status

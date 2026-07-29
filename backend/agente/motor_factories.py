@@ -37,15 +37,17 @@ def main():
     # Grava credenciais recebidas do backend num arquivo temp que o stub
     # config_manager.py do agente le. Assim `fazer_login_*` das factories
     # funciona sem tocar nas originais.
+    # SEMPRE grava (mesmo vazio): se a ordem chega sem credenciais e o arquivo
+    # antigo permanecesse, a automacao logaria com a credencial da ordem
+    # ANTERIOR (possivelmente de outro usuario).
     creds = itens.get("credenciais_por_sistema") or {}
-    if creds:
-        try:
-            (RAIZ / "_agente_credenciais_atuais.json").write_text(
-                json.dumps(creds, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+    try:
+        (RAIZ / "_agente_credenciais_atuais.json").write_text(
+            json.dumps(creds, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     # faturas_por_factory: {sistema: [{numero, factory, valor, ...}]}
     faturas_por_factory_raw = itens.get("faturas_por_factory") or {}
@@ -99,6 +101,22 @@ def main():
             "concluidas": status.get("concluidas", 0),
             "faturas_salvas": list(status.get("faturas_salvas", set())),
         }
+        # executar_factories_attach engole excecoes POR SISTEMA em status["erros"],
+        # entao um Chrome morto nunca chegava como 'erro' no topo e o auto-recovery
+        # do agente_bot nao disparava. Se TODOS os sistemas falharam com padrao de
+        # CDP morto, promove pra 'erro' no topo pra o agente reabrir o Chrome.
+        erros_lista = status.get("erros", []) or []
+        n_sistemas = len(faturas_por_factory_selecao)
+        if erros_lista and n_sistemas and len(erros_lista) >= n_sistemas:
+            txt = " | ".join(map(str, erros_lista)).lower()
+            padroes_cdp = ("econnrefused", "connect_over_cdp", "econnreset",
+                           "target page, context or browser has been closed",
+                           "nao foi possivel conectar")
+            if any(p in txt for p in padroes_cdp):
+                status_out["erro"] = (
+                    "Chrome CDP indisponivel — todas as factories falharam: "
+                    + str(erros_lista[0])[:200]
+                )
         res_file.write_text(json.dumps(status_out, ensure_ascii=False), encoding="utf-8")
         report(len(faturas_por_factory_selecao), len(faturas_por_factory_selecao), "factories concluidas")
     except Exception as e:

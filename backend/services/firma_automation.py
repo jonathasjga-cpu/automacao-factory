@@ -81,15 +81,58 @@ async def buscar_dados_cnpj(cnpj: str) -> dict:
     return {}
 
 async def fazer_login_firma(page: Page, sistema: str):
-    """Login com retry (ate 3 tentativas) — cobre blip de rede ou timeout do servidor Firma."""
-    creds = get_credencial(sistema)
+    """Login com retry (ate 3 tentativas) — cobre blip de rede ou timeout do servidor Firma.
+
+    Cenario critico coberto: o perfil do Chrome CDP e' PERSISTENTE (cdp_profile).
+    Se ja existe sessao Firma salva (da filial errada, ou expirando), /login
+    REDIRECIONA pro dashboard — o form nunca aparece e o fill estourava timeout
+    3x seguidas. Agora: detecta o redirect, limpa a sessao do dominio (cookies +
+    storage) e volta pro /login limpo. Firma Matriz e SP compartilham dominio,
+    entao SEMPRE limpar garante que a credencial da filial certa e' usada.
+    """
+    creds = get_credencial(sistema) or {}
+    # Guard: credencial vazia produzia 3 tentativas de login com usuario/senha
+    # em branco e o erro final nao dizia o motivo real.
+    if not (creds.get("usuario") or "").strip() or not (creds.get("senha") or ""):
+        raise Exception(
+            f"Credenciais da Firma ({sistema}) nao cadastradas. Acesse "
+            f"Configuracoes e salve usuario/senha antes de operar."
+        )
     last_exc = None
     for tentativa in range(1, 4):
         try:
             await page.goto(f"{FIRMA_URL}/login", timeout=60000)
-            await page.wait_for_load_state("networkidle", timeout=20000)
-            await page.fill('input[placeholder*="uario"], input[name*="user"], input[type="text"]', creds["usuario"])
-            await page.fill('input[type="password"]', creds["senha"])
+            try:
+                await page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                pass
+
+            # Ja logado? (sessao persistida do cdp_profile) → /login redireciona.
+            # Limpa a sessao do dominio e volta pro login.
+            if "login" not in (page.url or "").lower():
+                from services.cdp_tabs import limpar_sessao_dominio
+                await limpar_sessao_dominio(page, "firmasa.com")
+                await page.goto(f"{FIRMA_URL}/login", timeout=60000)
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=20000)
+                except Exception:
+                    pass
+                if "login" not in (page.url or "").lower():
+                    raise Exception(
+                        f"Firma nao mostrou a tela de login mesmo apos limpar sessao (URL: {page.url})"
+                    )
+
+            # Espera o FORM de verdade: campo de senha visivel identifica a tela
+            # de login (dashboards nao tem input password).
+            await page.locator('input[type="password"]').first.wait_for(state="visible", timeout=15000)
+
+            # Preenche apenas inputs VISIVEIS — o seletor antigo pegava o 1o input
+            # do DOM mesmo oculto e o fill travava 30s esperando ficar acionavel.
+            campo_user = page.locator(
+                'input[placeholder*="uario"]:visible, input[name*="user"]:visible, input[type="text"]:visible'
+            ).first
+            await campo_user.fill(creds["usuario"], timeout=10000)
+            await page.locator('input[type="password"]:visible').first.fill(creds["senha"], timeout=10000)
             await page.click('button:has-text("Entrar"), button[type="submit"]')
             # Aguarda redirect para fora do login — sai tão logo a URL muda
             try:

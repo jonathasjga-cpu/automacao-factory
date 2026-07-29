@@ -45,15 +45,15 @@ def main():
     # Grava credenciais recebidas do backend num arquivo temp que o stub
     # config_manager.py do agente le. Necessario pro auto-login do GW quando
     # a sessao expira (403).
+    # SEMPRE grava (mesmo vazio) — ver comentario em motor_factories.py
     creds = itens.get("credenciais_por_sistema") or {}
-    if creds:
-        try:
-            (RAIZ / "_agente_credenciais_atuais.json").write_text(
-                json.dumps(creds, ensure_ascii=False),
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
+    try:
+        (RAIZ / "_agente_credenciais_atuais.json").write_text(
+            json.dumps(creds, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
     def report(feito: int, total: int, desc: str):
         try:

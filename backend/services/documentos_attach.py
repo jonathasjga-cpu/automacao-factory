@@ -20,29 +20,16 @@ CDP_URL_DEFAULT = os.getenv("CDP_URL", "http://localhost:9222")
 BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
 
 
-async def _abrir_aba_automacao_gw(browser, base_gw: str):
-    """Prefere REUSAR aba GW existente (herda sessionStorage do login).
-    So abre nova se nao houver nenhuma. Retorna (ctx, page, nova)."""
-    contexts = browser.contexts
-    if not contexts:
-        raise Exception(
-            "Nenhum contexto CDP disponivel. Rode '2 - ABRIR CHROME.bat' primeiro."
-        )
-    for ctx in contexts:
-        for pg in ctx.pages:
-            if "webtrans" in (pg.url or "").lower():
-                return ctx, pg, False
-    ctx = contexts[0]
-    page = await ctx.new_page()
-    await page.goto(f"{base_gw}/home", wait_until="load", timeout=60000)
-    return ctx, page, True
+from services.cdp_tabs import achar_aba as _achar_aba, fechar_aba_criada as _fechar_aba_automacao
 
 
-async def _fechar_aba_automacao(page):
-    try:
-        await page.close()
-    except Exception:
-        pass
+async def _abrir_aba_automacao_gw(browser, base_gw: str, status: dict | None = None):
+    """Reusa a aba GW padrao (dedupe automatico de leftovers); so cria se
+    nao existir nenhuma. Retorna (ctx, page, nova)."""
+    log = None
+    if status is not None:
+        log = lambda m: status.setdefault("logs", []).append(m)
+    return await _achar_aba(browser, "webtrans", f"{base_gw}/home", log=log)
 
 
 async def _garantir_logado(page, report=None, base_gw: str = BASE_GW_DEFAULT, status: dict | None = None):
@@ -116,7 +103,7 @@ async def baixar_documentos_attach(
                 f"Rode '2 - ABRIR CHROME.bat' primeiro. Detalhe: {str(e)[:200]}"
             )
 
-        ctx, page, nova = await _abrir_aba_automacao_gw(browser, base_gw)
+        ctx, page, nova = await _abrir_aba_automacao_gw(browser, base_gw, status=status)
         try:
             await _garantir_logado(page, report, base_gw=base_gw, status=status)
 
