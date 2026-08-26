@@ -23,3 +23,5 @@ backend/operacoes_historico.json
 
 # Build
 {backend,frontend
+backend/_faturas_teste.json
+backend/_dados_teste*.json

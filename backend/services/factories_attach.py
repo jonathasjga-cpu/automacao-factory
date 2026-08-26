@@ -144,24 +144,30 @@ async def executar_factory_attach(
                 await _core_executar_fluxasset(page, faturas_selecao, sistema, status)
 
             elif sistema.startswith("gc"):
-                # GC precisa de 2 etapas: gerar .rem no GW + operar no portal GC
-                # Etapa 1 — reusa aba GW ja logada do usuario (sessionStorage
-                # do GW mora na aba; abrir aba nova cai na tela de login).
-                ctx_gw, page_gw, nova_gw = await _abrir_aba_automacao(
-                    browser, "webtrans", f"{base_gw}/home",
-                )
-                if nova_gw:
-                    abas_criadas.append(page_gw)
-                # Se GW nao esta logado, faz login usando credenciais salvas
-                await _login_gw_se_precisar(page_gw, base_gw, status)
-                report(0, 3, f"GC {sistema} — gerando .rem no GW...")
+                # ── ETAPA 1 (so no modo 'remessa') — gerar .rem no GW ──
+                # GC_MODO=digitacao (default): digita direto no portal, igual a
+                # Firma. Nao toca no GW — a etapa onde 8 dos 10 bugs historicos
+                # da GC aconteciam simplesmente deixa de existir.
+                # GC_MODO=remessa: fluxo antigo (.rem + Importar Leiaute), mantido
+                # como rollback de 1 minuto sem precisar de deploy.
+                gc_modo = os.getenv("GC_MODO", "digitacao").strip().lower()
                 numeros = [sel.numero for sel in faturas_selecao]
-                numeros_norm = [n.zfill(6) for n in numeros]
-                caminho_rem = await _core_gerar_remessa_gw(page_gw, ctx_gw, numeros_norm, sistema, status)
-                if not caminho_rem:
-                    status.setdefault("erros", []).append(f"GC {sistema}: falha ao gerar .rem")
-                    return {"sistema": sistema}
-                # Etapa 2 — portal GC
+                caminho_rem = None
+                if gc_modo == "remessa":
+                    ctx_gw, page_gw, nova_gw = await _abrir_aba_automacao(
+                        browser, "webtrans", f"{base_gw}/home",
+                    )
+                    if nova_gw:
+                        abas_criadas.append(page_gw)
+                    await _login_gw_se_precisar(page_gw, base_gw, status)
+                    report(0, 3, f"GC {sistema} — gerando .rem no GW...")
+                    numeros_norm = [n.zfill(6) for n in numeros]
+                    caminho_rem = await _core_gerar_remessa_gw(page_gw, ctx_gw, numeros_norm, sistema, status)
+                    if not caminho_rem:
+                        status.setdefault("erros", []).append(f"GC {sistema}: falha ao gerar .rem")
+                        return {"sistema": sistema}
+
+                # ── Aba + login do portal GC (comum aos dois modos) ──
                 ctx_gc, page_gc, nova_gc = await _abrir_aba_automacao(
                     browser,
                     "gcrecursos.dyndns.org",
@@ -172,8 +178,6 @@ async def executar_factory_attach(
                 # Matriz e SP compartilham dominio: se a sessao da unidade
                 # anterior ainda esta viva, /login redireciona pro sistema e o
                 # fazer_login_gc estoura timeout esperando o campo #Email.
-                # Limpa a sessao ANTES (mesmo tratamento da Firma). Nao mexe em
-                # gc_automation.py — a logica de operacao da GC fica intacta.
                 try:
                     await page_gc.goto(
                         "http://gcrecursos.dyndns.org:9000/FactaConsult/login",
@@ -186,9 +190,7 @@ async def executar_factory_attach(
                     log(f"  [LOGIN] GC ja tinha sessao ativa — limpando pra logar como {sistema}...")
                     from services.cdp_tabs import limpar_sessao_dominio
                     await limpar_sessao_dominio(page_gc, "gcrecursos.dyndns.org")
-                # Guard de credencial AQUI (nao dentro de gc_automation.py, pra
-                # nao tocar na logica da operacao da GC): erro claro em vez de
-                # timeout obscuro esperando o campo #Email.
+                # Guard de credencial: erro claro em vez de timeout no #Email
                 try:
                     from config_manager import get_credencial as _gc_cred
                     _c = _gc_cred(sistema) or {}
@@ -199,12 +201,19 @@ async def executar_factory_attach(
                         )
                 except ImportError:
                     pass
-                # SEMPRE loga forcado no GC — Matriz e SP usam mesmo dominio
                 log(f"  [LOGIN] GC {sistema} — forcando login com credencial da filial...")
                 await fazer_login_gc(page_gc, sistema)
-                report(1, 3, f"GC {sistema} — operando no portal...")
-                total_qtd = len(numeros)
-                await _core_executar_gc_portal(page_gc, faturas_selecao, sistema, status, caminho_rem, numeros, total_qtd)
+
+                # ── ETAPA 2 — operar no portal ──
+                if gc_modo == "remessa":
+                    report(1, 3, f"GC {sistema} — importando .rem no portal...")
+                    await _core_executar_gc_portal(
+                        page_gc, faturas_selecao, sistema, status,
+                        caminho_rem, numeros, len(numeros))
+                else:
+                    report(1, 3, f"GC {sistema} — digitando titulos...")
+                    from services.gc_digitacao import _core_executar_gc_digitacao
+                    await _core_executar_gc_digitacao(page_gc, faturas_selecao, sistema, status)
                 report(2, 3, f"GC {sistema} concluida")
 
             else:
