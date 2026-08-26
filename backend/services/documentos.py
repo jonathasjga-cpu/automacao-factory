@@ -693,12 +693,36 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         f"{BASE_GW}/consultafatura?acao=iniciar",
                         wait_until="domcontentloaded", timeout=30000, log=log,
                     )
-                    await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
-
+                    # Checa o titulo ANTES de esperar o select: quando o GW
+                    # responde 500 (rate-limit / sessao corrompida) a pagina nao
+                    # tem select nenhum, e o wait de 15s estourava com
+                    # "Timeout waiting for select[campoDeConsulta]" — mensagem
+                    # que nao diz o motivo real. Agora o erro nomeia o 500.
                     titulo = await page.title()
                     log(f"  Pagina: {titulo} | filialId={filial_id or 'Todas'} | range={data_ini_busca} → {data_fim_busca}")
                     if "500" in titulo or "status 500" in titulo.lower():
-                        raise Exception("GW retornou 500 na tela de faturas.")
+                        raise Exception(
+                            "GW retornou 500 na tela de faturas (servidor recusou a "
+                            "consulta — pode ser sessao expirada ou rate-limit). "
+                            "Tente novamente em alguns minutos."
+                        )
+
+                    try:
+                        await page.locator('select[name="campoDeConsulta"]').wait_for(state="visible", timeout=15000)
+                    except Exception:
+                        # Segunda chance: reconfere o titulo (o 500 pode ter chegado
+                        # depois do domcontentloaded) antes de culpar o seletor.
+                        t2 = await page.title()
+                        if "500" in t2 or "status 500" in t2.lower():
+                            raise Exception(
+                                "GW retornou 500 na tela de faturas (servidor recusou a "
+                                "consulta). Tente novamente em alguns minutos."
+                            )
+                        raise Exception(
+                            f"Tela de faturas do GW nao carregou o formulario de busca "
+                            f"(select 'campoDeConsulta' ausente). Titulo da pagina: '{t2}'. "
+                            f"Sessao pode ter expirado."
+                        )
 
                     await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
                     await page.fill('input[name="dtemissao1"]', data_ini_busca)
@@ -723,6 +747,23 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     await page.select_option('select[name="finalizada"]', label="Todas")
                     await page.select_option('select[name="limiteResultados"]', value="200")
 
+                    # Assinatura da tabela ANTES de pesquisar. Necessaria porque a
+                    # tela `acao=iniciar` JA VEM com uma lista default (6 faturas,
+                    # ck0..ck5 visiveis) — medido ao vivo em debug_gw_boletos.json.
+                    # Sem isso, o wait por "existe checkbox" retornava na hora e o
+                    # codigo lia a lista DEFAULT em vez do resultado da busca:
+                    # dava "Nenhuma fatura marcada" com as mesmas 6 faturas em
+                    # todas as filiais.
+                    assinatura_js = r"""() => {
+                        const n = document.querySelectorAll('input[id^="ck"]').length;
+                        const m = (document.body.innerText || '').match(/(\d{5,6})\/\d{4}/);
+                        return n + '|' + (m ? m[1] : '');
+                    }"""
+                    try:
+                        assinatura_antes = await page.evaluate(assinatura_js)
+                    except Exception:
+                        assinatura_antes = ""
+
                     # Espera explicitamente a RESPOSTA HTTP do Pesquisar.
                     # Bug antigo: `wait_for_url(acao=consultar)` retornava
                     # imediatamente em iterações subsequentes, porque a URL
@@ -738,13 +779,35 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     except Exception as e_url:
                         log(f"  AVISO expect_response timeout: {e_url}")
                         log(f"  URL atual: {page.url}")
-                    # Aguarda os checkboxes ck* aparecerem = resultados renderizados
+
+                    # A navegacao do Pesquisar e' real (URL muda pra acao=consultar)
                     try:
-                        await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=15000)
+                        await page.wait_for_load_state("domcontentloaded", timeout=20000)
                     except Exception:
                         pass
 
-                    await page.wait_for_timeout(300)
+                    # Espera a tabela REALMENTE trocar — nao apenas "existir checkbox"
+                    try:
+                        await page.wait_for_function(
+                            r"""(antes) => {
+                                const n = document.querySelectorAll('input[id^="ck"]').length;
+                                const m = (document.body.innerText || '').match(/(\d{5,6})\/\d{4}/);
+                                return (n + '|' + (m ? m[1] : '')) !== antes;
+                            }""",
+                            arg=assinatura_antes,
+                            timeout=20000,
+                        )
+                    except Exception:
+                        # Pode nao mudar legitimamente (busca devolveu o mesmo conjunto).
+                        # Segue adiante; a checagem de "marcadas" abaixo pega o problema.
+                        log("  [INFO] tabela nao mudou de assinatura apos pesquisar")
+
+                    try:
+                        await page.wait_for_selector('input[id^="ck"]', state="visible", timeout=10000)
+                    except Exception:
+                        pass
+
+                    await page.wait_for_timeout(400)
 
                     # Faturas retornadas pelo GW
                     na_pagina = []
