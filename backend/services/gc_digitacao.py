@@ -163,6 +163,35 @@ JS_ESTADO_LOOKUP = """
 """
 
 
+# Le quantos titulos JA entraram na operacao. Medido ao vivo: ao salvar 1
+# titulo, "Qtde.Titulo" vai de 0 -> 1 em ~400ms, e a grid do modal ganha 1
+# linha. Esse contador e' a PROVA de gravacao — sem ele o codigo dizia
+# "[OK] Titulo salvo" mesmo quando o portal recusou ou ficou esperando
+# confirmacao, e a analista tinha que digitar a fatura na mao depois.
+JS_CONTAR_TITULOS = r"""
+() => {
+    const txt = document.body.innerText || '';
+    const m = txt.match(/Qtde\.?\s*T[íi]tulo\s*:?\s*(\d+)/i);
+    let linhas = 0;
+    for (const tr of document.querySelectorAll('.modal-interna-fundo tbody tr, .modal-interna-fundo tr')) {
+        if (!tr.offsetParent) continue;
+        const tds = [...tr.querySelectorAll('td')].map(x => (x.textContent||'').trim());
+        if (tds.some(t => /^\d{5,6}$/.test(t))) linhas++;
+    }
+    return {qtde: m ? parseInt(m[1], 10) : null, linhas: linhas};
+}
+"""
+
+
+async def _contar_titulos_gc(page):
+    """(qtde_oficial, linhas_grid). None em qtde se o rotulo nao aparecer."""
+    try:
+        r = await page.evaluate(JS_CONTAR_TITULOS)
+        return r.get("qtde"), r.get("linhas") or 0
+    except Exception:
+        return None, -1
+
+
 async def _log_status(status, msg):
     status.setdefault("logs", []).append(msg)
 
@@ -199,8 +228,39 @@ async def navegar_para_digitacao_gc(page, status):
     )
 
 
+async def _fechar_modais_abertos(page):
+    """Fecha modais residuais ANTES de abrir a operacao.
+
+    Necessario porque, com um modal aberto, existem DOIS botoes 'Novo' no DOM:
+    o da listagem (cria operacao) e o do formulario (so limpa os campos da
+    operacao atual). O querySelectorAll pegava o primeiro, entao um modal
+    residual fazia a automacao reusar a operacao anterior em vez de criar uma
+    nova — medido ao vivo: o contador Qtde.Titulo abria em 1 em vez de 0.
+    """
+    for _ in range(4):
+        aberto = await page.evaluate(
+            f"""() => !![...document.querySelectorAll('{MODAL}')].find(m => m.offsetParent)"""
+        )
+        if not aberto:
+            return
+        # tenta o X do modal; se nao houver, Escape
+        fechou = await page.evaluate(f"""() => {{
+            const ms = [...document.querySelectorAll('{MODAL}')].filter(m => m.offsetParent);
+            if (!ms.length) return false;
+            const m = ms[ms.length - 1];
+            const x = m.querySelector('.bx-fechar, .fa-xmark, .close, [class*="fechar"], [aria-label="Close"]');
+            if (x) {{ x.click(); return true; }}
+            return false;
+        }}""")
+        if not fechou:
+            await page.keyboard.press("Escape")
+        await page.wait_for_timeout(700)
+
+
 async def _abrir_modal_novo(page):
-    """Clica o 'Novo' da LISTAGEM (fora do modal) pra abrir o formulario."""
+    """Cria uma operacao nova clicando o 'Novo' da LISTAGEM.
+    Fecha modais residuais antes, senao pegaria o 'Novo' do formulario."""
+    await _fechar_modais_abertos(page)
     ok = await page.evaluate("""() => {
         for (const b of document.querySelectorAll('button')) {
             if (b.offsetParent && b.textContent.trim() === 'Novo') { b.click(); return true; }
@@ -478,6 +538,8 @@ async def preencher_titulo_gc(page, fatura, status):
         return "dry_run"
 
     # 4. Salvar (ancora #valo_titu, teto no modal — medido no nivel 3)
+    # Contagem ANTES: e' o que prova, depois, que o titulo entrou de verdade.
+    qtde_antes, linhas_antes = await _contar_titulos_gc(page)
     # Snapshot dos botoes de confirmacao ANTES do clique, pra depois saber
     # qual apareceu por causa do Salvar.
     try:
@@ -540,11 +602,39 @@ async def preencher_titulo_gc(page, fatura, status):
         return null;
     }""")
     except Exception as e:
-        log(f"  [INFO] Nao consegui checar erros pos-save ({str(e)[:60]}) — assumindo salvo")
+        log(f"  [INFO] Nao consegui ler mensagens de erro ({str(e)[:60]})")
         erro = None
     if erro:
         raise Exception(f"GC: titulo {numero} nao foi salvo — portal retornou: {erro}")
-    log(f"  [OK] Titulo {numero} salvo ({fatura.get('cliente_nome', '')[:35]})")
+
+    # 7. PROVA DE GRAVACAO: o contador da operacao tem que ter subido.
+    # Sem isso o codigo dizia "[OK] Titulo salvo" com base em nada: se o
+    # portal ficasse esperando uma confirmacao nao clicada, ou recusasse a
+    # validacao em silencio, a fatura era contada como digitada e a analista
+    # descobria o furo depois, digitando na mao.
+    entrou = False
+    ultimo = (qtde_antes, linhas_antes)
+    for _ in range(30):                       # 30 x 400ms = 12s
+        try:
+            await page.wait_for_timeout(400)
+            qd, ld = await _contar_titulos_gc(page)
+        except Exception:
+            continue
+        ultimo = (qd, ld)
+        subiu_qtde = (qtde_antes is not None and qd is not None and qd > qtde_antes)
+        subiu_linhas = (linhas_antes >= 0 and ld > linhas_antes)
+        if subiu_qtde or subiu_linhas:
+            entrou = True
+            break
+    if not entrou:
+        raise Exception(
+            f"GC: titulo {numero} NAO entrou na grid da operacao "
+            f"(Qtde.Titulo {qtde_antes}->{ultimo[0]}, linhas {linhas_antes}->{ultimo[1]}). "
+            f"Causas tipicas: confirmacao pendente nao clicada ou validacao "
+            f"recusada pelo portal. A fatura precisa ser digitada manualmente."
+        )
+    log(f"  [OK] Titulo {numero} confirmado na grid "
+        f"(Qtde.Titulo {qtde_antes}->{ultimo[0]}) — {fatura.get('cliente_nome', '')[:32]}")
     return "salvo"
 
 
@@ -573,7 +663,12 @@ async def _core_executar_gc_digitacao(page, faturas_selecao, sistema, status):
     await navegar_para_digitacao_gc(page, status)
     await _abrir_modal_novo(page)
     aba = await _ativar_aba_digitacao(page)
-    log(f"  [OK] Modal aberto, aba '{aba}' ativa")
+    q_ini, l_ini = await _contar_titulos_gc(page)
+    log(f"  [OK] Modal aberto, aba '{aba}' ativa (operacao inicia com "
+        f"Qtde.Titulo={q_ini}, {l_ini} linha(s))")
+    if (q_ini or 0) > 0:
+        log(f"  [WARN] A operacao NAO abriu vazia — pode ser uma operacao "
+            f"reaproveitada. Os titulos serao somados a ela.")
     if DRY_RUN:
         log("  [DRY-RUN] GC_DRY_RUN=1 — vou preencher mas NAO salvar nenhum titulo.")
 
