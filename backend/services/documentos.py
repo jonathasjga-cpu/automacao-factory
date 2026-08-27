@@ -529,99 +529,6 @@ async def _baixar_cte_de_meus_relatorios(
 
 # ─── SEPARACAO DE PDF AGRUPADO EM INDIVIDUAIS ────────────────────────────────
 
-def _separar_pdf_por_fatura(pdf_bytes: bytes, numeros: list[str], log) -> dict[str, bytes]:
-    """
-    Recebe o PDF agrupado (Modelo 10 do GW com todas as faturas) e retorna
-    um dict {numero_fatura: pdf_bytes_individual}.
-
-    Estratégia:
-    1. Lê todas as páginas do PDF
-    2. Para cada página, extrai texto e procura número de fatura (5-6 dígitos)
-    3. Agrupa páginas consecutivas que pertencem à mesma fatura
-    4. Salva cada grupo como PDF individual
-
-    Fallback: se não conseguir identificar fatura por página, divide
-    proporcionalmente (N páginas / N faturas).
-    """
-    try:
-        import io as _io
-        from pypdf import PdfReader, PdfWriter
-    except Exception as e:
-        log(f"  ⚠️ pypdf não disponível: {e} — pulando separação")
-        return {}
-
-    try:
-        reader = PdfReader(_io.BytesIO(pdf_bytes))
-    except Exception as e:
-        log(f"  ⚠️ Erro lendo PDF agrupado: {e}")
-        return {}
-
-    total_paginas = len(reader.pages)
-    if total_paginas == 0:
-        return {}
-
-    # Set normalizado dos números esperados (sem zeros à esquerda)
-    numeros_normalizados = {_normalizar(n): n for n in numeros}
-
-    # ── Estratégia 1: identifica fatura por página via texto ──
-    pagina_fatura: list[str | None] = []  # i-ésimo elemento = número da fatura naquela página
-    for i in range(total_paginas):
-        try:
-            texto = reader.pages[i].extract_text() or ""
-        except Exception:
-            texto = ""
-        # Procura padrões tipo "Número: 005028", "Fatura: 005028" ou só "005028/2026"
-        numero_pagina = None
-        # Procura todos os números 5-6 dígitos opcionalmente com /AAAA
-        candidatos = re.findall(r'(\d{5,6})(?:/\d{4})?', texto)
-        for c in candidatos:
-            norm_c = _normalizar(c)
-            if norm_c in numeros_normalizados:
-                numero_pagina = numeros_normalizados[norm_c]
-                break
-        pagina_fatura.append(numero_pagina)
-
-    # ── Estratégia 2 (fallback): se nenhuma página identificou fatura, divide proporcionalmente ──
-    if all(p is None for p in pagina_fatura):
-        log(f"  ⚠️ Não foi possível identificar fatura por página — dividindo proporcionalmente")
-        if total_paginas % len(numeros) != 0:
-            log(f"  ⚠️ {total_paginas} páginas / {len(numeros)} faturas — não divide exato. Pulando individuais.")
-            return {}
-        paginas_por_fatura = total_paginas // len(numeros)
-        for i in range(total_paginas):
-            idx_fatura = i // paginas_por_fatura
-            if idx_fatura < len(numeros):
-                pagina_fatura[i] = numeros[idx_fatura]
-
-    # ── Agrupa páginas consecutivas por fatura ──
-    grupos: dict[str, list[int]] = {}
-    fatura_atual = None
-    for i, num in enumerate(pagina_fatura):
-        if num is None:
-            # Página sem número identificado: assume que pertence à fatura anterior
-            if fatura_atual:
-                grupos.setdefault(fatura_atual, []).append(i)
-            continue
-        fatura_atual = num
-        grupos.setdefault(num, []).append(i)
-
-    # ── Gera PDF individual para cada grupo ──
-    resultado: dict[str, bytes] = {}
-    for num, paginas in grupos.items():
-        try:
-            writer = PdfWriter()
-            for p in paginas:
-                writer.add_page(reader.pages[p])
-            buf = _io.BytesIO()
-            writer.write(buf)
-            resultado[num] = buf.getvalue()
-        except Exception as e:
-            log(f"  ⚠️ Erro gerando PDF individual da fatura {num}: {e}")
-
-    log(f"  📄 Separação: {total_paginas} páginas → {len(resultado)} PDFs individuais")
-    return resultado
-
-
 # ─── FATURAS PDF ─────────────────────────────────────────────────────────────
 # Fluxo: /consultafatura?acao=iniciar
 #   → filtro Data de Emissão = hoje, filial
@@ -649,6 +556,162 @@ async def baixar_faturas_pdf(
             log(traceback.format_exc()[-600:])
         finally:
             await browser.close()
+
+
+async def _capturar_pdf_modelo10(page, context, log, rotulo: str = ""):
+    """Clica em 'imprimir PDF' e captura os bytes do PDF Modelo 10.
+
+    Assume que os checkboxes desejados JA estao marcados e o Modelo 10
+    selecionado. Extraida de _core_baixar_faturas_pdf pra poder ser chamada
+    varias vezes: uma pro PDF agrupado e uma por fatura (download individual).
+
+    Tres estrategias, na ordem: popup + route; aba nova navegando a URL do
+    window.open; fetch direto. Retorna bytes ou None.
+    """
+    _click_sel_fat = None
+    for _sel in [
+        'img#imprimirPDF',
+        'img.imagelink[id*="imprimir"]',
+        '[onclick*="popFatura"]',
+        'input[type="image"][src*="pdf"]',
+        'input[type="image"][src*="PDF"]',
+        'img[src*="pdf"]',
+        'input[type="image"]',
+    ]:
+        try:
+            if await page.locator(_sel).first.is_visible(timeout=600):
+                _click_sel_fat = _sel
+                break
+        except Exception:
+            continue
+
+    pdf_bytes = None
+    _pdf_fat_holder: dict = {"bytes": None}
+    pref = f"  {rotulo}" if rotulo else "  "
+
+    async def _ctx_rota_fat(route, request):
+        try:
+            resp = await route.fetch()
+            body = await resp.body()
+            if body and b"%PDF" in body[:10]:
+                _pdf_fat_holder["bytes"] = body
+                log(f"{pref}🎯 PDF interceptado: {len(body):,} bytes")
+            await route.fulfill(response=resp)
+        except Exception:
+            try:
+                await route.continue_()
+            except Exception:
+                pass
+
+    await context.route("**/*", _ctx_rota_fat)
+    popup_fat = None
+    popup_url_fat = ""
+    try:
+        await page.evaluate("""() => {
+            if (window._openHookInstalled) { window._capturedPopupUrls = []; return; }
+            window._capturedPopupUrls = [];
+            const _orig = window.open.bind(window);
+            window.open = function(u, ...rest) {
+                if (u) window._capturedPopupUrls.push(u);
+                return _orig(u, ...rest);
+            };
+            window._openHookInstalled = true;
+        }""")
+        try:
+            async with context.expect_page(timeout=8000) as _popup_fat_info:
+                if _click_sel_fat:
+                    await page.locator(_click_sel_fat).first.click()
+                else:
+                    await page.evaluate(
+                        "() => { if (typeof popFatura==='function') popFatura('1'); }"
+                    )
+            popup_fat = await _popup_fat_info.value
+            await _marcar_aba_automacao(popup_fat)
+            try:
+                await popup_fat.wait_for_url(
+                    lambda u: u not in ("about:blank", ""), timeout=20000)
+            except Exception:
+                pass
+            popup_url_fat = popup_fat.url
+        except Exception:
+            urls = await page.evaluate("() => window._capturedPopupUrls || []")
+            if urls:
+                popup_url_fat = urls[-1]
+
+        if popup_fat:
+            for _t in range(75):                     # 30s
+                await asyncio.sleep(0.4)
+                if _pdf_fat_holder.get("bytes"):
+                    break
+        pdf_bytes = _pdf_fat_holder.get("bytes")
+
+        if not pdf_bytes and popup_url_fat and "about:blank" not in popup_url_fat:
+            abs_url = popup_url_fat
+            if abs_url.startswith("/") or abs_url.startswith("./"):
+                abs_url = abs_url.lstrip("./")
+                if not abs_url.startswith("/"):
+                    abs_url = "/" + abs_url
+                abs_url = f"{BASE_GW}{abs_url}"
+            elif not abs_url.startswith("http"):
+                abs_url = f"{BASE_GW}/{abs_url}"
+
+            aba_pdf = None
+            try:
+                aba_pdf = await context.new_page()
+                await _marcar_aba_automacao(aba_pdf)
+                try:
+                    await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
+                except Exception:
+                    pass
+                for _t in range(75):
+                    await asyncio.sleep(0.4)
+                    if _pdf_fat_holder.get("bytes"):
+                        break
+                pdf_bytes = _pdf_fat_holder.get("bytes")
+            except Exception as e:
+                log(f"{pref}Erro aba nova: {e}")
+            finally:
+                if aba_pdf is not None:
+                    try:
+                        await aba_pdf.close()
+                    except Exception:
+                        pass
+
+            if not pdf_bytes:
+                try:
+                    resp_fat = await context.request.get(abs_url)
+                    body_fat = await resp_fat.body()
+                    if body_fat and b"%PDF" in body_fat[:10]:
+                        pdf_bytes = body_fat
+                except Exception as e:
+                    log(f"{pref}context.request: {e}")
+    except Exception as e:
+        log(f"{pref}Erro capturando PDF: {e}")
+    finally:
+        if popup_fat:
+            try:
+                await popup_fat.close()
+            except Exception:
+                pass
+        await context.unroute("**/*", _ctx_rota_fat)
+
+    if pdf_bytes and b"%PDF" in pdf_bytes[:10]:
+        return pdf_bytes
+    return None
+
+
+async def _marcar_somente(page, cb_id: str) -> int:
+    """Deixa marcado APENAS o checkbox cb_id. Retorna quantos ficaram marcados."""
+    return await page.evaluate(r"""(alvo) => {
+        let n = 0;
+        for (const cb of document.querySelectorAll('input[id^="ck"]')) {
+            if (!/^ck\d+$/.test(cb.id)) continue;
+            const querido = (cb.id === alvo);
+            if (cb.checked !== querido) cb.click();
+            if (cb.checked) n++;
+        }
+        return n;
+    }""", cb_id)
 
 
 async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
@@ -926,168 +989,8 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     }""")
                     log(f"  Modelo 10: {modelo_ok}")
 
-                    # ── Captura PDF da fatura ─────────────────────────────────────────
-                    # context.route() instalado ANTES do clique elimina race condition:
-                    # o PDF é interceptado mesmo que o Chrome o carregue instantaneamente.
-
-                    # Botão imprimir PDF confirmado pelo inspetor: img#imprimirPDF.imagelink
-                    _click_sel_fat = None
-                    for _sel in [
-                        'img#imprimirPDF',
-                        'img.imagelink[id*="imprimir"]',
-                        '[onclick*="popFatura"]',
-                        'input[type="image"][src*="pdf"]',
-                        'input[type="image"][src*="PDF"]',
-                        'img[src*="pdf"]',
-                        'input[type="image"]',
-                    ]:
-                        try:
-                            if await page.locator(_sel).first.is_visible(timeout=600):
-                                _click_sel_fat = _sel
-                                break
-                        except Exception:
-                            continue
-
-                    pdf_bytes = None
-                    _pdf_fat_holder: dict = {"bytes": None}
-
-                    async def _ctx_rota_fat(route, request):
-                        try:
-                            resp = await route.fetch()
-                            body = await resp.body()
-                            if body and b"%PDF" in body[:10]:
-                                _pdf_fat_holder["bytes"] = body
-                                log(f"  🎯 Fatura PDF interceptado: {len(body):,} bytes")
-                            await route.fulfill(response=resp)
-                        except Exception:
-                            try:
-                                await route.continue_()
-                            except Exception:
-                                pass
-
-                    # Instala route no contexto antes do clique — cobre popup desde o primeiro request
-                    await context.route("**/*", _ctx_rota_fat)
-                    popup_fat = None
-                    popup_url_fat = ""
-                    try:
-                        # Hook NÃO-BLOQUEANTE: captura a URL E chama window.open original.
-                        # Assim o popup abre normalmente (quando possível) e temos fallback.
-                        await page.evaluate("""() => {
-                            if (window._openHookInstalled) {
-                                window._capturedPopupUrls = [];
-                                return;
-                            }
-                            window._capturedPopupUrls = [];
-                            const _orig = window.open.bind(window);
-                            window.open = function(u, ...rest) {
-                                if (u) window._capturedPopupUrls.push(u);
-                                return _orig(u, ...rest);
-                            };
-                            window._openHookInstalled = true;
-                        }""")
-
-                        # Estratégia 1: expect_page pro caso do popup funcionar (fluxo original)
-                        try:
-                            async with context.expect_page(timeout=8000) as _popup_fat_info:
-                                if _click_sel_fat:
-                                    await page.locator(_click_sel_fat).first.click()
-                                    log(f"  Clicou: {_click_sel_fat}")
-                                else:
-                                    await page.evaluate(
-                                        "() => { if (typeof popFatura==='function') popFatura('1'); }"
-                                    )
-                                    log("  Clique: popFatura JS (fallback)")
-                            popup_fat = await _popup_fat_info.value
-                            await _marcar_aba_automacao(popup_fat)
-                            try:
-                                await popup_fat.wait_for_url(
-                                    lambda u: u not in ("about:blank", ""),
-                                    timeout=20000,
-                                )
-                            except Exception:
-                                pass
-                            popup_url_fat = popup_fat.url
-                            log(f"  Popup URL: {popup_url_fat[:80]}")
-                        except Exception:
-                            # Popup não abriu (headless). Usa a URL capturada via window.open hook.
-                            log("  Popup não abriu; tentando URL capturada de window.open")
-                            urls = await page.evaluate("() => window._capturedPopupUrls || []")
-                            if urls:
-                                popup_url_fat = urls[-1]
-                                log(f"  URL via window.open: {popup_url_fat[:80]}")
-
-                        # Aguarda route interceptar o PDF (se popup abriu e fez request)
-                        # Poll fino — sai imediatamente quando o PDF chega
-                        if popup_fat:
-                            for _t in range(75):  # 75 × 0.4s = 30s
-                                await asyncio.sleep(0.4)
-                                if _pdf_fat_holder.get("bytes"):
-                                    break
-                        pdf_bytes = _pdf_fat_holder.get("bytes")
-
-                        # Fallback: navega a URL em uma ABA nova do contexto.
-                        # Em headless o popup não abre, mas uma page criada manualmente
-                        # faz a mesma navegação, disparando route handler e redirect p/ S3.
-                        if not pdf_bytes and popup_url_fat and "about:blank" not in popup_url_fat:
-                            abs_url = popup_url_fat
-                            if abs_url.startswith("/") or abs_url.startswith("./"):
-                                abs_url = abs_url.lstrip("./")
-                                if not abs_url.startswith("/"):
-                                    abs_url = "/" + abs_url
-                                abs_url = f"{BASE_GW}{abs_url}"
-                            elif not abs_url.startswith("http"):
-                                abs_url = f"{BASE_GW}/{abs_url}"
-
-                            # Estratégia 2: abre uma aba nova e navega — equivalente ao popup
-                            aba_pdf = None
-                            try:
-                                aba_pdf = await context.new_page()
-                                await _marcar_aba_automacao(aba_pdf)
-                                try:
-                                    await aba_pdf.goto(abs_url, wait_until="load", timeout=30000)
-                                except Exception:
-                                    pass
-                                for _t in range(75):  # 75 × 0.4s = 30s
-                                    await asyncio.sleep(0.4)
-                                    if _pdf_fat_holder.get("bytes"):
-                                        break
-                                pdf_bytes = _pdf_fat_holder.get("bytes")
-                                if pdf_bytes:
-                                    log(f"  ✅ PDF via nova aba: {len(pdf_bytes):,} bytes")
-                            except Exception as e:
-                                log(f"  Erro aba nova: {e}")
-                            finally:
-                                # Fecha SEMPRE — exceção no meio deixava a aba órfã
-                                # acumulando no Chrome do usuário.
-                                if aba_pdf is not None:
-                                    try:
-                                        await aba_pdf.close()
-                                    except Exception:
-                                        pass
-
-                            # Estratégia 3: fetch direto (último recurso)
-                            if not pdf_bytes:
-                                try:
-                                    resp_fat = await context.request.get(abs_url)
-                                    body_fat = await resp_fat.body()
-                                    log(f"  context.request status={resp_fat.status}, size={len(body_fat)}")
-                                    if body_fat and b"%PDF" in body_fat[:10]:
-                                        pdf_bytes = body_fat
-                                        log(f"  ✅ PDF via context.request: {len(pdf_bytes):,} bytes")
-                                except Exception as e:
-                                    log(f"  context.request: {e}")
-
-                    except Exception as e:
-                        log(f"  Erro capturando fatura PDF: {e}")
-                    finally:
-                        # Fecha o popup SEMPRE (antes fechava só no caminho feliz —
-                        # exceção deixava a aba órfã acumulando no Chrome).
-                        if popup_fat:
-                            try:
-                                await popup_fat.close()
-                            except Exception:
-                                pass
-                        await context.unroute("**/*", _ctx_rota_fat)
+                    # ── Captura o PDF AGRUPADO (todas as faturas marcadas) ──
+                    pdf_bytes = await _capturar_pdf_modelo10(page, context, log, "[agrupado] ")
 
                     if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
                         log(f"  ⚠️ PDF de fatura não capturado — {nome_factory}")
@@ -1105,9 +1008,39 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     _salvar_arquivo_seguro(status, nome_arquivo, pdf_bytes, log)
                     log(f"  ✅ Salvo: {nome_arquivo} ({len(pdf_bytes):,} bytes)")
 
-                    # ── Separa o PDF agrupado em PDFs INDIVIDUAIS e empacota num ZIP ──
-                    # Cada fatura vira um PDF proprio dentro do ZIP — mesmo padrao dos CTes.
-                    pdfs_individuais = _separar_pdf_por_fatura(pdf_bytes, nums_marcados, log)
+                    # ── PDFs INDIVIDUAIS: baixa UM POR FATURA direto do GW ──
+                    # NAO fatia mais o PDF agrupado. Fatiar por pagina estava
+                    # errado por construcao: uma fatura pode ter varias paginas,
+                    # e o fallback "N paginas / N faturas" dividia cego, gerando
+                    # arquivo com o conteudo de outra fatura. A identificacao por
+                    # texto tambem era fragil — o regex pegava qualquer numero de
+                    # 5-6 digitos da pagina (valor, nosso numero, CNPJ, codigo de
+                    # barras) e podia casar com o numero de outra fatura.
+                    # Agora: marca UM checkbox por vez e imprime. Custa N
+                    # downloads a mais, mas cada arquivo vem do proprio GW com o
+                    # numero certo — sem heuristica nenhuma.
+                    pdfs_individuais: dict[str, bytes] = {}
+                    log(f"  📎 Baixando {len(ids_marcar)} boleto(s) individual(is) do GW...")
+                    for _cb_id, _num in ids_marcar:
+                        try:
+                            n_marc = await _marcar_somente(page, _cb_id)
+                            if n_marc != 1:
+                                log(f"     ⚠️ {_num}: esperava 1 marcado, ficaram {n_marc} — pulando")
+                                continue
+                            await page.wait_for_timeout(350)
+                            b_ind = await _capturar_pdf_modelo10(
+                                page, context, log, f"[{_num}] ")
+                            if b_ind:
+                                pdfs_individuais[_num] = b_ind
+                                log(f"     ✅ {_num}: {len(b_ind):,} bytes")
+                            else:
+                                log(f"     ⚠️ {_num}: PDF individual nao capturado")
+                        except Exception as e_ind:
+                            log(f"     ⚠️ {_num}: erro no individual — {str(e_ind)[:90]}")
+                    faltaram_ind = [n for _c, n in ids_marcar if n not in pdfs_individuais]
+                    if faltaram_ind:
+                        log(f"  ⚠️ Sem PDF individual: {faltaram_ind}")
+
                     zip_individuais_nome = None
                     if pdfs_individuais:
                         zip_individuais_nome = f"Faturas separadas - {nome_factory} - {_hoje_fmt()}.zip"
@@ -1127,6 +1060,7 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         "faturas_faltando": faltando,
                         "zip_individuais": zip_individuais_nome,
                         "individuais_qtd": len(pdfs_individuais),
+                        "individuais_faltando": faltaram_ind,
                     }
 
                 except Exception as e:
