@@ -56,9 +56,6 @@ class ProgressoBody(BaseModel):
     feito: int = 0
     total: int = 0
     desc: str = ""
-    # Logs detalhados enviados DURANTE a execucao. Antes so chegavam no fim,
-    # e uma factory longa parecia travada sem ter feito login.
-    logs: Optional[list] = None
 
 
 @router.post("/progresso/{ordem_id}")
@@ -77,13 +74,8 @@ def progresso(ordem_id: str, body: ProgressoBody, _=Depends(_verificar_token)):
             op = status_operacoes.get(op_id)
             if op is not None:
                 logs = op.setdefault("logs", [])
-                # Logs detalhados do motor primeiro (ordem cronologica)
-                for l in (body.logs or []):
-                    txt = str(l)[:400]
-                    if not logs or logs[-1] != txt:
-                        logs.append(txt)
-                # Depois a linha de progresso, se mudou
-                if body.desc and (not logs or logs[-1] != body.desc):
+                # Evita spam: so adiciona se mudou do ultimo
+                if not logs or logs[-1] != body.desc:
                     logs.append(body.desc)
     except Exception:
         pass  # nunca deixar isso quebrar o endpoint
@@ -144,14 +136,9 @@ def _injetar_resultado_em_operacao(ordem_id: str, resultado: dict) -> None:
     tipo = o.get("tipo", "")
     resultado = resultado or {}
 
-    # Logs acumulam SEM duplicar: a maior parte deles ja subiu durante a
-    # execucao via /progresso (logs em tempo real). Adiciona so os que ainda
-    # nao estao na cauda recente — senao o painel mostrava tudo em dobro.
+    # Logs sempre acumula
     if resultado.get("logs"):
-        existentes = op.setdefault("logs", [])
-        novos = [str(x) for x in resultado["logs"]]
-        janela = set(existentes[-(len(novos) + 80):])
-        op["logs"].extend([l for l in novos if l not in janela])
+        op.setdefault("logs", []).extend(resultado["logs"])
     if resultado.get("erros"):
         op.setdefault("erros", []).extend(resultado["erros"])
     if resultado.get("erro"):

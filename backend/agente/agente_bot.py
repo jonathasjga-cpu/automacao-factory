@@ -236,21 +236,14 @@ def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, s
                     raw = prog_file.read_text(encoding="utf-8").strip()
                     if raw:
                         p = json.loads(raw)
-                        logs_novos = p.get("logs") or []
                         key = f'{p.get("feito")}/{p.get("total")}: {p.get("desc")}'
-                        # Envia se o progresso mudou OU se ha logs novos — sem a
-                        # 2a condicao, os logs detalhados de uma factory longa
-                        # ficavam presos ate o progresso mudar de sistema.
-                        if key != ultimo_prog or logs_novos:
-                            corpo = {
-                                "feito": int(p.get("feito", 0)),
-                                "total": int(p.get("total", 0)),
-                                "desc": str(p.get("desc", "")),
-                            }
-                            if logs_novos:
-                                corpo["logs"] = [str(x)[:400] for x in logs_novos][-40:]
+                        if key != ultimo_prog:
                             _http("POST", f"{panel_url}/api/agente/progresso/{ordem['id']}",
-                                  token, body=corpo)
+                                  token, body={
+                                      "feito": int(p.get("feito", 0)),
+                                      "total": int(p.get("total", 0)),
+                                      "desc": str(p.get("desc", "")),
+                                  })
                             ultimo_prog = key
             except Exception as e:
                 print(f"[AGENTE] leitura progresso falhou: {e}")

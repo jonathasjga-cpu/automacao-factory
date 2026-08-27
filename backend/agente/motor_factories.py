@@ -65,31 +65,12 @@ def main():
     for sist, lst in faturas_por_factory_raw.items():
         faturas_por_factory_selecao[sist] = [_to_fatura_selecao({"numero": f.get("numero"), "factory": sist}) for f in lst if isinstance(f, dict)]
 
-    # `status` e' criado abaixo; o report precisa ler os logs dele em tempo real,
-    # entao guardamos a referencia numa caixa mutavel.
-    _ref: dict = {"status": None, "enviados": 0}
-
     def report(feito: int, total: int, desc: str):
-        """Grava progresso E os logs novos acumulados desde a ultima chamada.
-
-        Antes o painel so recebia `desc` ("iniciando firma_sp..."), e os logs
-        detalhados ([LOGIN], [DIR], [OK] Titulo salvo) chegavam SO no fim da
-        ordem — durante a execucao parecia que a automacao estava travada sem
-        ter feito login. Agora os logs sobem junto com o progresso.
-        """
-        payload = {"feito": feito, "total": total, "desc": desc}
         try:
-            st = _ref.get("status")
-            if st is not None:
-                logs = st.get("logs") or []
-                novos = logs[_ref["enviados"]:]
-                if novos:
-                    _ref["enviados"] = len(logs)
-                    payload["logs"] = novos[-40:]     # teto por envio
-        except Exception:
-            pass
-        try:
-            prog_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            prog_file.write_text(
+                json.dumps({"feito": feito, "total": total, "desc": desc}, ensure_ascii=False),
+                encoding="utf-8",
+            )
         except Exception:
             pass
 
@@ -107,7 +88,6 @@ def main():
             "usuario_id": None,
             "factories": {},
         }
-        _ref["status"] = status          # a partir daqui o report envia os logs
         from services.factories_attach import executar_factories_attach
         asyncio.run(executar_factories_attach(
             faturas_por_factory_selecao=faturas_por_factory_selecao,
