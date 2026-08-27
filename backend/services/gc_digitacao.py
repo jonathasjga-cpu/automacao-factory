@@ -87,22 +87,56 @@ JS_CLICAR_BOTAO_DO_FORM = """
 }
 """
 
-# Botoes de CONFIRMACAO (Sim/Ok) vivem no ULTIMO modal visivel — escopo
-# diferente do formulario. Misturar os dois e' como se clica no botao errado.
-JS_CLICAR_CONFIRMACAO = """
-(texto) => {
-    const modais = [...document.querySelectorAll('.modal-interna-fundo')].filter(m => m.offsetParent);
-    const escopos = modais.length ? [modais[modais.length - 1]] : [document.body];
-    for (const esc of escopos) {
-        for (const b of esc.querySelectorAll('button, input[type=button], input[type=submit]')) {
-            if (!b.offsetParent) continue;
-            const t = (b.textContent || b.value || '').trim();
-            if (t === texto) { b.click(); return true; }
-        }
+# Snapshot dos botoes de confirmacao VISIVEIS agora. Usado pra diferenciar
+# "botao que ja estava na tela" de "botao que apareceu por causa do Salvar" —
+# sem isso, clicar em qualquer "Ok" da tela seria perigoso.
+JS_SNAPSHOT_CONFIRMACAO = r"""
+(textos) => {
+    const alvos = textos.map(t => t.toLowerCase());
+    const out = [];
+    for (const b of document.querySelectorAll('button, input[type=button], input[type=submit], a')) {
+        if (!b.offsetParent) continue;
+        const t = (b.textContent || b.value || '').trim().toLowerCase();
+        if (!alvos.includes(t)) continue;
+        const r = b.getBoundingClientRect();
+        out.push(t + '@' + Math.round(r.top) + ',' + Math.round(r.left));
     }
-    return false;
+    return out;
 }
 """
+
+# Clica no botao de confirmacao que NAO estava no snapshot. Varre o documento
+# inteiro — a GC aninha 4 niveis de modal (modal-interna-fundo > modal-interna
+# > modal-cabecalho > modal-conteudo, medido em debug_gc_popup_sacado.json) e a
+# confirmacao pode vir em qualquer um deles ou fora. Prioriza maior z-index.
+JS_CLICAR_CONFIRMACAO_NOVA = r"""
+(args) => {
+    const alvos = args.textos.map(t => t.toLowerCase());
+    const antes = new Set(args.antes || []);
+    const cands = [];
+    for (const b of document.querySelectorAll('button, input[type=button], input[type=submit], a')) {
+        if (!b.offsetParent) continue;
+        const t = (b.textContent || b.value || '').trim().toLowerCase();
+        if (!alvos.includes(t)) continue;
+        const r = b.getBoundingClientRect();
+        const chave = t + '@' + Math.round(r.top) + ',' + Math.round(r.left);
+        if (antes.has(chave)) continue;          // ja estava la antes do Salvar
+        let z = 0, el = b;
+        while (el && el !== document.body) {
+            const zi = parseInt(getComputedStyle(el).zIndex, 10);
+            if (!isNaN(zi) && zi > z) z = zi;
+            el = el.parentElement;
+        }
+        cands.push({b: b, z: z, y: r.top, texto: t, chave: chave});
+    }
+    if (!cands.length) return null;
+    cands.sort((a, c) => c.z - a.z || c.y - a.y);
+    cands[0].b.click();
+    return {texto: cands[0].texto, z: cands[0].z, chave: cands[0].chave, n_cands: cands.length};
+}
+"""
+
+TEXTOS_CONFIRMACAO = ["sim", "ok", "confirmar", "confirma", "yes"]
 
 JS_ATIVAR_ABA = """
 (nomes) => {
@@ -283,23 +317,36 @@ async def cadastrar_sacado_gc(page, cnpj_limpo, fatura, status):
         pass
 
     # Salvar do POPUP: ancora em #iden, teto no modal do popup
+    try:
+        snap_pop = await page.evaluate(JS_SNAPSHOT_CONFIRMACAO, TEXTOS_CONFIRMACAO)
+    except Exception:
+        snap_pop = []
     res = await page.evaluate(JS_CLICAR_BOTAO_DO_FORM,
                               {"ancora": "iden", "modal": MODAL, "texto": "Salvar"})
     log(f"  [INFO] Salvar do cadastro de sacado: {res}")
     if res in ("nao_encontrado", "ancora_nao_existe"):
         raise Exception(f"GC: nao achei o botao Salvar do popup de cadastro ({res})")
 
-    # Resposta: "Confirma salvar?" ou "CNPJ/CPF Invalido"
-    await page.wait_for_timeout(700)
-    corpo = await page.evaluate("() => document.body.innerText || ''")
-    if re.search(r"CNPJ/CPF\s*Inv", corpo, re.I):
-        await page.evaluate(JS_CLICAR_CONFIRMACAO, "Ok")
-        raise Exception(
-            f"GC: CNPJ {cnpj_limpo} rejeitado como invalido pelo portal — "
-            f"verifique os digitos verificadores na planilha"
-        )
-    if "confirma salvar" in corpo.lower():
-        await page.evaluate(JS_CLICAR_CONFIRMACAO, "Sim")
+    # Resposta: confirmacao (texto varia) ou "CNPJ/CPF Invalido".
+    # Mesma estrategia do titulo: procura o botao que APARECEU, sem depender
+    # de um texto especifico do portal.
+    confirmou_pop = None
+    for _ in range(CONFIRMA_POLLS):
+        await page.wait_for_timeout(200)
+        corpo = await page.evaluate("() => document.body.innerText || ''")
+        if re.search(r"CNPJ/CPF\s*Inv", corpo, re.I):
+            await page.evaluate(JS_CLICAR_CONFIRMACAO_NOVA,
+                                {"textos": ["ok"], "antes": []})
+            raise Exception(
+                f"GC: CNPJ {cnpj_limpo} rejeitado como invalido pelo portal — "
+                f"verifique os digitos verificadores na planilha"
+            )
+        r = await page.evaluate(JS_CLICAR_CONFIRMACAO_NOVA,
+                                {"textos": TEXTOS_CONFIRMACAO, "antes": snap_pop})
+        if r:
+            confirmou_pop = r
+            log(f"  [INFO] Confirmacao do cadastro clicada: '{r['texto']}'")
+            break
 
     # Espera o popup fechar
     for _ in range(40):
@@ -431,24 +478,56 @@ async def preencher_titulo_gc(page, fatura, status):
         return "dry_run"
 
     # 4. Salvar (ancora #valo_titu, teto no modal — medido no nivel 3)
+    # Snapshot dos botoes de confirmacao ANTES do clique, pra depois saber
+    # qual apareceu por causa do Salvar.
+    try:
+        snap_conf = await page.evaluate(JS_SNAPSHOT_CONFIRMACAO, TEXTOS_CONFIRMACAO)
+    except Exception:
+        snap_conf = []
     res = await page.evaluate(JS_CLICAR_BOTAO_DO_FORM,
                               {"ancora": "valo_titu", "modal": MODAL, "texto": "Salvar"})
     log(f"  [INFO] Salvar do titulo: {res}")
     if res in ("nao_encontrado", "ancora_nao_existe"):
         raise Exception(f"GC: nao achei o botao Salvar do formulario ({res})")
 
-    # 5. "Confirma salvar?" — DOM (sondagem: nenhum dialogo nativo)
+    # 5. Confirmacao pos-save.
+    # NAO depende mais do texto "confirma salvar": medido ao vivo, a GC nem
+    # sempre mostra esse texto, e quando mostra pode ser em outro container.
+    # Agora clica qualquer botao de confirmacao que APARECEU depois do Salvar
+    # (diff contra o snapshot), em qualquer nivel do DOM, maior z-index primeiro.
+    # IMPORTANTE: daqui pra baixo o titulo JA FOI enviado ao portal. Qualquer
+    # falha aqui e' de LEITURA, nao de gravacao — nunca deve marcar a fatura
+    # como nao-digitada. Era a causa do "PARCIAL 9/11" com 11 titulos salvos
+    # na GC: o portal recarrega a tabela depois do Salvar, o page.evaluate do
+    # poll morria com "Execution context was destroyed", virava excecao e a
+    # fatura entrava em erros() mesmo tendo sido gravada.
+    confirmou = None
     for _ in range(CONFIRMA_POLLS):
-        await page.wait_for_timeout(200)
-        corpo = await page.evaluate("() => document.body.innerText || ''")
-        if "confirma salvar" in corpo.lower():
-            if await page.evaluate(JS_CLICAR_CONFIRMACAO, "Sim"):
-                log("  [INFO] Confirmacao 'Sim' aceita")
-                break
-    await page.wait_for_timeout(900)
+        try:
+            await page.wait_for_timeout(200)
+            r = await page.evaluate(JS_CLICAR_CONFIRMACAO_NOVA,
+                                    {"textos": TEXTOS_CONFIRMACAO, "antes": snap_conf})
+        except Exception as e:
+            # contexto destruido = o portal navegou/recarregou apos salvar
+            log(f"  [INFO] Pagina recarregou durante a confirmacao ({str(e)[:60]}) — segue")
+            break
+        if r:
+            confirmou = r
+            log(f"  [INFO] Confirmacao clicada: '{r['texto']}' (z={r['z']})")
+            break
+    if confirmou is None:
+        log("  [INFO] Nenhuma confirmacao apareceu (portal salvou direto)")
+    try:
+        await page.wait_for_timeout(900)
+    except Exception:
+        pass
 
-    # 6. Erro de validacao pos-save
-    erro = await page.evaluate("""() => {
+    # 6. Erro de validacao pos-save. Se a LEITURA falhar (contexto destruido),
+    # trata como "sem erro": o titulo ja foi enviado e a operacao na GC e' a
+    # fonte da verdade — inventar um erro aqui subnotifica o que foi digitado.
+    erro = None
+    try:
+        erro = await page.evaluate("""() => {
         const sels = ['.alert-danger','.error','.msg-erro','[class*="erro"]',
                       '[class*="error"]','.toast-error','.notification-error'];
         for (const s of sels) {
@@ -460,6 +539,9 @@ async def preencher_titulo_gc(page, fatura, status):
         }
         return null;
     }""")
+    except Exception as e:
+        log(f"  [INFO] Nao consegui checar erros pos-save ({str(e)[:60]}) — assumindo salvo")
+        erro = None
     if erro:
         raise Exception(f"GC: titulo {numero} nao foi salvo — portal retornou: {erro}")
     log(f"  [OK] Titulo {numero} salvo ({fatura.get('cliente_nome', '')[:35]})")
@@ -496,11 +578,16 @@ async def _core_executar_gc_digitacao(page, faturas_selecao, sistema, status):
         log("  [DRY-RUN] GC_DRY_RUN=1 — vou preencher mas NAO salvar nenhum titulo.")
 
     total = len(faturas_selecao)
+    # Rastreia QUAIS faturas nao entraram e por que. Antes o resumo dizia so
+    # "PARCIAL: 9/11" e era impossivel saber quais 2 faltaram sem ler o log
+    # inteiro — e faturas sem dados no cache nem geravam erro.
+    falhas: list = []
     for idx, sel in enumerate(faturas_selecao):
         numero = getattr(sel, "numero", None) or (sel.get("numero") if isinstance(sel, dict) else None)
         fatura = faturas_dados.get(numero)
         if not fatura:
-            log(f"  [WARN] Dados nao encontrados para fatura {numero}")
+            log(f"  [WARN] Fatura {numero}: dados nao encontrados no cache — PULADA")
+            falhas.append((numero, "sem dados no cache (nao veio do carregamento de faturas)"))
             continue
         log(f"[{idx + 1}/{total}] Digitando fatura {numero} - {fatura.get('cliente_nome', '')[:35]}...")
 
@@ -535,6 +622,7 @@ async def _core_executar_gc_digitacao(page, faturas_selecao, sistema, status):
         except Exception as e:
             log(f"  [ERR] Fatura {numero}: {str(e)[:220]}")
             status.setdefault("erros", []).append(f"GC {sistema} fatura {numero}: {str(e)[:200]}")
+            falhas.append((numero, str(e)[:160]))
 
     if dialogos:
         status.setdefault("erros", []).append(
@@ -576,4 +664,16 @@ async def _core_executar_gc_digitacao(page, faturas_selecao, sistema, status):
         log(f"[OK] GC {sistema} — {feitas}/{total} titulo(s) digitado(s).")
     else:
         log(f"[WARN] GC {sistema} — PARCIAL: {feitas}/{total} titulo(s) digitado(s).")
+        # Lista NOMINALMENTE o que faltou — sem isso o "9/11" nao dizia quais.
+        if falhas:
+            for num, motivo in falhas:
+                log(f"     ↳ fatura {num} NAO digitada: {motivo}")
+        nao_contabilizadas = total - feitas - len(falhas)
+        if nao_contabilizadas > 0:
+            log(f"     ↳ {nao_contabilizadas} fatura(s) sem motivo registrado "
+                f"(possivel interrupcao no meio do lote)")
+        msg = f"GC {sistema}: {feitas}/{total} titulo(s) digitado(s)."
+        if falhas:
+            msg += " Faltaram: " + ", ".join(str(n) for n, _ in falhas)
+        status.setdefault("erros", []).append(msg)
     return status
