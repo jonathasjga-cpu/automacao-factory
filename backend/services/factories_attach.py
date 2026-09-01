@@ -151,6 +151,11 @@ async def executar_factory_attach(
                 # GC_MODO=remessa: fluxo antigo (.rem + Importar Leiaute), mantido
                 # como rollback de 1 minuto sem precisar de deploy.
                 gc_modo = os.getenv("GC_MODO", "digitacao").strip().lower()
+                if gc_modo == "remessa":
+                    # A GC migrou pro SIFAC em 27/08/2026 e o FactaConsult saiu
+                    # do ar. O modo remessa so serve pra historico.
+                    log("  ⚠️ GC_MODO=remessa aponta pro portal ANTIGO (FactaConsult), "
+                        "que foi desativado. Use o modo digitacao (SIFAC).")
                 numeros = [sel.numero for sel in faturas_selecao]
                 caminho_rem = None
                 if gc_modo == "remessa":
@@ -168,41 +173,19 @@ async def executar_factory_attach(
                         return {"sistema": sistema}
 
                 # ── Aba + login do portal GC (comum aos dois modos) ──
+                # A GC migrou do FactaConsult (gcrecursos.dyndns.org:9000) pro
+                # SIFAC (app.sifacweb.com.br). Dominio novo, login novo.
+                from services.gc_sifac import BASE_SIFAC, fazer_login_sifac
                 ctx_gc, page_gc, nova_gc = await _abrir_aba_automacao(
-                    browser,
-                    "gcrecursos.dyndns.org",
-                    "http://gcrecursos.dyndns.org:9000/FactaConsult",
+                    browser, "sifacweb.com.br", f"{BASE_SIFAC}/Login",
                 )
                 if nova_gc:
                     abas_criadas.append(page_gc)
-                # Matriz e SP compartilham dominio: se a sessao da unidade
-                # anterior ainda esta viva, /login redireciona pro sistema e o
-                # fazer_login_gc estoura timeout esperando o campo #Email.
-                try:
-                    await page_gc.goto(
-                        "http://gcrecursos.dyndns.org:9000/FactaConsult/login",
-                        wait_until="domcontentloaded", timeout=90000,
-                    )
-                    await page_gc.wait_for_load_state("networkidle", timeout=10000)
-                except Exception:
-                    pass
-                if "login" not in (page_gc.url or "").lower():
-                    log(f"  [LOGIN] GC ja tinha sessao ativa — limpando pra logar como {sistema}...")
-                    from services.cdp_tabs import limpar_sessao_dominio
-                    await limpar_sessao_dominio(page_gc, "gcrecursos.dyndns.org")
-                # Guard de credencial: erro claro em vez de timeout no #Email
-                try:
-                    from config_manager import get_credencial as _gc_cred
-                    _c = _gc_cred(sistema) or {}
-                    if not (_c.get("usuario") or "").strip() or not (_c.get("senha") or ""):
-                        raise Exception(
-                            f"Credenciais da GC ({sistema}) nao cadastradas. Acesse "
-                            f"Configuracoes e salve usuario/senha antes de operar."
-                        )
-                except ImportError:
-                    pass
-                log(f"  [LOGIN] GC {sistema} — forcando login com credencial da filial...")
-                await fazer_login_gc(page_gc, sistema)
+                # fazer_login_sifac ja trata sessao de outra filial (limpa e
+                # reloga) e valida a credencial — inclusive avisa se ainda
+                # estiver cadastrada a do portal ANTIGO.
+                log(f"  [LOGIN] SIFAC {sistema} — entrando com a credencial da filial...")
+                await fazer_login_sifac(page_gc, sistema, status)
 
                 # ── ETAPA 2 — operar no portal ──
                 if gc_modo == "remessa":
@@ -212,8 +195,8 @@ async def executar_factory_attach(
                         caminho_rem, numeros, len(numeros))
                 else:
                     report(1, 3, f"GC {sistema} — digitando titulos...")
-                    from services.gc_digitacao import _core_executar_gc_digitacao
-                    await _core_executar_gc_digitacao(page_gc, faturas_selecao, sistema, status)
+                    from services.gc_sifac import _core_executar_gc_sifac
+                    await _core_executar_gc_sifac(page_gc, faturas_selecao, sistema, status)
                 report(2, 3, f"GC {sistema} concluida")
 
             else:

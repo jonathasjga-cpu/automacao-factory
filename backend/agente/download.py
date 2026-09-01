@@ -139,6 +139,7 @@ _ARQUIVOS_VERSAO = [
     ("services/fluxasset_automation.py", SERVICES_DIR / "fluxasset_automation.py"),
     ("services/gc_automation.py",        SERVICES_DIR / "gc_automation.py"),
     ("services/gc_digitacao.py",         SERVICES_DIR / "gc_digitacao.py"),
+    ("services/gc_sifac.py",             SERVICES_DIR / "gc_sifac.py"),
     ("services/factories_attach.py",     SERVICES_DIR / "factories_attach.py"),
 ]
 
@@ -223,6 +224,8 @@ def download(request: Request):
                     _read(SERVICES_DIR / "gc_automation.py"))
         zf.writestr("services/gc_digitacao.py",
                     _read(SERVICES_DIR / "gc_digitacao.py"))
+        zf.writestr("services/gc_sifac.py",
+                    _read(SERVICES_DIR / "gc_sifac.py"))
         zf.writestr("services/factories_attach.py",
                     _read(SERVICES_DIR / "factories_attach.py"))
 
