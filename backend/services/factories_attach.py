@@ -34,7 +34,7 @@ def _sistema_para_url(sistema: str) -> str:
     if sistema.startswith("fluxasset"):
         return "portal.fluxasset.com.br"
     if sistema.startswith("gc"):
-        return "gcrecursos.dyndns.org"
+        return "sifacweb.com.br"
     return ""
 
 

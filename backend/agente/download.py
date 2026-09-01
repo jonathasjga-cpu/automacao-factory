@@ -126,6 +126,12 @@ _ARQUIVOS_VERSAO = [
     # install.ps1 entra no hash: quando as dependencias mudam (ex: pypdf), o
     # painel precisa avisar pra baixar o pacote novo e rodar '1 - INSTALAR'.
     ("pacote/install.ps1",               PACOTE_DIR / "install.ps1"),
+    # Os .bat tambem entram: quando uma URL de portal muda (ex: a GC saiu do
+    # FactaConsult pro SIFAC), so o .bat muda — sem isso o painel nao marcava
+    # "desatualizado" e o usuario seguia abrindo o Chrome no dominio morto.
+    ("pacote/1 - INSTALAR.bat",          PACOTE_DIR / "1 - INSTALAR.bat"),
+    ("pacote/2 - ABRIR CHROME.bat",      PACOTE_DIR / "2 - ABRIR CHROME.bat"),
+    ("pacote/3 - INICIAR AGENTE.bat",    PACOTE_DIR / "3 - INICIAR AGENTE.bat"),
     ("agente_bot.py",                    AGENTE_DIR / "agente_bot.py"),
     ("motor_excel.py",                   AGENTE_DIR / "motor_excel.py"),
     ("motor_documentos.py",              AGENTE_DIR / "motor_documentos.py"),
@@ -141,6 +147,9 @@ _ARQUIVOS_VERSAO = [
     ("services/gc_digitacao.py",         SERVICES_DIR / "gc_digitacao.py"),
     ("services/gc_sifac.py",             SERVICES_DIR / "gc_sifac.py"),
     ("services/factories_attach.py",     SERVICES_DIR / "factories_attach.py"),
+    # Vao no zip, entao mudanca neles tambem exige novo download.
+    ("_tz.py",                           BACKEND_DIR / "_tz.py"),
+    ("arquivos_recentes.py",             BACKEND_DIR / "arquivos_recentes.py"),
 ]
 
 _versao_cache: dict = {"hash": None}
