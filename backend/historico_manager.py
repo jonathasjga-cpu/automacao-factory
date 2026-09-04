@@ -59,7 +59,7 @@ def salvar_operacao(op_id: str, status: dict):
         salvas = status.get("faturas_salvas", set())
         for num in salvas:
             f = cache.get(num, {})
-            factory = f.get("factory_sugerida", "desconhecido")
+            factory = f.get("factory_sugerida") or "desconhecido"
             if factory not in factories:
                 factories[factory] = {"qtd": 0, "valor": 0.0}
             factories[factory]["qtd"] += 1

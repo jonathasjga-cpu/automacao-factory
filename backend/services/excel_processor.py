@@ -1,5 +1,7 @@
 import asyncio
 import json
+import re
+import unicodedata
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -872,10 +874,35 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
             "cliente_cnpj": str(row["cliente_cnpj"]).strip(),
             "situacao": str(row["situacao"]).strip(),
             "chave": str(row["chave"]).strip() if pd.notna(row.get("chave")) else "",
-            "factory_sugerida": "gc_sp" if "SP" in str(row["filial"]) else "gc_matriz",
+            # "" quando a filial nao permite deduzir: o frontend pede a
+            # escolha em vez de mandar pra unidade errada.
+            "factory_sugerida": (lambda u: f"gc_{u}" if u else "")(_unidade_filial(row["filial"])),
         })
 
     return faturas
+
+def _unidade_filial(filial) -> str | None:
+    """Unidade da factory a partir do nome da filial no GW: 'sp', 'matriz' ou
+    None. Espelha _unidadeFilial() no frontend — as duas pontas TEM que usar
+    o mesmo critério, senão a sugestão diverge da opção que aparece na tela.
+
+    Retorna None quando não dá pra afirmar. Antes a regra era
+    `"SP" in filial`, que jogava toda filial sem "SP" no nome — MORAIS, por
+    exemplo — pra matriz, silenciosamente.
+    """
+    s = unicodedata.normalize("NFD", str(filial or ""))
+    s = s.encode("ascii", "ignore").decode().lower().strip()
+    if not s:
+        return None
+    # Comparacao por TOKEN, nao por substring: "SP" e' a unidade, mas
+    # "ESPERANCA" contem "sp" e nao e' filial de Sao Paulo.
+    tokens = set(re.split("[^a-z0-9]+", s))
+    if "sp" in tokens or "morais" in s or "sao paulo" in s:
+        return "sp"
+    if "matriz" in s or "freire" in s:
+        return "matriz"
+    return None
+
 
 def _iso_para_br(iso: str | None) -> str | None:
     """'2026-05-18' → '18/05/2026'. None se vazio."""

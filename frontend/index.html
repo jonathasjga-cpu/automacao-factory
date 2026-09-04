@@ -346,6 +346,8 @@
   .factory-select.fluxasset_matriz, .factory-select.fluxasset_sp { border-color: #A5B4FC; }
   .factory-select.gc_matriz, .factory-select.gc_sp { border-color: #6EE7B7; }
   .factory-select.ignorar { border-color: var(--border); color: var(--muted); }
+  /* Filial que nao da pra classificar: fica ambar ate alguem escolher. */
+  .factory-select.nao-definida { border-color: #FBBF24; color: #FBBF24; }
 
   /* ─── BADGES ─────────────────────────────────────────── */
   .badge {
@@ -3508,6 +3510,41 @@ function _normFilial(s) {
     .toLowerCase();
 }
 
+// Uma filial pode ter QUALQUER nome no GW. O que decide a conta da factory
+// nao e' o nome, e' a UNIDADE: matriz ou SP. Antes isso era
+// `filial.includes('SP')` — uma filial chamada so "MORAIS" caia em matriz.
+// Retorna null quando nao da pra afirmar: nesse caso o usuario escolhe na
+// tela, em vez de a gente adivinhar e digitar na operacao errada.
+function _unidadeFilial(filial) {
+  const s = _normFilial(filial);
+  if (!s) return null;
+  // Comparacao por TOKEN, nao por substring: "SP" e a unidade, mas
+  // "ESPERANCA" contem "sp" e nao e filial de Sao Paulo.
+  const tokens = s.split(/[^a-z0-9]+/);
+  if (tokens.includes('sp') || s.includes('morais') || s.includes('sao paulo')) return 'sp';
+  if (s.includes('matriz') || s.includes('freire')) return 'matriz';
+  return null;
+}
+
+// Todas as factories, SEMPRE renderizadas. Antes o <select> recebia as opcoes
+// de UMA unidade so — uma fatura da filial SP nao tinha como ir pra GC SP
+// porque a opcao nem chegava a existir no DOM.
+const _FACTORIES_POR_UNIDADE = [
+  ['Matriz',      [['gc_matriz','GC Matriz'],['firma_matriz','Firma Matriz'],['fluxasset_matriz','FluxAsset Matriz']]],
+  ['SP (Morais)', [['gc_sp','GC SP'],['firma_sp','Firma SP'],['fluxasset_sp','FluxAsset SP']]],
+];
+
+function _opcoesFactory(sugestao) {
+  const sel = v => v === sugestao ? ' selected' : '';
+  let html = sugestao ? '' : '<option value="" selected>— Escolha a factory</option>';
+  for (const [grupo, ops] of _FACTORIES_POR_UNIDADE) {
+    html += `<optgroup label="${grupo}">`;
+    for (const [v, t] of ops) html += `<option value="${v}"${sel(v)}>${t}</option>`;
+    html += '</optgroup>';
+  }
+  return html + `<option value="ignorar"${sel('ignorar')}>— Ignorar</option>`;
+}
+
 // Popula o dropdown #filtro-filial com todas as filiais unicas encontradas
 // nas faturas carregadas. Preserva a selecao atual se ainda for valida.
 function _populaFiltroFiliais() {
@@ -3601,9 +3638,9 @@ function renderFaturas() {
     // Badge de filial mostra o NOME REAL da filial (nao mais binario SP/Matriz).
     // Cores: SP=roxo, MATRIZ=azul, outras=cinza generica.
     const filialRaw = String(f.filial || '').trim();
-    const filialClasse = filialRaw.toUpperCase().includes('SP')
-      ? 'badge-sp'
-      : (filialRaw.toUpperCase().includes('MATRIZ') ? 'badge-matriz' : 'badge-filial-outra');
+    const unidade = _unidadeFilial(filialRaw);
+    const filialClasse = unidade === 'sp' ? 'badge-sp'
+      : (unidade === 'matriz' ? 'badge-matriz' : 'badge-filial-outra');
     const filialTexto = filialRaw || '—';
     const filialBadge = `<span class="badge ${filialClasse}">${filialTexto}</span>`;
 
@@ -3611,21 +3648,10 @@ function renderFaturas() {
       ? `<span class="badge badge-normal">Normal</span>`
       : `<span class="badge badge-descontada">Descontada</span>`;
 
-    const isSP = f.filial?.includes('SP');
     // GC é o padrão — ignora firma_* que vem do backend (padrão legado)
     const _s = f.factory_sugerida || '';
-    const sugestao = (_s && !_s.startsWith('firma_')) ? _s : (isSP ? 'gc_sp' : 'gc_matriz');
-
-    const opcoesMatriz = `
-      <option value="gc_matriz"        ${sugestao==='gc_matriz'       ?'selected':''}>GC Matriz</option>
-      <option value="firma_matriz"     ${sugestao==='firma_matriz'    ?'selected':''}>Firma Matriz</option>
-      <option value="fluxasset_matriz" ${sugestao==='fluxasset_matriz'?'selected':''}>FluxAsset Matriz</option>
-      <option value="ignorar"          ${sugestao==='ignorar'         ?'selected':''}>— Ignorar</option>`;
-    const opcoesSP = `
-      <option value="gc_sp"            ${sugestao==='gc_sp'       ?'selected':''}>GC SP</option>
-      <option value="firma_sp"         ${sugestao==='firma_sp'    ?'selected':''}>Firma SP</option>
-      <option value="fluxasset_sp"     ${sugestao==='fluxasset_sp'?'selected':''}>FluxAsset SP</option>
-      <option value="ignorar"          ${sugestao==='ignorar'     ?'selected':''}>— Ignorar</option>`;
+    const sugestao = (_s && !_s.startsWith('firma_')) ? _s
+                   : (unidade ? `gc_${unidade}` : '');
 
     return `<tr>
       <td style="width:36px;padding-left:18px">
@@ -3642,8 +3668,8 @@ function renderFaturas() {
       <td class="valor">R$ ${Number(f.valor).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
       <td>${sitBadge}</td>
       <td>
-        <select class="factory-select ${sugestao}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
-          ${isSP ? opcoesSP : opcoesMatriz}
+        <select class="factory-select ${sugestao || 'nao-definida'}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
+          ${_opcoesFactory(sugestao)}
         </select>
       </td>
     </tr>`;
@@ -3676,7 +3702,7 @@ function renderFaturas() {
 }
 
 function updateSelectStyle(sel) {
-  sel.className = 'factory-select ' + sel.value;
+  sel.className = 'factory-select ' + (sel.value || 'nao-definida');
 }
 
 function selecionarTodas() {
@@ -3758,13 +3784,22 @@ function _coletarSelecionadas() {
     if (filtroFilial && _normFilial(f.filial) !== filtroFilialNorm) return;
     const chk    = document.getElementById(`chk-${i}`);
     const factory = document.getElementById(`factory-${i}`);
-    if (chk?.checked) selecionadas.push({ numero: f.numero, factory: factory?.value || f.factory_sugerida || 'ignorar' });
+    const escolha = factory ? factory.value : (f.factory_sugerida || '');
+    if (chk?.checked) selecionadas.push({ numero: f.numero, factory: escolha });
   });
   return selecionadas;
 }
 
 async function _disparaOperacao(apenasDocumentos) {
   const selecionadas = _coletarSelecionadas();
+  const semFactory = selecionadas.filter(f => !f.factory);
+  if (semFactory.length) {
+    const nums = semFactory.map(f => f.numero).join(', ');
+    notifyWarn(`Escolha a factory de: ${nums}. A filial dessas faturas nao permite `
+      + `deduzir a unidade, e enviar no palpite digitaria na operacao errada.`,
+      'Factory nao definida');
+    return;
+  }
   const relevantes = selecionadas.filter(f => f.factory !== 'ignorar');
   if (!relevantes.length) {
     notifyWarn('Marque pelo menos uma fatura na lista antes de continuar.', 'Nenhuma fatura selecionada');
