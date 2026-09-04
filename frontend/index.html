@@ -2955,7 +2955,10 @@ async function abrirModalAgente() {
   const online = window.AGENTE_ONLINE ? 'online' : 'offline';
   const ok = await showConfirm({
     title: 'Baixar pacote do agente',
-    message: `Agente Local está ${online}.\n\nBaixar o pacote (.zip com config e credenciais já embutidas) para instalar em uma máquina?`,
+    message: `Agente Local está ${online}.\n\nBaixar o pacote (.zip com config e credenciais já embutidas) para instalar em uma máquina?`
+      + `\n\nIMPORTANTE: extraia o .zip antes de rodar. Clicar no "1 - INSTALAR.bat" `
+      + `de dentro do compactado não funciona — o descompactador copia só o .bat `
+      + `para uma pasta temporária e deixa o resto para trás.`,
     confirmText: 'Baixar .zip',
     cancelText: 'Cancelar',
   });
@@ -2977,7 +2980,8 @@ async function abrirModalAgente() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 5000);
-    notifyOk('Download iniciado. Descompacte e siga o LEIA-ME.', 'Pacote gerado');
+    notifyOk('Download iniciado. EXTRAIA o .zip primeiro, depois rode o '
+      + '"1 - INSTALAR.bat" de dentro da pasta extraída.', 'Pacote gerado');
   } catch (e) {
     notifyErr('Erro ao baixar pacote: ' + e.message);
   }

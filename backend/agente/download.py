@@ -98,6 +98,12 @@ def _leia_me(panel_url: str) -> str:
 
 Painel: {panel_url}
 
+ANTES DE TUDO: extraia este .zip para uma pasta de verdade
+(botao direito no .zip > "Extrair tudo..."). Clicar nos .bat de dentro
+do compactado NAO funciona: o descompactador copia so o .bat pra uma
+pasta temporaria e deixa os arquivos vizinhos para tras. Os .bat detectam
+isso e explicam, mas nao ha como rodar sem extrair.
+
 Instale UMA vez. Use SEMPRE:
 
 1) "1 - INSTALAR.bat"     (instala Python + libs; so na primeira vez)
