@@ -1213,6 +1213,18 @@
     transition: all .15s;
   }
   .agente-status-card .status-btn:hover { background: currentColor; color: white; }
+  /* No estado "tudo ok" o botao existe pra quem QUER baixar (outra maquina,
+     reinstalar) — nao e' um chamado a acao. Fica em tom secundario. */
+  .agente-status-card .status-btn.ghost {
+    border-color: var(--border2);
+    color: var(--text2);
+    font-weight: 500;
+  }
+  .agente-status-card .status-btn.ghost:hover {
+    background: var(--surface2);
+    border-color: var(--text2);
+    color: var(--text);
+  }
   .agente-status-card.online-ok .status-btn:hover { color: white; }
 
   /* Botão iniciar operação desabilitado quando offline */
@@ -2908,6 +2920,7 @@ function _renderAgenteStatusCard() {
         <div class="status-title">Agente conectado e atualizado</div>
         <div class="status-detail">Tudo pronto para começar. Versão ${window.AGENTE_VERSAO_LOCAL || ''}</div>
       </div>
+      <button class="status-btn ghost" onclick="abrirModalAgente()" title="Baixar o pacote do agente novamente — util pra instalar em outra maquina">${icon('arrow-down-tray','icn-sm')} Baixar agente</button>
     `;
   } else if (window.AGENTE_ONLINE && !window.AGENTE_ATUALIZADO) {
     card.className = 'agente-status-card online-outdated';
