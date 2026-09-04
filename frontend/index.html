@@ -3526,19 +3526,24 @@ function _unidadeFilial(filial) {
   return null;
 }
 
-// Todas as factories, SEMPRE renderizadas. Antes o <select> recebia as opcoes
-// de UMA unidade so — uma fatura da filial SP nao tinha como ir pra GC SP
-// porque a opcao nem chegava a existir no DOM.
+// As contas de cada unidade. A fatura so recebe as factories da SUA unidade:
+// fatura da Morais nao deve nem oferecer as contas da matriz, e vice-versa.
 const _FACTORIES_POR_UNIDADE = [
-  ['Matriz',      [['gc_matriz','GC Matriz'],['firma_matriz','Firma Matriz'],['fluxasset_matriz','FluxAsset Matriz']]],
-  ['SP (Morais)', [['gc_sp','GC SP'],['firma_sp','Firma SP'],['fluxasset_sp','FluxAsset SP']]],
+  ['matriz', 'Matriz (G Freire)', [['gc_matriz','GC Matriz'],['firma_matriz','Firma Matriz'],['fluxasset_matriz','FluxAsset Matriz']]],
+  ['sp',     'SP (Morais)',       [['gc_sp','GC SP'],['firma_sp','Firma SP'],['fluxasset_sp','FluxAsset SP']]],
 ];
 
-function _opcoesFactory(sugestao) {
+// unidade 'matriz' | 'sp' -> so as contas dessa unidade.
+// unidade null (nome de filial que nao da pra classificar) -> as duas, sem
+// nada pre-marcado: melhor perguntar do que digitar na operacao errada.
+function _opcoesFactory(sugestao, unidade) {
   const sel = v => v === sugestao ? ' selected' : '';
+  const grupos = unidade
+    ? _FACTORIES_POR_UNIDADE.filter(([u]) => u === unidade)
+    : _FACTORIES_POR_UNIDADE;
   let html = sugestao ? '' : '<option value="" selected>— Escolha a factory</option>';
-  for (const [grupo, ops] of _FACTORIES_POR_UNIDADE) {
-    html += `<optgroup label="${grupo}">`;
+  for (const [, rotulo, ops] of grupos) {
+    html += `<optgroup label="${rotulo}">`;
     for (const [v, t] of ops) html += `<option value="${v}"${sel(v)}>${t}</option>`;
     html += '</optgroup>';
   }
@@ -3669,7 +3674,7 @@ function renderFaturas() {
       <td>${sitBadge}</td>
       <td>
         <select class="factory-select ${sugestao || 'nao-definida'}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
-          ${_opcoesFactory(sugestao)}
+          ${_opcoesFactory(sugestao, unidade)}
         </select>
       </td>
     </tr>`;
