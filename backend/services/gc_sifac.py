@@ -343,8 +343,21 @@ async def incluir_titulo_sifac(page, fatura, status):
         except Exception:
             continue
         ultimo = (qd, ld)
-        if (qtd_antes is not None and qd is not None and qd > qtd_antes) or \
-           (linhas_antes >= 0 and ld > linhas_antes):
+        # PROVA PRIMARIA: o contador do proprio portal. Numa operacao vazia
+        # o texto "qtd. titulos" nao existe e qtd_antes vem None — tratar
+        # como 0 faz o PRIMEIRO titulo tambem ser provado pelo contador, em
+        # vez de depender da heuristica de linhas.
+        if qd is not None:
+            base = qtd_antes if qtd_antes is not None else 0
+            if qd > base:
+                entrou = True
+                break
+        # PROVA SECUNDARIA: so quando o contador nao e' legivel. Sozinha ela
+        # e' fraca — JS_CONTADOR conta linha de QUALQUER tabela visivel, e
+        # uma tabela que apareca por outro motivo inflaria o numero, dando um
+        # "incluido" falso. Falso positivo e' o pior caso: a analista confia
+        # que digitou e o titulo nao esta na operacao.
+        elif ld > linhas_antes >= 0:
             entrou = True
             break
     if not entrou:

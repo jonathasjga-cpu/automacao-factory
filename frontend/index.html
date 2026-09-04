@@ -3679,11 +3679,18 @@ function renderFaturas() {
       ? `<span class="badge badge-normal">Normal</span>`
       : `<span class="badge badge-descontada">Descontada</span>`;
 
-    // GC é o padrão — ignora firma_* que vem do backend (padrão legado)
+    // GC é o padrão — ignora firma_* que vem do backend (padrão legado).
+    // A sugestao vem do CACHE do backend, que pode ter sido calculado por uma
+    // regra anterior (uma fatura de GRU carregada antes do deploy vinha como
+    // gc_matriz). Se ela nao pertencer a unidade da fatura, e' descartada:
+    // senao o valor pre-marcado nao existiria na lista renderizada.
+    const _daUnidade = (v) => v === 'ignorar'
+      || _FACTORIES_POR_UNIDADE.some(([u, , ops]) => u === unidade && ops.some(([id]) => id === v));
     const _s = f.factory_sugerida || '';
-    const sugestao = (_s && !_s.startsWith('firma_')) ? _s : `gc_${unidade}`;
+    const sugestao = (_s && !_s.startsWith('firma_') && _daUnidade(_s)) ? _s : `gc_${unidade}`;
     // O que o usuario escolheu manda; a sugestao so vale na primeira pintura.
-    const escolhida = factoryState[i_real] || sugestao;
+    const _guardada = factoryState[i_real];
+    const escolhida = (_guardada && _daUnidade(_guardada)) ? _guardada : sugestao;
 
     return `<tr>
       <td style="width:36px;padding-left:18px">
@@ -3887,6 +3894,14 @@ async function baixarApenasArquivos() {
 
 async function executarAutomacao() {
   const selecionadas = _coletarSelecionadas();
+  // Mesma guarda do _disparaOperacao. Este e' o caminho do wizard no modo
+  // completo — sem ela, so metade dos disparos ficava protegida.
+  const semFactory = selecionadas.filter(f => !f.factory);
+  if (semFactory.length) {
+    notifyWarn(`Escolha a factory de: ${semFactory.map(f => f.numero).join(', ')}. `
+      + `Recarregue as faturas se o campo estiver em branco.`, 'Factory nao definida');
+    return;
+  }
   const relevantes = selecionadas.filter(f => f.factory !== 'ignorar');
   if (!relevantes.length) {
     notifyWarn('Marque as faturas cujos boletos e CT-es você quer baixar.', 'Nenhuma fatura selecionada');
