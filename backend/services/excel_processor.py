@@ -895,7 +895,9 @@ def _unidade_filial(filial) -> str:
     # Comparacao por TOKEN, nao por substring: "SP" e' a unidade, mas
     # "ESPERANCA" contem "sp" e nao e' filial de Sao Paulo.
     tokens = set(re.split("[^a-z0-9]+", s))
-    if "sp" in tokens or "morais" in s or "sao paulo" in s:
+    # GRU (Guarulhos) e a filial Morais — confirmado pelo usuario.
+    if ("sp" in tokens or "gru" in tokens
+            or "morais" in s or "sao paulo" in s or "guarulhos" in s):
         return "sp"
     return "matriz"
 
