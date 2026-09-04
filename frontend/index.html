@@ -3510,20 +3510,20 @@ function _normFilial(s) {
     .toLowerCase();
 }
 
-// Uma filial pode ter QUALQUER nome no GW. O que decide a conta da factory
-// nao e' o nome, e' a UNIDADE: matriz ou SP. Antes isso era
-// `filial.includes('SP')` — uma filial chamada so "MORAIS" caia em matriz.
-// Retorna null quando nao da pra afirmar: nesse caso o usuario escolhe na
-// tela, em vez de a gente adivinhar e digitar na operacao errada.
+// Uma filial pode ter QUALQUER nome no GW, e existem duas contas por
+// factory. A regra do negocio: e' de Sao Paulo (Morais) ou opera na MATRIZ.
+// Nunca retorna vazio — filial nova cai na matriz, que e' o padrao.
+//
+// Antes isso era `filial.includes('SP')`. A estrutura binaria estava certa;
+// o erro era a deteccao: a filial chamada so "MORAIS" nao contem "SP" e ia
+// pra matriz, e as opcoes de SP nem eram renderizadas.
 function _unidadeFilial(filial) {
   const s = _normFilial(filial);
-  if (!s) return null;
   // Comparacao por TOKEN, nao por substring: "SP" e a unidade, mas
   // "ESPERANCA" contem "sp" e nao e filial de Sao Paulo.
   const tokens = s.split(/[^a-z0-9]+/);
   if (tokens.includes('sp') || s.includes('morais') || s.includes('sao paulo')) return 'sp';
-  if (s.includes('matriz') || s.includes('freire')) return 'matriz';
-  return null;
+  return 'matriz';
 }
 
 // As contas de cada unidade. A fatura so recebe as factories da SUA unidade:
@@ -3533,16 +3533,11 @@ const _FACTORIES_POR_UNIDADE = [
   ['sp',     'SP (Morais)',       [['gc_sp','GC SP'],['firma_sp','Firma SP'],['fluxasset_sp','FluxAsset SP']]],
 ];
 
-// unidade 'matriz' | 'sp' -> so as contas dessa unidade.
-// unidade null (nome de filial que nao da pra classificar) -> as duas, sem
-// nada pre-marcado: melhor perguntar do que digitar na operacao errada.
+// Cada fatura recebe SO as contas da sua unidade.
 function _opcoesFactory(sugestao, unidade) {
   const sel = v => v === sugestao ? ' selected' : '';
-  const grupos = unidade
-    ? _FACTORIES_POR_UNIDADE.filter(([u]) => u === unidade)
-    : _FACTORIES_POR_UNIDADE;
-  let html = sugestao ? '' : '<option value="" selected>— Escolha a factory</option>';
-  for (const [, rotulo, ops] of grupos) {
+  let html = '';
+  for (const [, rotulo, ops] of _FACTORIES_POR_UNIDADE.filter(([u]) => u === unidade)) {
     html += `<optgroup label="${rotulo}">`;
     for (const [v, t] of ops) html += `<option value="${v}"${sel(v)}>${t}</option>`;
     html += '</optgroup>';
@@ -3644,8 +3639,11 @@ function renderFaturas() {
     // Cores: SP=roxo, MATRIZ=azul, outras=cinza generica.
     const filialRaw = String(f.filial || '').trim();
     const unidade = _unidadeFilial(filialRaw);
+    // A cor segue o NOME, nao a unidade: uma filial "CAMPINAS" opera na
+    // matriz mas nao deve aparecer pintada como se fosse a matriz.
+    const _nf = _normFilial(filialRaw);
     const filialClasse = unidade === 'sp' ? 'badge-sp'
-      : (unidade === 'matriz' ? 'badge-matriz' : 'badge-filial-outra');
+      : ((_nf.includes('matriz') || _nf.includes('freire')) ? 'badge-matriz' : 'badge-filial-outra');
     const filialTexto = filialRaw || '—';
     const filialBadge = `<span class="badge ${filialClasse}">${filialTexto}</span>`;
 
@@ -3655,8 +3653,7 @@ function renderFaturas() {
 
     // GC é o padrão — ignora firma_* que vem do backend (padrão legado)
     const _s = f.factory_sugerida || '';
-    const sugestao = (_s && !_s.startsWith('firma_')) ? _s
-                   : (unidade ? `gc_${unidade}` : '');
+    const sugestao = (_s && !_s.startsWith('firma_')) ? _s : `gc_${unidade}`;
 
     return `<tr>
       <td style="width:36px;padding-left:18px">
@@ -3673,7 +3670,7 @@ function renderFaturas() {
       <td class="valor">R$ ${Number(f.valor).toLocaleString('pt-BR', {minimumFractionDigits:2})}</td>
       <td>${sitBadge}</td>
       <td>
-        <select class="factory-select ${sugestao || 'nao-definida'}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
+        <select class="factory-select ${sugestao}" id="factory-${i_real}" onchange="updateSelectStyle(this)">
           ${_opcoesFactory(sugestao, unidade)}
         </select>
       </td>
@@ -3800,9 +3797,11 @@ async function _disparaOperacao(apenasDocumentos) {
   const semFactory = selecionadas.filter(f => !f.factory);
   if (semFactory.length) {
     const nums = semFactory.map(f => f.numero).join(', ');
-    notifyWarn(`Escolha a factory de: ${nums}. A filial dessas faturas nao permite `
-      + `deduzir a unidade, e enviar no palpite digitaria na operacao errada.`,
-      'Factory nao definida');
+    // Toda filial recebe unidade (desconhecida -> matriz), entao isso so
+    // acontece com fatura de cache antigo, anterior a essa versao. Barrar e'
+    // melhor que mandar sem factory definida.
+    notifyWarn(`Escolha a factory de: ${nums}. Recarregue as faturas se o campo `
+      + `estiver em branco.`, 'Factory nao definida');
     return;
   }
   const relevantes = selecionadas.filter(f => f.factory !== 'ignorar');
