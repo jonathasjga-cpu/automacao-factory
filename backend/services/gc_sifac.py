@@ -251,6 +251,16 @@ async def incluir_titulo_sifac(page, fatura, status):
 
     # ── CNPJ + busca automatica do sacado ──
     await page.fill("#cnpj", doc)
+    # Limpa o nome ANTES de buscar. Quando o titulo anterior falha o portal
+    # nao limpa o formulario, e a espera abaixo (nome != vazio) acertava de
+    # imediato com o nome do sacado ANTERIOR — o log dizia "Sacado
+    # encontrado: <cliente errado>" e ninguem percebia.
+    try:
+        await page.evaluate(
+            "() => { const el = document.getElementById('no_sacado');"
+            " if (el) el.value = ''; }")
+    except Exception:
+        pass
     r = await page.evaluate(JS_BUSCAR_SACADO)
     if r != "clicou":
         log(f"  [WARN] Botao de busca do sacado nao encontrado ({r}) — tentando Tab")
@@ -272,10 +282,26 @@ async def incluir_titulo_sifac(page, fatura, status):
     # ── demais campos ──
     valor_fmt = f"{valor:.2f}".replace(".", ",")
     chave = str(fatura.get("chave") or "").strip()
+    # MEDIDO AO VIVO com fatura real: o campo do SIFAC e' "Chave NF-e" e
+    # recusa EM SILENCIO uma chave que nao seja de NF-e — o titulo nao entra
+    # e o portal nao diz nada. A mesma fatura, sem chave, entra com
+    # "Incluido com sucesso!".
+    #
+    # As faturas da Transrota sao CT-e (modelo 57 nas posicoes 21-22 da
+    # chave), nao NF-e (55). Ou seja: com a chave, NENHUM titulo entrava.
+    # O modelo decide se a chave vai ou nao.
+    modelo = chave[20:22] if (len(chave) == 44 and chave.isdigit()) else ""
     if not chave:
-        log(f"  [WARN] Fatura {numero}: sem chave NF-e")
-    elif len(chave) != 44:
-        log(f"  [WARN] Fatura {numero}: chave com {len(chave)} digitos (esperado 44)")
+        log(f"  [WARN] Fatura {numero}: sem chave")
+    elif len(chave) != 44 or not chave.isdigit():
+        log(f"  [WARN] Fatura {numero}: chave com {len(chave)} caracteres "
+            f"(esperado 44 digitos) — enviando sem chave")
+        chave = ""
+    elif modelo != "55":
+        rotulo = "CT-e" if modelo == "57" else f"modelo {modelo}"
+        log(f"  [INFO] Fatura {numero}: chave e' de {rotulo}; o campo do SIFAC "
+            f"aceita so NF-e (55) e recusa em silencio — enviando sem chave")
+        chave = ""
 
     valores = {
         "#nuDocumento": numero,
@@ -370,7 +396,11 @@ async def incluir_titulo_sifac(page, fatura, status):
         # nao mostra mensagem nenhuma, so nao inclui. Por isso a chave entra
         # como principal suspeita quando nao ha erro visivel.
         pista = ""
-        if not erro and chave:
+        if not erro and not chave:
+            pista = (" Nenhuma mensagem do portal. A chave nao foi enviada, "
+                     "entao a causa e' outra — confira sacado, datas e valor "
+                     "na tela.")
+        elif not erro and chave:
             pista = (f" Nenhuma mensagem do portal — a causa mais provavel e' a "
                      f"chave NF-e ({len(chave)} digitos): o SIFAC valida a chave e "
                      f"recusa sem avisar quando ela nao confere.")

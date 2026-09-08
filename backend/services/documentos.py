@@ -787,9 +787,13 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                             f"Sessao pode ter expirado."
                         )
 
-                    await page.select_option('select[name="campoDeConsulta"]', value="emissao_fatura")
-                    await page.fill('input[name="dtemissao1"]', data_ini_busca)
-                    await page.fill('input[name="dtemissao2"]', data_fim_busca)
+                    # Primeira tentativa; o valor e' RECONFIRMADO no fim, junto com
+                    # as datas — ver o bloco "CAMPO E DATAS POR ULTIMO".
+                    try:
+                        await page.select_option('select[name="campoDeConsulta"]',
+                                                 value="emissao_fatura", timeout=10000)
+                    except Exception as _e:
+                        log(f"  [AVISO] campoDeConsulta nao aceitou de primeira: {str(_e)[:70]}")
                     # Filial: usa value numerico quando conhecido; senao seleciona "Todas"
                     # (option com texto "Todas" ou selectedIndex=0), pra pegar faturas
                     # de filiais fora do mapeamento MATRIZ/SP.
@@ -797,7 +801,11 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         await page.select_option('select[name="filialId"]', value=filial_id)
                     else:
                         try:
-                            await page.select_option('select[name="filialId"]', label="Todas")
+                            # timeout curto: MEDIDO, esse select costuma nao ser
+                            # interagivel (a filial tem botao de popup proprio) e o
+                            # default de 30s era gasto inteiro antes do fallback JS.
+                            await page.select_option('select[name="filialId"]', label="Todas",
+                                                     timeout=3000)
                         except Exception:
                             # Fallback via JS: acha option "todas" no texto ou usa selectedIndex=0
                             await page.evaluate("""() => {
@@ -809,6 +817,51 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                             }""")
                     await page.select_option('select[name="finalizada"]', label="Todas")
                     await page.select_option('select[name="limiteResultados"]', value="200")
+
+                    # ── CAMPO E DATAS POR ULTIMO, e conferidos ──────────────────
+                    # MEDIDO AO VIVO: o campoDeConsulta selecionado no inicio VOLTAVA
+                    # sozinho pro default "vencimento_fatura" — o JS da tela ainda
+                    # estava inicializando quando o select era mexido. A busca entao
+                    # rodava por VENCIMENTO 04/09 em vez de EMISSAO 04/09, devolvia 65
+                    # faturas que nada tinham a ver, e nenhuma das faturas da operacao
+                    # era encontrada. Era o "faturas agrupadas e separadas nao foram
+                    # salvas": os CT-es baixavam (outra tela) e as faturas, nao.
+                    #
+                    # Cada select desta tela tambem dispara JS que limpa as datas.
+                    # Por isso: campo e datas por ULTIMO, os tres conferidos por
+                    # leitura de volta, com o Pesquisar imediatamente depois.
+                    await page.wait_for_timeout(700)
+                    _JS_LER = ("() => { const g = n => { const e ="
+                               " document.querySelector(`[name=\"${n}\"]`);"
+                               " return e ? e.value : ''; };"
+                               " return {campo: g('campoDeConsulta'),"
+                               " d1: g('dtemissao1'), d2: g('dtemissao2')}; }")
+                    lido = {}
+                    for _t in range(1, 5):
+                        try:
+                            await page.select_option('select[name="campoDeConsulta"]',
+                                                     value="emissao_fatura", timeout=10000)
+                        except Exception:
+                            pass
+                        await page.wait_for_timeout(400)
+                        await page.fill('input[name="dtemissao1"]', data_ini_busca)
+                        await page.fill('input[name="dtemissao2"]', data_fim_busca)
+                        await page.wait_for_timeout(350)
+                        lido = await page.evaluate(_JS_LER)
+                        if (lido.get("campo") == "emissao_fatura"
+                                and lido.get("d1") == data_ini_busca
+                                and lido.get("d2") == data_fim_busca):
+                            if _t > 1:
+                                log(f"  [OK] Filtro fixou na tentativa {_t}")
+                            break
+                        log(f"  [RETRY filtro {_t}/4] tela devolveu {lido} — esperado "
+                            f"campo=emissao_fatura, {data_ini_busca} a {data_fim_busca}")
+                        await page.wait_for_timeout(900)
+                    else:
+                        log(f"  ⚠️ O filtro NAO fixou em 4 tentativas (ficou {lido}). "
+                            f"A busca vai sair errada e as faturas nao serao achadas.")
+                    log(f"  Filtro aplicado: campo={lido.get('campo')} "
+                        f"emissao {lido.get('d1')} a {lido.get('d2')}")
 
                     # Assinatura da tabela ANTES de pesquisar. Necessaria porque a
                     # tela `acao=iniciar` JA VEM com uma lista default (6 faturas,
@@ -852,12 +905,16 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     # Espera a tabela REALMENTE trocar — nao apenas "existir checkbox"
                     try:
                         await page.wait_for_function(
-                            r"""(antes) => {
+                            r"""([antes, esperados]) => {
+                                // Se alguma fatura buscada ja esta na tela, pronto —
+                                // evita gastar os 20s de timeout a cada factory.
+                                const _t = document.body.innerText || '';
+                                if (esperados.some(x => _t.includes(x + '/'))) return true;
                                 const n = document.querySelectorAll('input[id^="ck"]').length;
                                 const m = (document.body.innerText || '').match(/(\d{5,6})\/\d{4}/);
                                 return (n + '|' + (m ? m[1] : '')) !== antes;
                             }""",
-                            arg=assinatura_antes,
+                            arg=[assinatura_antes, sorted(set(numeros_norm) | set(numeros_raw))],
                             timeout=20000,
                         )
                     except Exception:
@@ -883,6 +940,40 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         except Exception:
                             pass
                     log(f"  📋 GW retornou {len(na_pagina)} fatura(s): {na_pagina[:8]}")
+
+                    # Rede de seguranca: se nenhuma das faturas buscadas veio, tenta
+                    # pesquisar de novo. A causa conhecida (campoDeConsulta voltando
+                    # pro default) esta tratada no bloco do filtro acima; isto cobre
+                    # o caso de o clique em si nao ter surtido efeito.
+                    async def _ler_na_pagina():
+                        out = []
+                        for _tr in await page.query_selector_all("tr"):
+                            try:
+                                _t = await _tr.inner_text()
+                                _m = re.search(r"(\d{5,6})/\d{4}", _t)
+                                if _m:
+                                    out.append(_m.group(1))
+                            except Exception:
+                                pass
+                        return out
+
+                    def _achou(lista):
+                        return any(_normalizar(x) in numeros_norm or x in numeros_raw
+                                   for x in lista)
+
+                    for _tent in range(1, 3):
+                        if _achou(na_pagina):
+                            break
+                        log(f"  [RETRY {_tent}/2] Nenhuma fatura buscada apareceu — "
+                            f"reclicando Pesquisar (1a busca da sessao costuma ser ignorada)")
+                        try:
+                            await page.click('input[value="Pesquisar"]', timeout=20000)
+                        except Exception as _e:
+                            log(f"  [RETRY] clique falhou: {str(_e)[:90]}")
+                            break
+                        await page.wait_for_timeout(6000)
+                        na_pagina = await _ler_na_pagina()
+                        log(f"  📋 Apos retry: {len(na_pagina)} fatura(s): {na_pagina[:8]}")
 
                     # ── Seleciona checkboxes via Playwright nativo ────────────────
                     # PASSO 1: leitura — coleta ids e números (sem tocar no DOM)
