@@ -36,26 +36,6 @@ pause
 exit /b 1
 :_viz_agente
 
-rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
-rem O cmd.exe NAO aceita \\servidor\pasta como diretorio atual.
-set "_DIR=%~dp0"
-if not "%_DIR:~0,2%"=="\\" goto :_viz_agente_local
-echo.
-echo ============================================================
-echo   [X] PASTA DE REDE NAO FUNCIONA
-echo ============================================================
-echo.
-echo   Esta pasta esta num caminho de rede:
-echo   "%_DIR%"
-echo.
-echo   O Windows nao permite rodar .bat direto de pasta de rede.
-echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
-echo   e rode de la.
-echo.
-pause
-exit /b 1
-:_viz_agente_local
-
 call :detectpy
 if not defined PYEXE (
     echo [X] Python nao encontrado. Rode antes o "1 - INSTALAR.bat".
@@ -68,7 +48,12 @@ echo   Python: !PYEXE!
 echo   Deixe esta janela aberta. Ctrl+C para parar.
 echo ============================================================
 echo.
-"!PYEXE!" -u agente_bot.py
+rem Caminho ABSOLUTO de proposito. Quando a pasta do agente esta num
+rem caminho de rede (\\servidor\...), o `cd /d` nao funciona: o cmd avisa
+rem e deixa o diretorio atual em C:\Windows. Com "agente_bot.py" relativo o
+rem Python nao achava o arquivo, o agente nunca subia e o painel mostrava
+rem "offline" sem motivo aparente. Todo o resto dos .bat ja usava %~dp0.
+"!PYEXE!" -u "%~dp0agente_bot.py"
 echo.
 echo Agente encerrado. Feche a janela quando terminar de ler.
 pause

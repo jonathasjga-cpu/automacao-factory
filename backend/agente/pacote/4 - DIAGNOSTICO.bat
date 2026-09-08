@@ -21,19 +21,6 @@ pause
 exit /b 1
 :_viz_diag
 
-rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
-set "_DIR=%~dp0"
-if not "%_DIR:~0,2%"=="\\" goto :_viz_diag_local
-echo.
-echo   [X] PASTA DE REDE NAO FUNCIONA
-echo.
-echo       Copie a pasta do agente para o computador e rode de la.
-echo       Pasta atual: "%_DIR%"
-echo.
-pause
-exit /b 1
-:_viz_diag_local
-
 echo.
 echo ============================================================
 echo   DIAGNOSTICO DO AGENTE - mande um print desta janela

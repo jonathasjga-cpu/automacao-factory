@@ -35,26 +35,6 @@ pause
 exit /b 1
 :_viz_chrome
 
-rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
-rem O cmd.exe NAO aceita \\servidor\pasta como diretorio atual.
-set "_DIR=%~dp0"
-if not "%_DIR:~0,2%"=="\\" goto :_viz_chrome_local
-echo.
-echo ============================================================
-echo   [X] PASTA DE REDE NAO FUNCIONA
-echo ============================================================
-echo.
-echo   Esta pasta esta num caminho de rede:
-echo   "%_DIR%"
-echo.
-echo   O Windows nao permite rodar .bat direto de pasta de rede.
-echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
-echo   e rode de la.
-echo.
-pause
-exit /b 1
-:_viz_chrome_local
-
 rem =================================================
 rem Se voce quiser usar um Chrome portable (recomendado: 149)
 rem pra evitar bug de trava do Chrome 150 com CDP, extraia o
