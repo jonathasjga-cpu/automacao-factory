@@ -1,34 +1,59 @@
 @echo off
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
+
 rem ── Guarda: rodou de dentro do ZIP? ─────────────────────────────
 rem Dando duplo clique num .bat que esta DENTRO do .zip, o WinRAR/7-Zip
-rem extrai SO o .bat pra uma pasta temporaria (Temp\Rar$DIa...) e deixa os
-rem vizinhos no compactado. O script entao quebra com "o arquivo nao
-rem existe", mensagem que nao ajuda ninguem a entender o que fazer.
-if not exist "%~dp0agente_config.json" (
-    echo.
-    echo ============================================================
-    echo   [X] NAO DA PRA RODAR DE DENTRO DO ZIP
-    echo ============================================================
-    echo.
-    echo   Faltou o arquivo agente_config.json ao lado deste .bat.
-    echo   Isso acontece quando o .bat e aberto direto de dentro do
-    echo   arquivo compactado: o descompactador copia so o .bat pra uma
-    echo   pasta temporaria e deixa todo o resto para tras.
-    echo.
-    echo   COMO RESOLVER:
-    echo     1^) Feche esta janela.
-    echo     2^) Botao direito no AutoFactory-Agente.zip
-    echo     3^) "Extrair tudo..." ^(ou "Extrair aqui"^)
-    echo     4^) Abra a PASTA extraida e rode o .bat de dentro dela
-    echo.
-    echo   Esta execucao veio de:
-    echo   %~dp0
-    echo.
-    pause
-    exit /b 1
-)
+rem extrai SO o .bat pra uma pasta temporaria e deixa os vizinhos no
+rem compactado. O script quebrava com "o arquivo nao existe".
+rem
+rem IMPORTANTE: sem blocos `if (...)` aqui. O cmd expande %~dp0 ao PARSEAR
+rem o bloco, entao um ")" no nome da pasta — "AutoFactory-Agente (1)",
+rem que e' o que o Windows cria ao baixar o zip duas vezes — fechava o
+rem bloco antes da hora e a janela morria com "\ foi inesperado".
+if exist "%~dp0agente_config.json" goto :_viz_chrome
+echo.
+echo ============================================================
+echo   [X] NAO DA PRA RODAR DE DENTRO DO ZIP
+echo ============================================================
+echo.
+echo   Faltou o arquivo agente_config.json ao lado deste .bat.
+echo   Isso acontece quando o .bat e aberto direto de dentro do
+echo   arquivo compactado: o descompactador copia so o .bat pra uma
+echo   pasta temporaria e deixa todo o resto para tras.
+echo.
+echo   COMO RESOLVER:
+echo     1^) Feche esta janela.
+echo     2^) Botao direito no AutoFactory-Agente.zip
+echo     3^) "Extrair tudo..."
+echo     4^) Abra a PASTA extraida e rode o .bat de dentro dela
+echo.
+echo   Esta execucao veio de:
+echo   "%~dp0"
+echo.
+pause
+exit /b 1
+:_viz_chrome
+
+rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
+rem O cmd.exe NAO aceita \\servidor\pasta como diretorio atual.
+set "_DIR=%~dp0"
+if not "%_DIR:~0,2%"=="\\" goto :_viz_chrome_local
+echo.
+echo ============================================================
+echo   [X] PASTA DE REDE NAO FUNCIONA
+echo ============================================================
+echo.
+echo   Esta pasta esta num caminho de rede:
+echo   "%_DIR%"
+echo.
+echo   O Windows nao permite rodar .bat direto de pasta de rede.
+echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
+echo   e rode de la.
+echo.
+pause
+exit /b 1
+:_viz_chrome_local
 
 rem =================================================
 rem Se voce quiser usar um Chrome portable (recomendado: 149)
@@ -37,40 +62,20 @@ rem Chrome portable dentro da pasta do agente e ele sera
 rem detectado automaticamente:
 rem   %~dp0chrome_portable\chrome.exe
 rem =================================================
-rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
-rem O cmd.exe NAO aceita caminho \servidor\pasta como diretorio atual.
-rem O `cd /d` falha, o script segue na pasta errada e nada funciona — e a
-rem janela fecha antes de dar tempo de ler o motivo.
-set "_DIR=%~dp0"
-if "%_DIR:~0,2%"=="\\" (
-    echo.
-    echo ============================================================
-    echo   [X] PASTA DE REDE NAO FUNCIONA
-    echo ============================================================
-    echo.
-    echo   Esta pasta esta num caminho de rede:
-    echo   %_DIR%
-    echo.
-    echo   O Windows nao permite rodar .bat direto de pasta de rede.
-    echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
-    echo   e rode de la.
-    echo.
-    pause
-    exit /b 1
-)
-
 set "CHROME="
 if exist "%~dp0chrome_portable\chrome.exe" set "CHROME=%~dp0chrome_portable\chrome.exe"
 if not defined CHROME if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe"
 if not defined CHROME if exist "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe" set "CHROME=C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
 if not defined CHROME if exist "%LocalAppData%\Google\Chrome\Application\chrome.exe" set "CHROME=%LocalAppData%\Google\Chrome\Application\chrome.exe"
-if not defined CHROME (
-    echo [X] Chrome nao encontrado nos caminhos padrao.
-    echo     Instale o Google Chrome, ou abra manualmente com:
-    echo     chrome.exe --remote-debugging-port=9222 --user-data-dir="%~dp0cdp_profile"
-    pause
-    exit /b 1
-)
+rem Sem bloco `if (...)`: a mensagem imprime o caminho da pasta, e um ")"
+rem no nome dela quebraria o parse e a janela fecharia sem explicar nada.
+if defined CHROME goto :_tem_chrome
+echo [X] Chrome nao encontrado nos caminhos padrao.
+echo     Instale o Google Chrome, ou abra manualmente com:
+echo     chrome.exe --remote-debugging-port=9222 --user-data-dir="%~dp0cdp_profile"
+pause
+exit /b 1
+:_tem_chrome
 echo ============================================================
 echo   Abrindo o Chrome de automacao (perfil isolado, porta 9222)
 echo   com abas de: GW, Firma, FluxAsset, GC.
