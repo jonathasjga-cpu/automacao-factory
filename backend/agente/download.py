@@ -110,6 +110,10 @@ Instale UMA vez. Use SEMPRE:
 2) "2 - ABRIR CHROME.bat" (perfil isolado; faca login manual no GW)
 3) "3 - INICIAR AGENTE.bat" (deixe a janela aberta enquanto usar)
 
+Se o painel insistir em mostrar "Agente offline", rode
+"4 - DIAGNOSTICO.bat": ele diz em uma tela se o problema e' o pacote
+velho, bloqueio de rede ou outra coisa. Mande um print dessa janela.
+
 O agente puxa ordens do painel a cada 5s. O Chrome logado continua ativo
 enquanto voce nao fechar a janela dele (perfil salvo em cdp_profile/).
 
@@ -138,6 +142,7 @@ _ARQUIVOS_VERSAO = [
     ("pacote/1 - INSTALAR.bat",          PACOTE_DIR / "1 - INSTALAR.bat"),
     ("pacote/2 - ABRIR CHROME.bat",      PACOTE_DIR / "2 - ABRIR CHROME.bat"),
     ("pacote/3 - INICIAR AGENTE.bat",    PACOTE_DIR / "3 - INICIAR AGENTE.bat"),
+    ("pacote/4 - DIAGNOSTICO.bat",       PACOTE_DIR / "4 - DIAGNOSTICO.bat"),
     ("agente_bot.py",                    AGENTE_DIR / "agente_bot.py"),
     ("motor_excel.py",                   AGENTE_DIR / "motor_excel.py"),
     ("motor_documentos.py",              AGENTE_DIR / "motor_documentos.py"),
@@ -201,7 +206,8 @@ def download(request: Request):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         # ── Raiz do pacote: .bat + LEIA-ME em CRLF ──
-        for nome in ("1 - INSTALAR.bat", "2 - ABRIR CHROME.bat", "3 - INICIAR AGENTE.bat"):
+        for nome in ("1 - INSTALAR.bat", "2 - ABRIR CHROME.bat",
+                     "3 - INICIAR AGENTE.bat", "4 - DIAGNOSTICO.bat"):
             zf.writestr(nome, _crlf(_read(PACOTE_DIR / nome)))
         # install.ps1 tambem CRLF (Windows PowerShell prefere)
         zf.writestr("install.ps1", _crlf(_read(PACOTE_DIR / "install.ps1")))
