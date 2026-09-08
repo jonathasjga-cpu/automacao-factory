@@ -37,6 +37,28 @@ rem Chrome portable dentro da pasta do agente e ele sera
 rem detectado automaticamente:
 rem   %~dp0chrome_portable\chrome.exe
 rem =================================================
+rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
+rem O cmd.exe NAO aceita caminho \servidor\pasta como diretorio atual.
+rem O `cd /d` falha, o script segue na pasta errada e nada funciona — e a
+rem janela fecha antes de dar tempo de ler o motivo.
+set "_DIR=%~dp0"
+if "%_DIR:~0,2%"=="\\" (
+    echo.
+    echo ============================================================
+    echo   [X] PASTA DE REDE NAO FUNCIONA
+    echo ============================================================
+    echo.
+    echo   Esta pasta esta num caminho de rede:
+    echo   %_DIR%
+    echo.
+    echo   O Windows nao permite rodar .bat direto de pasta de rede.
+    echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
+    echo   e rode de la.
+    echo.
+    pause
+    exit /b 1
+)
+
 set "CHROME="
 if exist "%~dp0chrome_portable\chrome.exe" set "CHROME=%~dp0chrome_portable\chrome.exe"
 if not defined CHROME if exist "C:\Program Files\Google\Chrome\Application\chrome.exe" set "CHROME=C:\Program Files\Google\Chrome\Application\chrome.exe"

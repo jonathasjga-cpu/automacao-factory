@@ -40,6 +40,28 @@ rem Este .bat: mostra header, roda .ps1, e SEMPRE pausa no fim mesmo que quebre.
 rem Se voce ver a mensagem [X] o log detalhado esta em %USERPROFILE%\autofactory_install.log
 
 echo.
+rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
+rem O cmd.exe NAO aceita caminho \servidor\pasta como diretorio atual.
+rem O `cd /d` falha, o script segue na pasta errada e nada funciona — e a
+rem janela fecha antes de dar tempo de ler o motivo.
+set "_DIR=%~dp0"
+if "%_DIR:~0,2%"=="\\" (
+    echo.
+    echo ============================================================
+    echo   [X] PASTA DE REDE NAO FUNCIONA
+    echo ============================================================
+    echo.
+    echo   Esta pasta esta num caminho de rede:
+    echo   %_DIR%
+    echo.
+    echo   O Windows nao permite rodar .bat direto de pasta de rede.
+    echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
+    echo   e rode de la.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo ============================================================
 echo   AutoFactory Agente - INSTALADOR
 echo ============================================================
@@ -57,10 +79,19 @@ if %EXITCODE% equ 0 (
     echo     2 - ABRIR CHROME.bat   ^(faca login nos sistemas^)
     echo     3 - INICIAR AGENTE.bat ^(deixe aberto^)
 ) else (
-    echo   [X] Instalacao terminou com erro. Ver log:
-    echo   %USERPROFILE%\autofactory_install.log
+    echo   [X] Instalacao terminou com erro ^(codigo %EXITCODE%^).
     echo.
-    echo   Copie o conteudo do log e mande pro suporte.
+    echo   --- DIAGNOSTICO ^(mande este print junto^) ---
+    ver
+    powershell -NoProfile -Command "'   PowerShell ' + $PSVersionTable.PSVersion.ToString()" 2>nul
+    echo    Pasta: %~dp0
+    if exist "%USERPROFILE%\autofactory_install.log" (
+        echo    Log detalhado: %USERPROFILE%\autofactory_install.log
+        echo    ^(abra e mande o conteudo — ele diz o passo exato^)
+    ) else (
+        echo    Log: nao encontrado. Mande o print DESTA janela — as
+        echo    linhas de erro acima sao o que importa.
+    )
 )
 echo ============================================================
 echo.

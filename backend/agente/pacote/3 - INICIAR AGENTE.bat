@@ -31,6 +31,28 @@ if not exist "%~dp0agente_bot.py" (
     exit /b 1
 )
 
+rem ── Guarda: pasta de rede (UNC) ─────────────────────────────────
+rem O cmd.exe NAO aceita caminho \servidor\pasta como diretorio atual.
+rem O `cd /d` falha, o script segue na pasta errada e nada funciona — e a
+rem janela fecha antes de dar tempo de ler o motivo.
+set "_DIR=%~dp0"
+if "%_DIR:~0,2%"=="\\" (
+    echo.
+    echo ============================================================
+    echo   [X] PASTA DE REDE NAO FUNCIONA
+    echo ============================================================
+    echo.
+    echo   Esta pasta esta num caminho de rede:
+    echo   %_DIR%
+    echo.
+    echo   O Windows nao permite rodar .bat direto de pasta de rede.
+    echo   COPIE a pasta do agente para o computador ^(ex: Documentos^)
+    echo   e rode de la.
+    echo.
+    pause
+    exit /b 1
+)
+
 call :detectpy
 if not defined PYEXE (
     echo [X] Python nao encontrado. Rode antes o "1 - INSTALAR.bat".
