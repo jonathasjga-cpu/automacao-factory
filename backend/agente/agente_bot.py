@@ -299,8 +299,31 @@ def main():
                 time.sleep(intervalo * 2)
                 continue
             if "_erro_http" in r:
-                print(f"[AGENTE] painel HTTP {r['_erro_http']}: {r.get('_body', '')[:200]}")
-                time.sleep(intervalo * 2)
+                cod = r["_erro_http"]
+                if cod in (401, 403):
+                    # Token rejeitado. Antes isso saia como "painel HTTP 401"
+                    # a cada 4s — o usuario nao tinha como saber o que fazer e
+                    # o agente ficava "offline" no painel sem explicacao.
+                    print("")
+                    print("=" * 60)
+                    print(" [X] O PAINEL RECUSOU ESTE AGENTE (token invalido)")
+                    print("=" * 60)
+                    print(" Este pacote foi baixado antes de uma atualizacao do")
+                    print(" painel e o token dele nao vale mais.")
+                    print("")
+                    print(" O QUE FAZER:")
+                    print("   1) Feche esta janela.")
+                    print("   2) No painel, clique em 'Baixar agente'.")
+                    print("   3) Extraia o .zip novo numa pasta e rode o")
+                    print("      '3 - INICIAR AGENTE.bat' de dentro dela.")
+                    print("")
+                    print(" Nao precisa reinstalar o Python — so o pacote novo.")
+                    print("=" * 60)
+                    print("")
+                    time.sleep(30)
+                else:
+                    print(f"[AGENTE] painel HTTP {cod}: {r.get('_body', '')[:200]}")
+                    time.sleep(intervalo * 2)
                 continue
 
             if not r.get("tem_ordem"):
