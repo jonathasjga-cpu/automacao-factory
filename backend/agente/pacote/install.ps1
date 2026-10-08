@@ -9,11 +9,11 @@ function Log($msg, $color = "White") {
     $ts = Get-Date -Format "HH:mm:ss"
     $line = "[$ts] $msg"
     Write-Host $line -ForegroundColor $color
-    Add-Content -Path $LOG_FILE -Value $line -Encoding UTF8
+    Add-Content -LiteralPath $LOG_FILE -Value $line -Encoding UTF8
 }
 
 # Reset log
-"" | Out-File -FilePath $LOG_FILE -Encoding UTF8
+"" | Out-File -LiteralPath $LOG_FILE -Encoding UTF8
 
 Log "=========================================="
 Log " AutoFactory Agente - Instalacao"
@@ -29,9 +29,9 @@ Log ""
 Log "PASSO 0/5: Desativando stub Python da Microsoft Store (se existir)..."
 foreach ($stub in @("python.exe", "python3.exe")) {
     $p = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\$stub"
-    if (Test-Path $p) {
+    if (Test-Path -LiteralPath $p) {
         try {
-            Remove-Item $p -Force -ErrorAction Stop
+            Remove-Item -LiteralPath $p -Force -ErrorAction Stop
             Log "  removido: $p" "Green"
         } catch {
             Log "  aviso: nao consegui remover $p ($_)" "Yellow"
@@ -60,7 +60,7 @@ function Find-Python {
     }
     # Testa cada um: precisa executar `--version` e imprimir "Python 3.X.Y"
     foreach ($c in $candidatos) {
-        if (Test-Path $c) {
+        if (Test-Path -LiteralPath $c) {
             try {
                 $ver = & $c --version 2>&1
                 if ($ver -match '^Python 3\.\d+\.\d+') {
@@ -192,7 +192,16 @@ $sb = New-Object System.Text.StringBuilder
 [IO.File]::WriteAllText($tmpPy, $sb.ToString(), [Text.UTF8Encoding]::new($false))
 $saida = & $py $tmpPy 2>&1
 foreach ($linha in $saida) { Log ("  " + $linha) }
-Remove-Item $tmpPy -Force -ErrorAction SilentlyContinue
+# -LiteralPath (e nao o -Path posicional) em TODO caminho vindo de variavel.
+# O -Path expande curinga, e um perfil com acento faz o Windows usar o nome
+# curto 8.3 — C:\Users\JOSC~1\... O '~' quebrava a expansao com
+# 'Nao existe um objeto no caminho especificado', em vermelho, no fim de uma
+# instalacao que tinha dado certo. O -ErrorAction nao silencia isso: o erro
+# acontece ao ligar o parametro, antes do cmdlet rodar.
+# .NET direto, sem o parser de caminho do PowerShell: nenhum curinga, nenhum
+# tratamento de '~', e o catch engole qualquer coisa. Apagar um temporario
+# nunca pode pintar a tela de vermelho no fim de uma instalacao que deu certo.
+try { [IO.File]::Delete($tmpPy) } catch { }
 if ($LASTEXITCODE -ne 0) {
     Log "ERRO: Deps instaladas mas import falhou." "Red"
     exit 3
@@ -211,7 +220,7 @@ $chromeCandidatos = @(
 if ($pf86) { $chromeCandidatos += "$pf86\Google\Chrome\Application\chrome.exe" }
 $chrome = $null
 foreach ($c in $chromeCandidatos) {
-    if (Test-Path $c) { $chrome = $c; break }
+    if (Test-Path -LiteralPath $c) { $chrome = $c; break }
 }
 if ($chrome) {
     Log "  Chrome encontrado: $chrome" "Green"
@@ -223,7 +232,7 @@ if ($chrome) {
             $out = & winget install -e --id Google.Chrome --scope user --silent --accept-package-agreements --accept-source-agreements 2>&1
             Log ($out | Out-String)
             foreach ($c in $chromeCandidatos) {
-                if (Test-Path $c) { $chrome = $c; break }
+                if (Test-Path -LiteralPath $c) { $chrome = $c; break }
             }
         } catch {
             Log "  winget Chrome falhou: $_" "Yellow"
