@@ -133,53 +133,14 @@ async def _safe_goto(page: Page, url: str, *, wait_until: str = "load", timeout:
     raise ultimo_erro if ultimo_erro else Exception("goto falhou")
 
 
-# NAO use mais este mapa pra decidir a filial da busca: os ids do GW NAO sao
-# estaveis e ja mudaram. MEDIDO em 08/10/2026 na propria tela:
+# Ids de filial do GW, medidos em 08/10/2026 na propria tela — guardados so
+# como documentacao, NAO use pra filtrar:
 #   0 TODAS | 1 MATRIZ | 2 DESATIVADA | 3 Filial BA | 4 Filial CE
 #   5 Filial PB | 6 FL Petrolina | 8 FL Caruaru | 9 Filial SP
-# O mapa dizia que *_sp era "2" — que e' a filial DESATIVADA, nao a SP (9).
-# Resultado: operacao de Filial SP buscava na filial errada e nao achava
-# fatura nenhuma, enquanto a Matriz (1, por acaso correto) funcionava.
-# Agora a filial e' resolvida PELO TEXTO, lendo as opcoes da tela.
-_FILIAL_ID = {
-    "firma_matriz": "1", "firma_sp": "9",
-    "fluxasset_matriz": "1", "fluxasset_sp": "9",
-    "gc_matriz": "1", "gc_sp": "9",
-}
-
-
-async def _resolver_filial_id(page, rotulo: str, log) -> str | None:
-    """Acha o value da opcao de filial cujo texto casa com `rotulo`.
-
-    Comparacao por texto normalizado (sem acento/caixa). Devolve None quando
-    nao da pra casar — e o chamador entao busca em TODAS as filiais, que e'
-    mais abrangente e nunca traz a filial errada.
-    """
-    try:
-        opcoes = await page.evaluate(
-            "() => { const s = document.querySelector('select[name=\"filialId\"]');"
-            " return s ? [...s.options].map(o => ({v: o.value, t: (o.text||'').trim()})) : []; }")
-    except Exception:
-        return None
-    if not opcoes:
-        return None
-    alvo = _norm_txt(rotulo)
-    if not alvo:
-        return None
-    for o in opcoes:
-        if _norm_txt(o["t"]) == alvo:
-            log(f"  Filial '{rotulo}' -> id {o['v']}")
-            return o["v"]
-    # casamento parcial: "SP" casa "Filial SP"; evita pegar "TODAS"/"DESATIVADA"
-    parciais = [o for o in opcoes
-                if alvo in _norm_txt(o["t"])
-                and _norm_txt(o["t"]) not in ("todas", "desativada")]
-    if len(parciais) == 1:
-        log(f"  Filial '{rotulo}' -> id {parciais[0]['v']} (por '{parciais[0]['t']}')")
-        return parciais[0]["v"]
-    log(f"  ⚠️ Filial '{rotulo}' nao casou com nenhuma opcao da tela "
-        f"({[o['t'] for o in opcoes]}) — buscando em TODAS")
-    return None
+# Existia aqui um mapa dizendo que *_sp era "2" (que e' a DESATIVADA). Mas
+# mesmo com o id certo (9) a busca nao achava as faturas: a filial do
+# relatorio de Automacao nao corresponde a filial desta tela. A tela de
+# faturas passou a buscar em TODAS — ver o comentario no _core_baixar_faturas.
 
 
 async def _selecionar_filial_cte(page, rotulo: str, log) -> str | None:
@@ -912,24 +873,20 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                 # desliga o filtro de filial no GW e filtra localmente pelos numeros.
                 # Isso evita "fatura nao retornou na busca" quando o usuario atribuiu a factory
                 # errada (ex: gc_matriz mas fatura esta em Filial CE).
-                # A filial vem da PROPRIA fatura, e o id e' resolvido lendo as
-                # opcoes da tela (ver _resolver_filial_id). O criterio antigo
-                # ("MATRIZ ou contem SP, senao busca todas") somado ao mapa fixo
-                # mandava a Filial SP pro id 2, que e' a DESATIVADA — a busca
-                # voltava vazia e nenhuma fatura era encontrada.
-                filiais_reais = {str(f.get("filial") or "").strip()
-                                 for f in faturas if str(f.get("filial") or "").strip()}
+                # Busca SEMPRE em TODAS as filiais. MEDIDO em 08/10/2026 com
+                # 3 faturas reais da Filial SP (014025, 014036, 014042):
+                #
+                #   emissao 08/10 + filial 9 (Filial SP) -> 10 linhas, SEM elas
+                #   emissao 08/10 + filial TODAS         -> 48 linhas, COM elas
+                #
+                # Ou seja: a filial do relatorio de Automacao NAO corresponde a
+                # filial desta tela. Filtrar por ela devolvia o subconjunto
+                # errado e a fatura "sumia" — era o bug relatado. A Matriz
+                # funcionava por coincidencia de id.
+                #
+                # Nao perdemos nada: a marcacao abaixo e' por NUMERO de fatura,
+                # que ja identifica sozinha. O unico custo e' a lista vir maior.
                 filial_id = None
-                filial_rotulo = None
-                if len(filiais_reais) == 1:
-                    filial_rotulo = next(iter(filiais_reais))
-                elif len(filiais_reais) > 1:
-                    log(f"  ℹ️  Faturas de varias filiais {sorted(filiais_reais)} — "
-                        f"busca SEM filtro de filial (filtragem local por numero).")
-                else:
-                    # Sem filial nas faturas: ultimo recurso pelo sistema.
-                    filial_rotulo = {"1": "MATRIZ", "9": "Filial SP"}.get(
-                        _FILIAL_ID.get(sistema, "1"))
 
                 try:
                     # Submete o formulário para garantir que o GW atualize a sessão corretamente.
@@ -983,8 +940,6 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                     # Agora que a tela esta carregada, resolve o id da filial
                     # pelo TEXTO da opcao. Se nao casar, filial_id fica None e a
                     # busca sai em TODAS — abrangente, nunca na filial errada.
-                    if filial_rotulo:
-                        filial_id = await _resolver_filial_id(page, filial_rotulo, log)
                     # Filial: usa value numerico quando conhecido; senao seleciona "Todas"
                     # (option com texto "Todas" ou selectedIndex=0), pra pegar faturas
                     # de filiais fora do mapeamento MATRIZ/SP.
@@ -1131,6 +1086,13 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                         except Exception:
                             pass
                     log(f"  📋 GW retornou {len(na_pagina)} fatura(s): {na_pagina[:8]}")
+                    # O select de limite vai so ate 200. Num dia com mais faturas
+                    # que isso a lista chega cortada e a fatura pode faltar por
+                    # truncamento, nao por estar ausente — avisa pra nao virar
+                    # cacada no escuro.
+                    if len(na_pagina) >= 200:
+                        log("  ⚠️ Resultado no limite de 200 — pode estar truncado. "
+                            "Se faltar fatura, rode a operacao em intervalo de data menor.")
 
                     # Rede de seguranca: se nenhuma das faturas buscadas veio, tenta
                     # pesquisar de novo. A causa conhecida (campoDeConsulta voltando
