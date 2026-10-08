@@ -133,11 +133,59 @@ async def _safe_goto(page: Page, url: str, *, wait_until: str = "load", timeout:
     raise ultimo_erro if ultimo_erro else Exception("goto falhou")
 
 
+# NAO use mais este mapa pra decidir a filial da busca: os ids do GW NAO sao
+# estaveis e ja mudaram. MEDIDO em 08/10/2026 na propria tela:
+#   0 TODAS | 1 MATRIZ | 2 DESATIVADA | 3 Filial BA | 4 Filial CE
+#   5 Filial PB | 6 FL Petrolina | 8 FL Caruaru | 9 Filial SP
+# O mapa dizia que *_sp era "2" — que e' a filial DESATIVADA, nao a SP (9).
+# Resultado: operacao de Filial SP buscava na filial errada e nao achava
+# fatura nenhuma, enquanto a Matriz (1, por acaso correto) funcionava.
+# Agora a filial e' resolvida PELO TEXTO, lendo as opcoes da tela.
 _FILIAL_ID = {
-    "firma_matriz": "1", "firma_sp": "2",
-    "fluxasset_matriz": "1", "fluxasset_sp": "2",
-    "gc_matriz": "1", "gc_sp": "2",
+    "firma_matriz": "1", "firma_sp": "9",
+    "fluxasset_matriz": "1", "fluxasset_sp": "9",
+    "gc_matriz": "1", "gc_sp": "9",
 }
+
+
+async def _resolver_filial_id(page, rotulo: str, log) -> str | None:
+    """Acha o value da opcao de filial cujo texto casa com `rotulo`.
+
+    Comparacao por texto normalizado (sem acento/caixa). Devolve None quando
+    nao da pra casar — e o chamador entao busca em TODAS as filiais, que e'
+    mais abrangente e nunca traz a filial errada.
+    """
+    try:
+        opcoes = await page.evaluate(
+            "() => { const s = document.querySelector('select[name=\"filialId\"]');"
+            " return s ? [...s.options].map(o => ({v: o.value, t: (o.text||'').trim()})) : []; }")
+    except Exception:
+        return None
+    if not opcoes:
+        return None
+    alvo = _norm_txt(rotulo)
+    if not alvo:
+        return None
+    for o in opcoes:
+        if _norm_txt(o["t"]) == alvo:
+            log(f"  Filial '{rotulo}' -> id {o['v']}")
+            return o["v"]
+    # casamento parcial: "SP" casa "Filial SP"; evita pegar "TODAS"/"DESATIVADA"
+    parciais = [o for o in opcoes
+                if alvo in _norm_txt(o["t"])
+                and _norm_txt(o["t"]) not in ("todas", "desativada")]
+    if len(parciais) == 1:
+        log(f"  Filial '{rotulo}' -> id {parciais[0]['v']} (por '{parciais[0]['t']}')")
+        return parciais[0]["v"]
+    log(f"  ⚠️ Filial '{rotulo}' nao casou com nenhuma opcao da tela "
+        f"({[o['t'] for o in opcoes]}) — buscando em TODAS")
+    return None
+
+
+def _norm_txt(s) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFD", str(s or ""))
+    return t.encode("ascii", "ignore").decode().lower().strip()
 
 # Labels da filial conforme aparecem no CTeControlador
 _FILIAL_CTE = {
@@ -391,17 +439,56 @@ async def _diagnosticar_busca_cte(page: Page, numero: str, filial_label: str) ->
     return " | ".join(info)
 
 
+def _cnpj_digitos(v) -> str:
+    return re.sub(r"\D", "", str(v or ""))
+
+
+def _pdf_confere_com_fatura(body: bytes, esperado: dict, log) -> bool | None:
+    """O PDF do CT-e e' do cliente esperado?
+
+    Devolve True/False, ou None quando nao deu pra extrair texto (PDF de
+    imagem, por exemplo) — nesse caso quem chama decide.
+
+    O DACTE traz "TOMADOR DO SERVICO <nome>" e os CNPJs em texto. O CNPJ e'
+    o criterio: exato, sem acento nem abreviacao pra atrapalhar.
+    """
+    cnpj = _cnpj_digitos((esperado or {}).get("cliente_cnpj"))
+    if not cnpj:
+        return None
+    try:
+        from pypdf import PdfReader
+        import io as _io
+        r = PdfReader(_io.BytesIO(body))
+        txt = "\n".join((pg.extract_text() or "") for pg in r.pages[:12])
+    except Exception as e:
+        log(f"    (nao consegui ler o texto do PDF: {str(e)[:60]})")
+        return None
+    if not txt.strip():
+        return None
+    return cnpj in _cnpj_digitos(txt)
+
+
 async def _baixar_cte_de_meus_relatorios(
     page: Page,
     context: BrowserContext,
     marcador_dt: datetime,
     log,
     max_seconds: int = 300,
+    esperado: dict | None = None,
 ) -> bytes | None:
     """
-    Fallback quando o popup do CT-e não captura o PDF: vai em
-    /RelatorioControlador?acao=abrirTelaMeusRelatorios e baixa o relatório
-    Modelo 17 (CT-e) processado depois de marcador_dt.
+    Fallback quando o popup do CT-e não captura o PDF: vai em Meus Relatórios
+    e baixa o relatório de CT-e gerado para ESTA fatura.
+
+    A tela de Meus Relatórios NAO diz de qual fatura e' cada relatorio — as
+    colunas sao so "Nome do Relatorio | Rotina | Status | Solicitado em |
+    Processado em". Pegar "o CT-e mais recente" era, por isso, um palpite: com
+    duas faturas pedidas com segundos de diferenca, o relatorio de uma era
+    salvo com o numero da outra (CT-e da Gartran gravado como fatura da ERS).
+
+    Entao: junta TODOS os candidatos da janela, e confere o CNPJ do cliente
+    dentro do PDF. Se nenhum confere e havia mais de um candidato, nao salva
+    nada — melhor a fatura faltar do que vir o documento do cliente errado.
     """
     import httpx as _httpx
 
@@ -421,107 +508,138 @@ async def _baixar_cte_de_meus_relatorios(
             continue
         await page.wait_for_timeout(1500)
 
-        # Procura linha mais recente: Rotina contém "CT-e" e Status="Gerado"
-        # com timestamp >= marcador_dt
-        marcador_iso = marcador_dt.strftime("%Y-%m-%dT%H:%M")
-        linha_idx = await page.evaluate(
+        # TODOS os candidatos da janela, nao so o mais recente.
+        # Precisao de SEGUNDO: com minuto, dois relatorios pedidos no mesmo
+        # minuto (medido: 09:18:55 e 09:19:24) viravam ambos candidatos e o
+        # "mais recente" podia ser o da fatura anterior.
+        marcador_iso = marcador_dt.strftime("%Y-%m-%dT%H:%M:%S")
+        candidatos = await page.evaluate(
             """(marcadorIso) => {
                 const rows = [...document.querySelectorAll('tr')];
-                const isoMin = marcadorIso;  // 'YYYY-MM-DDTHH:MM'
-                const candidatos = [];
+                const out = [];
                 for (let i = 0; i < rows.length; i++) {
-                    const r = rows[i];
-                    const tds = [...r.querySelectorAll('td')];
+                    const tds = [...rows[i].querySelectorAll('td')];
                     if (tds.length < 4) continue;
                     const txt = tds.map(t => (t.textContent || '').trim());
                     const all = txt.join(' | ');
                     if (!/CT-?e|Modelo\\s*17/i.test(all)) continue;
                     if (!/Gerado/i.test(all)) continue;
-                    // procura timestamp DD/MM/AAAA, HH:MM:SS no row
                     const dts = [];
                     for (const t of txt) {
                         const m = t.match(/(\\d{2})\\/(\\d{2})\\/(\\d{4}),?\\s+(\\d{2}):(\\d{2}):?(\\d{2})?/);
-                        if (m) {
-                            const iso = `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}`;
-                            dts.push(iso);
-                        }
+                        if (m) dts.push(`${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6] || '00'}`);
                     }
                     if (!dts.length) continue;
-                    // usa o maior (processado em)
-                    const maxIso = dts.sort().pop();
-                    if (maxIso >= isoMin) {
-                        candidatos.push({i, maxIso, all});
-                    }
+                    dts.sort();
+                    // dts[0] = "Solicitado em" (o pedido), que e o que casa
+                    // com o instante em que clicamos Imprimir.
+                    if (dts[0] >= marcadorIso) out.push({i, solicitado: dts[0], all: all.slice(0, 120)});
                 }
-                if (!candidatos.length) return -1;
-                // pega o mais recente
-                candidatos.sort((a, b) => b.maxIso.localeCompare(a.maxIso));
-                return candidatos[0].i;
+                // Mais ANTIGO primeiro: o nosso relatorio e' o primeiro
+                // pedido depois do marcador. Ordenar do mais recente fazia
+                // o de uma fatura posterior ganhar a preferencia.
+                out.sort((a, b) => a.solicitado.localeCompare(b.solicitado));
+                return out;
             }""",
             marcador_iso,
         )
-        if linha_idx < 0:
+        if not candidatos:
             elapsed = int(time.monotonic() - inicio)
-            log(f"    Meus Relatórios: ainda não tem CT-e gerado pra essa busca ({elapsed}s, máx {max_seconds}s)")
+            log(f"    Meus Relatórios: ainda não tem CT-e gerado pra essa busca "
+                f"({elapsed}s, máx {max_seconds}s)")
             await asyncio.sleep(15)
             continue
 
-        log(f"    Meus Relatórios: relatório CT-e encontrado na linha {linha_idx}")
+        log(f"    Meus Relatórios: {len(candidatos)} relatório(s) CT-e desde "
+            f"{marcador_dt:%H:%M:%S} — linhas {[c['i'] for c in candidatos]}")
 
-        # Captura URL do S3 via route interception ao clicar "Baixar PDF"
-        s3_url_holder: dict = {}
-        ev = asyncio.Event()
+        async def _baixar_linha(idx: int) -> bytes | None:
+            """Clica 'Baixar PDF' da linha e busca o PDF no S3."""
+            s3_url_holder: dict = {}
+            ev = asyncio.Event()
 
-        async def _route_s3(route, request=None):
-            u = route.request.url
-            if ("s3.amazonaws.com" in u or "s3.us-east" in u or "gw-saas-relatorios" in u) and not ev.is_set():
-                s3_url_holder["url"] = u
-                ev.set()
+            async def _route_s3(route, request=None):
+                u = route.request.url
+                if (("s3.amazonaws.com" in u or "s3.us-east" in u
+                     or "gw-saas-relatorios" in u) and not ev.is_set()):
+                    s3_url_holder["url"] = u
+                    ev.set()
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+
+            await context.route("**/*", _route_s3)
             try:
-                await route.continue_()
-            except Exception:
-                pass
+                clicado = await page.evaluate(
+                    """(idx) => {
+                        const r = document.querySelectorAll('tr')[idx];
+                        if (!r) return false;
+                        const l = [...r.querySelectorAll('a, button')]
+                            .find(x => /baixar/i.test(x.textContent || ''));
+                        if (!l) return false;
+                        l.click();
+                        return true;
+                    }""",
+                    idx,
+                )
+                if not clicado:
+                    log(f"    Meus Relatórios: link 'Baixar PDF' não achado na linha {idx}")
+                    return None
+                try:
+                    await asyncio.wait_for(ev.wait(), timeout=30)
+                except asyncio.TimeoutError:
+                    log(f"    Meus Relatórios: timeout aguardando S3 URL (linha {idx})")
+                    return None
+            finally:
+                await context.unroute("**/*", _route_s3)
 
-        await context.route("**/*", _route_s3)
-        try:
-            # Clica no link "Baixar PDF" da linha encontrada
-            clicked = await page.evaluate(
-                """(idx) => {
-                    const r = document.querySelectorAll('tr')[idx];
-                    if (!r) return false;
-                    const links = [...r.querySelectorAll('a, button')];
-                    const link = links.find(l => /baixar/i.test(l.textContent || ''));
-                    if (!link) return false;
-                    link.click();
-                    return true;
-                }""",
-                linha_idx,
-            )
-            if not clicked:
-                log("    Meus Relatórios: link 'Baixar PDF' não achado na linha")
+            url_pdf = s3_url_holder.get("url")
+            if not url_pdf:
                 return None
             try:
-                await asyncio.wait_for(ev.wait(), timeout=30)
-            except asyncio.TimeoutError:
-                log("    Meus Relatórios: timeout aguardando S3 URL")
-                return None
-        finally:
-            await context.unroute("**/*", _route_s3)
-
-        url_pdf = s3_url_holder.get("url")
-        if not url_pdf:
+                async with _httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
+                    corpo = (await client.get(url_pdf)).content
+                if corpo and b"%PDF" in corpo[:10]:
+                    return corpo
+            except Exception as e:
+                log(f"    Erro fetch S3: {e}")
             return None
 
-        try:
-            async with _httpx.AsyncClient(follow_redirects=True, timeout=120) as client:
-                resp = await client.get(url_pdf)
-                body = resp.content
-            if body and b"%PDF" in body[:10]:
-                log(f"    ✅ PDF via Meus Relatórios: {len(body):,} bytes")
-                return body
-        except Exception as e:
-            log(f"    Erro fetch S3: {e}")
+        # Confere CADA candidato pelo CNPJ do cliente. A tela nao diz de qual
+        # fatura e' o relatorio, entao a unica identificacao confiavel esta
+        # DENTRO do PDF (o DACTE traz "TOMADOR DO SERVICO <nome>" e os CNPJs).
+        sem_texto = []
+        for c in candidatos[:4]:
+            corpo = await _baixar_linha(c["i"])
+            if not corpo:
+                continue
+            confere = _pdf_confere_com_fatura(corpo, esperado or {}, log)
+            if confere is True:
+                log(f"    ✅ PDF via Meus Relatórios: {len(corpo):,} bytes "
+                    f"(CNPJ do cliente confere)")
+                return corpo
+            if confere is None:
+                sem_texto.append(corpo)
+                continue
+            log(f"    ⨯ Linha {c['i']} e' de OUTRO cliente — descartada "
+                f"(solicitado {c['solicitado'][11:]})")
+
+        # Nao deu pra confirmar por CNPJ (PDF sem texto ou sem CNPJ esperado).
+        if sem_texto and len(candidatos) == 1:
+            log("    ⚠️ Nao consegui confirmar o cliente pelo PDF, mas havia um "
+                "unico relatorio na janela — usando ele.")
+            return sem_texto[0]
+        if len(candidatos) > 1:
+            log(f"    ❌ {len(candidatos)} relatórios CT-e na janela e nenhum "
+                f"confirmou o CNPJ do cliente. NAO vou salvar: o risco e' "
+                f"gravar o CT-e de outro cliente nesta fatura.")
+            return None
+        log("    Meus Relatórios: nenhum PDF utilizável")
         return None
+
+
+
 
 
 # ─── S3 CAPTURE ──────────────────────────────────────────────────────────────
@@ -737,14 +855,24 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                 # desliga o filtro de filial no GW e filtra localmente pelos numeros.
                 # Isso evita "fatura nao retornou na busca" quando o usuario atribuiu a factory
                 # errada (ex: gc_matriz mas fatura esta em Filial CE).
-                filiais_reais = {str(f.get("filial") or "").strip().upper() for f in faturas if str(f.get("filial") or "").strip()}
-                filiais_conhecidas = {x for x in filiais_reais if x == "MATRIZ" or "SP" in x}
-                tem_filial_outra = bool(filiais_reais and (filiais_reais - filiais_conhecidas))
-                if tem_filial_outra:
-                    log(f"  ℹ️  Filiais detectadas: {sorted(filiais_reais)} — busca SEM filtro de filial (filtragem local por numero).")
-                    filial_id = None
+                # A filial vem da PROPRIA fatura, e o id e' resolvido lendo as
+                # opcoes da tela (ver _resolver_filial_id). O criterio antigo
+                # ("MATRIZ ou contem SP, senao busca todas") somado ao mapa fixo
+                # mandava a Filial SP pro id 2, que e' a DESATIVADA — a busca
+                # voltava vazia e nenhuma fatura era encontrada.
+                filiais_reais = {str(f.get("filial") or "").strip()
+                                 for f in faturas if str(f.get("filial") or "").strip()}
+                filial_id = None
+                filial_rotulo = None
+                if len(filiais_reais) == 1:
+                    filial_rotulo = next(iter(filiais_reais))
+                elif len(filiais_reais) > 1:
+                    log(f"  ℹ️  Faturas de varias filiais {sorted(filiais_reais)} — "
+                        f"busca SEM filtro de filial (filtragem local por numero).")
                 else:
-                    filial_id = _FILIAL_ID.get(sistema, "1")
+                    # Sem filial nas faturas: ultimo recurso pelo sistema.
+                    filial_rotulo = {"1": "MATRIZ", "9": "Filial SP"}.get(
+                        _FILIAL_ID.get(sistema, "1"))
 
                 try:
                     # Submete o formulário para garantir que o GW atualize a sessão corretamente.
@@ -794,6 +922,12 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
                                                  value="emissao_fatura", timeout=10000)
                     except Exception as _e:
                         log(f"  [AVISO] campoDeConsulta nao aceitou de primeira: {str(_e)[:70]}")
+
+                    # Agora que a tela esta carregada, resolve o id da filial
+                    # pelo TEXTO da opcao. Se nao casar, filial_id fica None e a
+                    # busca sai em TODAS — abrangente, nunca na filial errada.
+                    if filial_rotulo:
+                        filial_id = await _resolver_filial_id(page, filial_rotulo, log)
                     # Filial: usa value numerico quando conhecido; senao seleciona "Todas"
                     # (option com texto "Todas" ou selectedIndex=0), pra pegar faturas
                     # de filiais fora do mapeamento MATRIZ/SP.
@@ -1517,6 +1651,13 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                                 pdf_bytes = await _baixar_cte_de_meus_relatorios(
                                     page, context, marcador_relatorio, log,
                                     max_seconds=180,  # 3min — relatórios já chegam em 1-2min
+                                    # Sem isto o fallback nao tem como saber de
+                                    # qual fatura e' o relatorio que achou.
+                                    esperado={
+                                        "numero": numero,
+                                        "cliente_cnpj": fatura.get("cliente_cnpj"),
+                                        "cliente_nome": fatura.get("cliente_nome"),
+                                    },
                                 )
                             except Exception as e:
                                 log(f"    Erro fallback Meus Relatórios: {e}")
