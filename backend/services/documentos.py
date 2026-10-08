@@ -182,6 +182,63 @@ async def _resolver_filial_id(page, rotulo: str, log) -> str | None:
     return None
 
 
+async def _selecionar_filial_cte(page, rotulo: str, log) -> str | None:
+    """Seleciona a filial no #filial da tela de CT-e. Devolve o texto escolhido.
+
+    O select_option(label=...) LEVANTA quando o rotulo nao existe, e este
+    select nao tem opcao "TODAS" pra cair. Isso importa porque nome de filial
+    muda: a "Filial GRU" das faturas de setembro foi renomeada pra "Filial SP",
+    entao fatura antiga no cache traz um rotulo que o GW nao tem mais.
+
+    Ordem: texto exato > parcial unico > pela unidade (SP/Matriz) > desiste
+    sem quebrar, deixando o default e avisando no log.
+    """
+    try:
+        opcoes = await page.evaluate(
+            "() => { const s = document.getElementById('filial');"
+            " return s ? [...s.options].map(o => ({v: o.value, t: (o.text||'').trim()})) : []; }")
+    except Exception:
+        opcoes = []
+    if not opcoes:
+        log("    ⚠️ Select de filial da tela de CT-e nao encontrado")
+        return None
+
+    alvo = _norm_txt(rotulo)
+    escolhido = None
+    for o in opcoes:
+        if _norm_txt(o["t"]) == alvo:
+            escolhido = o
+            break
+    if not escolhido and alvo:
+        parciais = [o for o in opcoes if alvo in _norm_txt(o["t"])
+                    and _norm_txt(o["t"]) != "desativada"]
+        if len(parciais) == 1:
+            escolhido = parciais[0]
+    if not escolhido and alvo:
+        # Pela unidade: nomes antigos (GRU) e variantes caem aqui.
+        toks = set(_norm_txt(rotulo).replace("-", " ").split())
+        if "sp" in toks or "gru" in toks or "sao paulo" in _norm_txt(rotulo):
+            cand = [o for o in opcoes if "sp" in _norm_txt(o["t"]).split()]
+        elif "matriz" in toks:
+            cand = [o for o in opcoes if _norm_txt(o["t"]) == "matriz"]
+        else:
+            cand = []
+        if len(cand) == 1:
+            escolhido = cand[0]
+            log(f"    Filial '{rotulo}' nao existe mais no GW — usando "
+                f"'{escolhido['t']}' (mesma unidade)")
+    if not escolhido:
+        log(f"    ⚠️ Filial '{rotulo}' nao casou com nenhuma opcao "
+            f"({[o['t'] for o in opcoes]}) — mantendo o padrao da tela")
+        return None
+    try:
+        await page.locator("#filial").select_option(value=escolhido["v"])
+    except Exception as e:
+        log(f"    ⚠️ Nao consegui selecionar a filial '{escolhido['t']}': {str(e)[:70]}")
+        return None
+    return escolhido["t"]
+
+
 def _norm_txt(s) -> str:
     import unicodedata
     t = unicodedata.normalize("NFD", str(s or ""))
@@ -1425,7 +1482,9 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                             const opt = [...s.options].find(o => o.text.includes('1000'));
                             if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); }
                         }""")
-                        await page.locator("#filial").select_option(label=filial_label)
+                        _fl = await _selecionar_filial_cte(page, filial_label, log)
+                        if _fl:
+                            filial_label = _fl
 
                         # 6b. LIMPA filtros de data — busca é por número de FATURA, não por
                         # data de emissão do CT-e (CT-es da fatura podem ter sido emitidos
