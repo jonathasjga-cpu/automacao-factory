@@ -587,6 +587,14 @@ async def _baixar_cte_de_meus_relatorios(
                 except Exception:
                     pass
 
+            # O clique em "Baixar PDF" abre uma ABA com o PDF. Sem fechar, ela
+            # fica la segurando o arquivo inteiro na memoria do Chrome — e um
+            # relatorio de fatura grande passa de 16 MB. MEDIDO: depois de uma
+            # fatura de 213 CT-es, a aba orfa deixou o navegador tao lento que a
+            # fatura SEGUINTE falhou com timeout de navegacao ("Ocorrencias=-1",
+            # depois "PDF nao capturado"). Por isso guardamos quais abas existiam
+            # antes e fechamos as novas no fim.
+            abas_antes = set(context.pages)
             await context.route("**/*", _route_s3)
             try:
                 clicado = await page.evaluate(
@@ -611,6 +619,13 @@ async def _baixar_cte_de_meus_relatorios(
                     return None
             finally:
                 await context.unroute("**/*", _route_s3)
+                # Fecha o que o clique abriu — inclusive se deu erro no meio.
+                await asyncio.sleep(1.0)
+                for _nova in [x for x in context.pages if x not in abas_antes]:
+                    try:
+                        await _nova.close()
+                    except Exception:
+                        pass
 
             url_pdf = s3_url_holder.get("url")
             if not url_pdf:
@@ -1496,7 +1511,13 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                         try:
                             achou = await _aguardar_busca_cte(
                                 page, occ_antes, numero, log,
-                                max_seconds=120,        # 2 min — sai antes em 0 resultados
+                                # MEDIDO: a fatura 013852 (462 CT-es) responde em 42s
+                                # quando roda sozinha, mas estourava os 120s quando
+                                # vinha LOGO DEPOIS de uma de 213 CT-es — o GW ainda
+                                # esta servindo o relatorio anterior (16 MB). Sai
+                                # assim que o resultado aparece, entao a folga maior
+                                # nao custa nada no caso normal.
+                                max_seconds=240,
                                 poll_seconds=0.4,       # poll fino — saída imediata
                                 log_every_seconds=15.0, # mostra progresso a cada 15s
                             )
@@ -1671,7 +1692,14 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                             try:
                                 pdf_bytes = await _baixar_cte_de_meus_relatorios(
                                     page, context, marcador_relatorio, log,
-                                    max_seconds=180,  # 3min — relatórios já chegam em 1-2min
+                                    # Escala com o tamanho. MEDIDO: 213 CT-es ficam
+                                    # prontos em ~55s, mas 462 nao chegaram em 180s —
+                                    # o relatorio cresce e a fila do GW tambem. Fixo
+                                    # em 3min, a fatura grande era perdida inteira.
+                                    # Sai assim que o relatorio aparece, entao o teto
+                                    # maior nao atrasa quem e' rapido.
+                                    max_seconds=max(180, min(600, 120 + int(
+                                        (total_ctes if total_ctes > 0 else 100) * 1.2))),
                                     # Sem isto o fallback nao tem como saber de
                                     # qual fatura e' o relatorio que achou.
                                     esperado={
@@ -1682,6 +1710,15 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                                 )
                             except Exception as e:
                                 log(f"    Erro fallback Meus Relatórios: {e}")
+
+                        # Depois de um relatorio grande o GW fica ocupado, e a busca
+                        # da fatura SEGUINTE estoura o tempo. Um respiro proporcional
+                        # custa segundos e evita perder a proxima fatura inteira.
+                        if pdf_bytes and len(pdf_bytes) > 5_000_000:
+                            pausa = min(20, 5 + len(pdf_bytes) // 2_000_000)
+                            log(f"    Relatorio de {len(pdf_bytes)/1e6:.1f} MB — "
+                                f"aguardando {pausa}s pro GW respirar")
+                            await asyncio.sleep(pausa)
 
                         if not pdf_bytes or b"%PDF" not in pdf_bytes[:10]:
                             log(f"  ⚠️ PDF CT-e não capturado — fatura {numero}")
