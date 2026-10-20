@@ -57,4 +57,28 @@ def get_agente_token() -> str:
 
 
 def is_agente_ativo() -> bool:
-    return os.environ.get("AGENTE_ATIVO", "").strip().lower() in ("1", "true", "yes", "on")
+    """Modo agente ligado?
+
+    No RAILWAY o padrao e' LIGADO. O caminho alternativo — Playwright rodando
+    no proprio servidor — nao funciona de la: o navegador do container abre a
+    tela de login do GW e o formulario nunca aparece. Quando a env var sumiu,
+    o painel caiu silenciosamente nesse caminho e o usuario recebeu
+    "Timeout 15000ms exceeded waiting for #login", que nao tem relacao
+    nenhuma com a causa real.
+
+    Deixar o modo depender de uma env var que pode sumir e' fragil demais pra
+    uma coisa que, em producao, so tem um valor correto. Continua sendo
+    possivel desligar de proposito com AGENTE_ATIVO=0.
+
+    Fora do Railway (dev local) o padrao segue DESLIGADO: ali o Playwright
+    local funciona e e' pratico pra testar sem subir o agente.
+    """
+    v = os.environ.get("AGENTE_ATIVO", "").strip().lower()
+    if v:
+        return v in ("1", "true", "yes", "on")
+    try:
+        from browser_config import IS_RAILWAY
+    except Exception:
+        IS_RAILWAY = any(os.environ.get(k) for k in (
+            "RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID"))
+    return bool(IS_RAILWAY)

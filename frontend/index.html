@@ -3489,6 +3489,19 @@ async function carregarFaturas(dataInicial, dataFinal) {
       const fats = await _carregarFaturasViaAgente(dataInicial, dataFinal);
       data = { faturas: fats };
     } else {
+      // Caminho do SERVIDOR (Playwright no backend). So faz sentido em dev
+      // local — no Railway o navegador do container nao abre a tela de login
+      // do GW. Quando a flag do modo agente sumiu, o painel caiu aqui sem
+      // avisar e o usuario recebeu "Timeout waiting for #login", que nao tem
+      // relacao com a causa. Agora o modo fica explicito no log.
+      const _box = document.getElementById('progresso-carregar');
+      if (_box) {
+        _box.textContent = '⚠️ Modo Agente DESLIGADO — tentando pelo servidor. '
+          + 'Em produção isso não funciona; o suporte precisa ligar AGENTE_ATIVO.';
+      }
+      notifyWarn('O painel está com o Modo Agente desligado e vai tentar carregar '
+        + 'pelo servidor, o que não funciona em produção. Avise o suporte.',
+        'Modo Agente desligado');
       try {
         const qs = new URLSearchParams({ data_inicial: dataInicial, data_final: dataFinal }).toString();
         const resp = await fetch(`${API}/faturas?${qs}`);

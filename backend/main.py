@@ -29,6 +29,7 @@ from fastapi import Depends
 from agente.routers import router as agente_router
 from agente.download import router as agente_download_router
 from agente.token import is_agente_ativo
+from browser_config import IS_RAILWAY
 
 MSG_FINALIZAR_MANUAL = (
     "Ótimo! Todos os títulos foram digitados com sucesso. "
@@ -176,6 +177,25 @@ async def get_faturas(
     """Carrega faturas via GW (Playwright + Excel), filtrando por emissao da fatura no periodo.
     data_inicial / data_final em 'YYYY-MM-DD'. Se omitidos, usa hoje (BR).
     """
+    # Este endpoint roda o Playwright NO SERVIDOR. Isso nao funciona no Railway:
+    # o navegador do container abre /login do GW e o formulario nunca aparece —
+    # o erro que chega ao usuario e' "Timeout waiting for #login", que nao diz
+    # nada sobre a causa. Em modo agente o painel nem deveria chegar aqui.
+    if is_agente_ativo():
+        raise HTTPException(
+            status_code=409,
+            detail=("Modo Agente esta ligado: carregar faturas tem que passar pelo "
+                    "agente, nao pelo servidor. Recarregue o painel (Ctrl+F5) e tente "
+                    "de novo. Se persistir, o agente esta offline — rode "
+                    "'3 - INICIAR AGENTE.bat' na maquina com o Chrome logado."),
+        )
+    if IS_RAILWAY:
+        raise HTTPException(
+            status_code=409,
+            detail=("Carregar faturas pelo servidor nao funciona aqui: o navegador do "
+                    "container nao consegue abrir a tela de login do GW. Use o Agente "
+                    "Local (variavel AGENTE_ATIVO=1 no Railway)."),
+        )
     try:
         from services.excel_processor import processar_dataframes
         faturas = await processar_excels(
