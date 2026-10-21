@@ -24,7 +24,7 @@ from services.gc_automation import (
 
 
 CDP_URL_DEFAULT = os.getenv("CDP_URL", "http://localhost:9222")
-BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
+BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas.gwsistemas.com.br")
 
 
 def _sistema_para_url(sistema: str) -> str:

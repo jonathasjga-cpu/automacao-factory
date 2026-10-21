@@ -11,7 +11,12 @@ from browser_config import launch_kwargs
 from config_manager import get_credencial
 
 import os as _os_gw
-BASE_GW = _os_gw.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
+# O GW saiu de webtrans.saas2 para webtrans.saas (sem o "2") em 21/10/2026.
+# Confirmado perguntando aos servidores autoritativos do proprio GW
+# (ns1/ns2.gwcloudhosts.com.br): o nome antigo responde "nao existe" e o
+# novo responde normalmente. Os resolvedores que ainda devolviam o antigo
+# estavam servindo cache. Da pra sobrescrever com a env var GW_BASE_URL.
+BASE_GW = _os_gw.getenv("GW_BASE_URL", "https://webtrans.saas.gwsistemas.com.br")
 
 # ─── UTILS ───────────────────────────────────────────────────────────────────
 

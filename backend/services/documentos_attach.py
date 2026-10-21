@@ -17,7 +17,7 @@ from services.documentos import (
 
 
 CDP_URL_DEFAULT = os.getenv("CDP_URL", "http://localhost:9222")
-BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas2.gwsistemas.com.br")
+BASE_GW_DEFAULT = os.getenv("GW_BASE_URL", "https://webtrans.saas.gwsistemas.com.br")
 
 
 from services.cdp_tabs import achar_aba as _achar_aba, fechar_aba_criada as _fechar_aba_automacao
