@@ -265,10 +265,8 @@ async def _login_gw(page: Page, user_id: int | None = None):
     creds = get_credencial("gw", user_id=user_id)
     await page.goto(f"{BASE_GW}/login", wait_until="domcontentloaded", timeout=30000)
     # Aguarda campos de login renderizarem (mais confiável que timeout fixo)
-    await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
-    await page.locator('input[name="login"]').fill(creds["usuario"])
-    await page.locator('input[name="senha"]').fill(creds["senha"])
-    await page.locator('button.button-login').click()
+    from services.gw_login import preencher_login_gw
+    await preencher_login_gw(page, creds["usuario"], creds["senha"])
     # Aguarda redirect para fora do login — sai tão logo a URL muda
     try:
         await page.wait_for_url(lambda url: "login" not in url.lower(), timeout=30000)

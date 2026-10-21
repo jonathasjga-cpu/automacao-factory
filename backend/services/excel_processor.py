@@ -156,10 +156,8 @@ async def _gerar_relatorio_personalizado(page, nome_relatorio: str, data_hoje: s
                     "Configuracoes > Meu acesso GW e salve usuario/senha."
                 )
             await page.goto(f"{base}/login", wait_until="domcontentloaded", timeout=60000)
-            await page.wait_for_selector('#login', timeout=15000)
-            await page.fill('#login', _usr)
-            await page.fill('#senha', _sen)
-            await page.click('.button-login')
+            from services.gw_login import preencher_login_gw
+            await preencher_login_gw(page, _usr, _sen)
             await page.wait_for_load_state("load", timeout=60000)
             await page.wait_for_timeout(3000)
             # Volta pra home pra fechar sessao corretamente
@@ -511,10 +509,8 @@ async def baixar_relatorios_gw(
         # Login
         _prog_log("🔑 Fazendo login no GW...")
         await page.goto(f"{base}/login", wait_until="domcontentloaded")
-        await page.wait_for_selector('#login', timeout=15000)
-        await page.fill('#login', creds["usuario"])
-        await page.fill('#senha', creds["senha"])
-        await page.click('.button-login')
+        from services.gw_login import preencher_login_gw
+        await preencher_login_gw(page, creds["usuario"], creds["senha"], log=_prog_log)
         await page.wait_for_load_state("load", timeout=60000)
         await page.wait_for_timeout(3000)
 

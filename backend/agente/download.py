@@ -148,6 +148,7 @@ _ARQUIVOS_VERSAO = [
     ("motor_documentos.py",              AGENTE_DIR / "motor_documentos.py"),
     ("motor_factories.py",               AGENTE_DIR / "motor_factories.py"),
     ("services/cdp_tabs.py",             SERVICES_DIR / "cdp_tabs.py"),
+    ("services/gw_login.py",             SERVICES_DIR / "gw_login.py"),
     ("services/excel_processor.py",      SERVICES_DIR / "excel_processor.py"),
     ("services/excel_processor_attach.py", SERVICES_DIR / "excel_processor_attach.py"),
     ("services/documentos.py",           SERVICES_DIR / "documentos.py"),
@@ -228,6 +229,8 @@ def download(request: Request):
         zf.writestr("services/__init__.py", "")
         zf.writestr("services/cdp_tabs.py",
                     _read(SERVICES_DIR / "cdp_tabs.py"))
+        zf.writestr("services/gw_login.py",
+                    _read(SERVICES_DIR / "gw_login.py"))
         zf.writestr("services/excel_processor.py",
                     _read(SERVICES_DIR / "excel_processor.py"))
         zf.writestr("services/excel_processor_attach.py",

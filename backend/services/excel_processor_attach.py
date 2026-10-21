@@ -61,10 +61,8 @@ async def _fazer_login_gw(page, base_gw: str) -> None:
             "e salve usuario/senha antes de operar."
         )
     await page.goto(f"{base_gw}/login", wait_until="domcontentloaded", timeout=60000)
-    await page.wait_for_selector('#login', timeout=15000)
-    await page.fill('#login', usuario)
-    await page.fill('#senha', senha)
-    await page.click('.button-login')
+    from services.gw_login import preencher_login_gw
+    await preencher_login_gw(page, usuario, senha)
     await page.wait_for_load_state("load", timeout=60000)
     await page.wait_for_timeout(2500)
     # Volta pra home pra estabilizar a sessao

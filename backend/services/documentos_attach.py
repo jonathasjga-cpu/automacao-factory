@@ -55,10 +55,8 @@ async def _garantir_logado(page, report=None, base_gw: str = BASE_GW_DEFAULT, st
                 if status:
                     status.setdefault("logs", []).append("  [LOGIN] GW — logando automaticamente...")
                 await page.goto(f"{base_gw}/login", wait_until="domcontentloaded", timeout=30000)
-                await page.locator('input[name="login"]').wait_for(state="visible", timeout=10000)
-                await page.locator('input[name="login"]').fill(creds["usuario"])
-                await page.locator('input[name="senha"]').fill(creds["senha"])
-                await page.locator('button.button-login').click()
+                from services.gw_login import preencher_login_gw
+                await preencher_login_gw(page, creds["usuario"], creds["senha"])
                 try:
                     await page.wait_for_url(lambda u: "login" not in u.lower(), timeout=30000)
                 except Exception:
