@@ -191,10 +191,11 @@ def _crlf(txt: str) -> bytes:
     return txt.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
 
 
-@router.get("/download", dependencies=[Depends(get_current_user)])
-def download(request: Request):
-    """Retorna .zip do agente com config embutida."""
-    panel_url = _panel_url_from_request(request)
+def montar_zip(panel_url: str) -> bytes:
+    """Monta o .zip do agente. Usado pelo download do painel E pela
+    auto-atualizacao do agente, pra que os dois entreguem exatamente o mesmo
+    pacote — se divergissem, o agente poderia se atualizar pra algo diferente
+    do que o painel considera "a versao atual"."""
     token = token_mod.get_agente_token()
 
     config = {
@@ -253,7 +254,13 @@ def download(request: Request):
         zf.writestr("services/factories_attach.py",
                     _read(SERVICES_DIR / "factories_attach.py"))
 
-    buf.seek(0)
+    return buf.getvalue()
+
+
+@router.get("/download", dependencies=[Depends(get_current_user)])
+def download(request: Request):
+    """Pacote do agente, pro usuario baixar pelo painel."""
+    buf = io.BytesIO(montar_zip(_panel_url_from_request(request)))
     return StreamingResponse(
         buf,
         media_type="application/zip",

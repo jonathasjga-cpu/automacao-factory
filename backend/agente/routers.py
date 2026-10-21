@@ -7,7 +7,7 @@ Dois esquemas de autenticacao:
 Ativado apenas quando AGENTE_ATIVO=1. main.py monta o router condicionalmente.
 """
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Header, Depends
+from fastapi import APIRouter, HTTPException, Header, Depends, Request
 from pydantic import BaseModel
 
 from auth import get_current_user
@@ -38,12 +38,31 @@ def _verificar_token(
 
 @router.get("/proximo")
 def proximo(_=Depends(_verificar_token)):
-    """Agente puxa a proxima ordem. Cada chamada tambem serve de heartbeat."""
+    """Agente puxa a proxima ordem. Cada chamada tambem serve de heartbeat.
+
+    Devolve junto a versao atual do pacote: o agente compara com a dele e se
+    atualiza sozinho. Vai aqui, e nao num endpoint proprio, pra nao criar mais
+    uma chamada a cada 2 segundos."""
+    from .download import get_versao_agente
     fila.registrar_ping()
     ordem = fila.proxima_pendente()
+    base = {"versao_atual": get_versao_agente()}
     if not ordem:
-        return {"tem_ordem": False}
-    return {"tem_ordem": True, "ordem": ordem}
+        return {"tem_ordem": False, **base}
+    return {"tem_ordem": True, "ordem": ordem, **base}
+
+
+@router.get("/pacote")
+def pacote(request: Request, _=Depends(_verificar_token)):
+    """O proprio pacote, pro agente se atualizar.
+
+    Separado do /download porque aquele exige login de USUARIO (JWT) e o
+    agente so tem o token dele. Mesmo conteudo: os dois chamam montar_zip().
+    """
+    from .download import montar_zip, _panel_url_from_request
+    from fastapi.responses import Response
+    dados = montar_zip(_panel_url_from_request(request))
+    return Response(content=dados, media_type="application/zip")
 
 
 @router.post("/ping")

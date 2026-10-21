@@ -11,6 +11,7 @@ Loop:
 
 Uso: python agente_bot.py
 """
+import io
 import json
 import shutil
 import ssl
@@ -193,6 +194,127 @@ def _recuperar_chrome() -> bool:
     return False
 
 
+# ── AUTO-ATUALIZACAO ─────────────────────────────────────────────────────────
+# Toda correcao no painel exigia o usuario baixar o pacote de novo e refazer os
+# passos. Isso atrasou varias correcoes: o analista seguia dias com uma versao
+# que ja tinha bug conhecido. Agora o agente se atualiza sozinho.
+#
+# REGRA DE OURO: se qualquer coisa na atualizacao falhar, o agente CONTINUA
+# rodando na versao antiga. Agente parado e' pior que agente desatualizado.
+_UPDATE_TENTADO: set = set()
+
+
+def _validar_pacote(zf) -> str:
+    """Devolve '' se o zip esta sadio, ou o motivo da recusa."""
+    # CRC de cada membro. Pega download truncado/corrompido — um .py cortado
+    # pode continuar compilando ("prin" e' uma expressao valida), entao
+    # conferir so a sintaxe nao basta.
+    try:
+        ruim = zf.testzip()
+        if ruim:
+            return f"arquivo corrompido no pacote: {ruim}"
+    except Exception as e:
+        return f"pacote ilegivel: {str(e)[:70]}"
+
+    nomes = set(zf.namelist())
+    obrigatorios = {"agente_bot.py", "agente_config.json", "motor_excel.py",
+                    "motor_documentos.py", "motor_factories.py",
+                    "3 - INICIAR AGENTE.bat"}
+    faltando = obrigatorios - nomes
+    if faltando:
+        return f"faltam arquivos no pacote: {sorted(faltando)}"
+    # O .py principal precisa COMPILAR. Pega download truncado ou corrompido
+    # antes de ele virar um agente que nao sobe mais.
+    import py_compile, tempfile
+    for py in ("agente_bot.py", "motor_excel.py", "motor_documentos.py",
+               "motor_factories.py"):
+        try:
+            fonte = zf.read(py)
+            compile(fonte, py, "exec")
+        except Exception as e:
+            return f"{py} nao compila: {str(e)[:80]}"
+    try:
+        cfg = json.loads(zf.read("agente_config.json").decode("utf-8"))
+        if not cfg.get("token") or not cfg.get("panel_url"):
+            return "agente_config.json do pacote veio sem token/panel_url"
+    except Exception as e:
+        return f"agente_config.json ilegivel: {str(e)[:60]}"
+    return ""
+
+
+_PACOTE_MIN_BYTES = 40_000   # o pacote real tem ~120 KB; bem menor = suspeito
+
+
+def _auto_atualizar(panel_url: str, token: str, versao_nova: str) -> bool:
+    """Baixa, valida e aplica o pacote novo. True = aplicado (vai reiniciar)."""
+    import shutil, tempfile, zipfile
+    print("")
+    print("=" * 60)
+    print(f" ATUALIZANDO: {_VERSAO_LOCAL or '?'} -> {versao_nova}")
+    print("=" * 60, flush=True)
+    try:
+        req = urlreq.Request(f"{panel_url}/api/agente/pacote",
+                             headers={"Authorization": f"Bearer {token}"})
+        with urlreq.urlopen(req, context=CTX, timeout=180) as r:
+            dados = r.read()
+        print(f"  baixado: {len(dados):,} bytes", flush=True)
+        if len(dados) < _PACOTE_MIN_BYTES:
+            print(f"  [X] pacote pequeno demais ({len(dados):,} b) — "
+                  f"download provavelmente cortado. Seguindo na versao atual.",
+                  flush=True)
+            return False
+
+        zf = zipfile.ZipFile(io.BytesIO(dados))
+        motivo = _validar_pacote(zf)
+        if motivo:
+            print(f"  [X] pacote recusado — {motivo}")
+            print("  Seguindo na versao atual.", flush=True)
+            return False
+
+        # Backup do que esta rodando, pra poder voltar atras na mao.
+        backup = RAIZ / f"_versao_anterior_{_VERSAO_LOCAL or 'desconhecida'}"
+        shutil.rmtree(backup, ignore_errors=True)
+        backup.mkdir(parents=True, exist_ok=True)
+        for item in RAIZ.iterdir():
+            if item.name.startswith("_versao_anterior") or item.name == "cdp_profile":
+                continue
+            try:
+                if item.is_file():
+                    shutil.copy2(item, backup / item.name)
+                elif item.is_dir():
+                    shutil.copytree(item, backup / item.name, dirs_exist_ok=True)
+            except Exception:
+                pass
+        print(f"  backup em {backup.name}", flush=True)
+
+        # cdp_profile NAO entra no zip — o Chrome logado continua intacto.
+        zf.extractall(RAIZ)
+        print(f"  aplicado. reiniciando...", flush=True)
+        return True
+    except Exception as e:
+        print(f"  [X] atualizacao falhou: {str(e)[:140]}")
+        print("  Seguindo na versao atual.", flush=True)
+        return False
+
+
+def _reiniciar_agente() -> None:
+    """Sobe o 3 - INICIAR AGENTE.bat numa janela nova e encerra esta."""
+    bat = RAIZ / "3 - INICIAR AGENTE.bat"
+    try:
+        if bat.exists():
+            subprocess.Popen(["cmd.exe", "/c", str(bat)], cwd=str(RAIZ),
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        else:
+            subprocess.Popen([sys.executable, "-u", str(RAIZ / "agente_bot.py")],
+                             cwd=str(RAIZ),
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+    except Exception as e:
+        print(f"  [X] nao consegui reiniciar: {e}")
+        print("  Feche esta janela e rode '3 - INICIAR AGENTE.bat'.", flush=True)
+        return
+    print("  Agente novo iniciado em outra janela. Esta pode fechar.", flush=True)
+
+
 def rodar_motor(ordem: dict, panel_url: str, token: str) -> tuple[dict | None, str | None]:
     """Executa o motor apropriado num subprocess, monitorando progresso."""
     tmpdir = Path(tempfile.mkdtemp(prefix="autof-ordem-"))
@@ -325,6 +447,17 @@ def main():
                     print(f"[AGENTE] painel HTTP {cod}: {r.get('_body', '')[:200]}")
                     time.sleep(intervalo * 2)
                 continue
+
+            # Auto-atualizacao: o /proximo devolve a versao do painel. Faz
+            # ANTES de pegar ordem — atualizar no meio de uma operacao
+            # deixaria a ordem orfa.
+            _vnova = r.get("versao_atual") or ""
+            if (_vnova and _VERSAO_LOCAL and _vnova != _VERSAO_LOCAL
+                    and _vnova not in _UPDATE_TENTADO and not r.get("tem_ordem")):
+                _UPDATE_TENTADO.add(_vnova)   # uma tentativa por versao
+                if _auto_atualizar(panel, token, _vnova):
+                    _reiniciar_agente()
+                    break
 
             if not r.get("tem_ordem"):
                 # Feedback ocioso a cada minuto
