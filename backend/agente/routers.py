@@ -23,29 +23,38 @@ router = APIRouter(prefix="/api/agente", tags=["agente"])
 def _verificar_token(
     authorization: Optional[str] = Header(None),
     x_agente_versao: Optional[str] = Header(None),
-) -> None:
+    x_agente_usuario: Optional[str] = Header(None),
+) -> str:
+    """Valida o token do agente e devolve o login do dono do pacote.
+
+    String vazia = agente de pacote antigo, que nao manda X-Agente-Usuario.
+    Esse continua atendendo qualquer ordem (fila.LEGADO), pra nao derrubar
+    quem ja tem o agente instalado.
+    """
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization ausente")
     esperado = f"Bearer {token_mod.get_agente_token()}"
     if authorization != esperado:
         raise HTTPException(status_code=401, detail="Token do agente invalido")
-    # Guarda a versao reportada pelo agente
-    if x_agente_versao:
-        fila.registrar_ping(versao=x_agente_versao)
+    usuario = (x_agente_usuario or "").strip()
+    # Guarda versao e dono reportados pelo agente
+    fila.registrar_ping(usuario=usuario, versao=x_agente_versao or "")
+    return usuario
 
 
 # ── Endpoints usados pelo agente_bot ─────────────────────────────────────────
 
 @router.get("/proximo")
-def proximo(_=Depends(_verificar_token)):
+def proximo(agente_usuario: str = Depends(_verificar_token)):
     """Agente puxa a proxima ordem. Cada chamada tambem serve de heartbeat.
 
     Devolve junto a versao atual do pacote: o agente compara com a dele e se
     atualiza sozinho. Vai aqui, e nao num endpoint proprio, pra nao criar mais
     uma chamada a cada 2 segundos."""
     from .download import get_versao_agente
-    fila.registrar_ping()
-    ordem = fila.proxima_pendente()
+    # Agente sem dono (pacote antigo) segue pegando qualquer ordem.
+    ordem = fila.proxima_pendente(usuario=agente_usuario,
+                                  legado=not agente_usuario)
     base = {"versao_atual": get_versao_agente()}
     if not ordem:
         return {"tem_ordem": False, **base}
@@ -53,7 +62,7 @@ def proximo(_=Depends(_verificar_token)):
 
 
 @router.get("/pacote")
-def pacote(request: Request, _=Depends(_verificar_token)):
+def pacote(request: Request, agente_usuario: str = Depends(_verificar_token)):
     """O proprio pacote, pro agente se atualizar.
 
     Separado do /download porque aquele exige login de USUARIO (JWT) e o
@@ -61,13 +70,15 @@ def pacote(request: Request, _=Depends(_verificar_token)):
     """
     from .download import montar_zip, _panel_url_from_request
     from fastapi.responses import Response
-    dados = montar_zip(_panel_url_from_request(request))
+    # Preserva o dono: sem isso a auto-atualizacao devolveria um pacote sem
+    # usuario e o agente virava legado a cada update.
+    dados = montar_zip(_panel_url_from_request(request), usuario=agente_usuario)
     return Response(content=dados, media_type="application/zip")
 
 
 @router.post("/ping")
-def ping(_=Depends(_verificar_token)):
-    fila.registrar_ping()
+def ping(_: str = Depends(_verificar_token)):
+    # O ping em si ja foi registrado por _verificar_token, com dono e versao.
     return {"ok": True}
 
 
@@ -78,8 +89,8 @@ class ProgressoBody(BaseModel):
 
 
 @router.post("/progresso/{ordem_id}")
-def progresso(ordem_id: str, body: ProgressoBody, _=Depends(_verificar_token)):
-    fila.registrar_ping()
+def progresso(ordem_id: str, body: ProgressoBody, _: str = Depends(_verificar_token)):
+    # ping ja registrado por _verificar_token, com dono e versao
     ok = fila.atualizar_progresso(ordem_id, body.feito, body.total, body.desc)
     if not ok:
         raise HTTPException(status_code=404, detail="Ordem nao encontrada")
@@ -107,8 +118,8 @@ class ResultadoBody(BaseModel):
 
 
 @router.post("/resultado/{ordem_id}")
-def resultado(ordem_id: str, body: ResultadoBody, _=Depends(_verificar_token)):
-    fila.registrar_ping()
+def resultado(ordem_id: str, body: ResultadoBody, _: str = Depends(_verificar_token)):
+    # ping ja registrado por _verificar_token, com dono e versao
     ok = fila.concluir(ordem_id, resultado=body.resultado, erro=body.erro)
     if not ok:
         raise HTTPException(status_code=404, detail="Ordem nao encontrada")
@@ -246,14 +257,17 @@ def _persistir_historico(op_id: str, op: dict, itens: dict) -> None:
 
 # ── Endpoints usados pelo frontend (JWT do usuario) ──────────────────────────
 
-@router.get("/online", dependencies=[Depends(get_current_user)])
-def online():
+@router.get("/online")
+def online(current_user = Depends(get_current_user)):
     from .download import get_versao_agente
-    versao_agente = fila.versao_reportada()
+    # Por usuario: o selo fala da maquina de quem esta olhando, nao de
+    # "algum agente em algum lugar". Agente legado conta pra todos.
+    login = getattr(current_user, "login", "") or ""
+    versao_agente = fila.versao_reportada(login)
     versao_atual = get_versao_agente()
     return {
-        "online": fila.agente_online(),
-        "ultimo_ping": fila.ultimo_ping_iso(),
+        "online": fila.agente_online(login),
+        "ultimo_ping": fila.ultimo_ping_iso(login),
         "versao_agente": versao_agente,        # o que o agente reportou
         "versao_atual": versao_atual,          # o que o backend tem no zip agora
         "atualizado": bool(versao_agente) and versao_agente == versao_atual,
