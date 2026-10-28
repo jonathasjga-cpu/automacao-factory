@@ -191,16 +191,28 @@ def _crlf(txt: str) -> bytes:
     return txt.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
 
 
-def montar_zip(panel_url: str) -> bytes:
+def montar_zip(panel_url: str, usuario: str = "") -> bytes:
     """Monta o .zip do agente. Usado pelo download do painel E pela
     auto-atualizacao do agente, pra que os dois entreguem exatamente o mesmo
     pacote — se divergissem, o agente poderia se atualizar pra algo diferente
-    do que o painel considera "a versao atual"."""
+    do que o painel considera "a versao atual".
+
+    `usuario` e' o login de quem baixou. O agente devolve isso em todo request
+    (X-Agente-Usuario), e e' o que permite ao backend entregar a ordem de
+    alguem so pra maquina dessa pessoa. Pacote montado sem usuario (ou baixado
+    antes desta versao) segue como "legado": atende qualquer ordem, igual
+    antes.
+
+    Nao entra no hash da versao de proposito: dois usuarios tem o mesmo
+    pacote, so muda o config. Se entrasse, cada um veria o outro como
+    "desatualizado".
+    """
     token = token_mod.get_agente_token()
 
     config = {
         "panel_url": panel_url,
         "token": token,
+        "usuario": usuario,
         "intervalo_poll_seg": 2,
         "versao": get_versao_agente(),
     }
@@ -257,10 +269,15 @@ def montar_zip(panel_url: str) -> bytes:
     return buf.getvalue()
 
 
-@router.get("/download", dependencies=[Depends(get_current_user)])
-def download(request: Request):
-    """Pacote do agente, pro usuario baixar pelo painel."""
-    buf = io.BytesIO(montar_zip(_panel_url_from_request(request)))
+@router.get("/download")
+def download(request: Request, current_user = Depends(get_current_user)):
+    """Pacote do agente, pro usuario baixar pelo painel.
+
+    Carimba o login de quem baixou — e' o que amarra o agente a' maquina
+    certa.
+    """
+    buf = io.BytesIO(montar_zip(_panel_url_from_request(request),
+                                usuario=getattr(current_user, "login", "") or ""))
     return StreamingResponse(
         buf,
         media_type="application/zip",

@@ -35,6 +35,7 @@ def _load_config() -> dict:
 
 
 _VERSAO_LOCAL = ""  # setado no main() a partir de agente_config.json
+_USUARIO_LOCAL = ""  # login do dono do pacote; vazio = pacote antigo (legado)
 
 
 def _ssl_context() -> ssl.SSLContext:
@@ -57,6 +58,11 @@ def _http(method: str, url: str, token: str, body: dict | None = None,
     headers = {"Authorization": f"Bearer {token}"}
     if incluir_versao and _VERSAO_LOCAL:
         headers["X-Agente-Versao"] = _VERSAO_LOCAL
+    # Diz de quem e' esta maquina. Sem isso o painel nao tem como saber pra
+    # quem entregar cada ordem e acaba mandando a ordem de um pro Chrome de
+    # outro. Pacote antigo nao tem o campo — ai segue o modo legado.
+    if _USUARIO_LOCAL:
+        headers["X-Agente-Usuario"] = _USUARIO_LOCAL
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -400,9 +406,15 @@ def main():
     panel = cfg["panel_url"].rstrip("/")
     token = cfg["token"]
     intervalo = int(cfg.get("intervalo_poll_seg", 2))
-    global _VERSAO_LOCAL
+    global _VERSAO_LOCAL, _USUARIO_LOCAL
     _VERSAO_LOCAL = cfg.get("versao", "")
+    _USUARIO_LOCAL = (cfg.get("usuario") or "").strip()
     print(f" Versao agente: {_VERSAO_LOCAL or '(nao definida)'}")
+    if _USUARIO_LOCAL:
+        print(f" Usuario      : {_USUARIO_LOCAL}")
+    else:
+        print(" Usuario      : (pacote antigo — atende ordens de qualquer um;")
+        print("                baixe o agente de novo pelo painel pra amarrar)")
 
     print("=" * 60)
     print(f" AutoFactory - Agente Local")
