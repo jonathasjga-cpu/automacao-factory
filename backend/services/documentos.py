@@ -1338,11 +1338,19 @@ async def _core_baixar_faturas_pdf(page, context, faturas_por_factory, status):
 
 
 # ─── CTes PDF ────────────────────────────────────────────────────────────────
-# Fluxo correto (confirmado pelo usuário):
-#   Lançamentos → Conhecimentos → /consultaconhecimento?acao=iniciar
-#   → 1° dropdown = "Número Fatura", digita número, ano, filial, status "Confirmado", 1000/pág
-#   → Pesquisar → marcar todos (#ckTodos) → clicar #img_imprimir
-#   → popup com PDF abre → capturar e salvar
+# Fluxo atual (28/10/2026 — ver _ctrcs_da_fatura para a medicao):
+#   1) Tela de FATURAS (/consultafatura): busca "No Fatura / Ano" (numromaneio)
+#      → linha da fatura → viewCtrcs(<id>) → /consultafatura?acao=obter_ctrcs&id=<id>
+#      → daí saem numero, serie e FILIAL REAL de cada CT-e
+#   2) Tela de CT-e (/CTeControlador?acao=listar): busca "Numero CT-e" (s.numero)
+#      com operador 13 (varios separados por virgula), filial do passo 1,
+#      status "Confirmado", emissao 01/01/2000-31/12/2099, 1000/pag
+#   3) Pesquisar → marcar todos (#ckTodos) → #img_imprimir → capturar o PDF
+#
+# O 1° dropdown NAO e' mais "Numero Fatura": essa opcao (ft.numero) parou de
+# retornar qualquer coisa no GW e era a causa de "Ocorrencias: 0" em todas as
+# faturas. Um job por (fatura, filial), porque a numeracao de CT-e reinicia
+# por filial/serie.
 
 async def baixar_ctes_pdf(
     faturas_por_factory: dict[str, list[dict]],
@@ -1365,6 +1373,195 @@ async def baixar_ctes_pdf(
             await browser.close()
 
 
+async def _ctrcs_da_fatura(page, numero_fatura: str, ano: str, fatura: dict, log) -> list[dict]:
+    """Lista os CT-es de uma fatura pela TELA DE FATURAS, nao pela busca de CT-e.
+
+    MEDIDO AO VIVO em 28/10/2026: a opcao "Numero Fatura" (ft.numero) da tela
+    de CT-e parou de retornar qualquer coisa no GW. Nao e' a fatura, nem o
+    formato do numero, nem a data, nem a filial, nem o status — e' o proprio
+    campo. Controles rodados no mesmo teste, intervalo de emissao 2020-2030:
+
+        s.numero     = 089340              -> 1       funciona
+        s.emissao_em = out/2026            -> 5460    funciona
+        ft.numero  comeca com '0'/'1'/'9'  -> 0       em MATRIZ e 4 filiais
+
+    Com ft.numero quebrado, o vinculo fatura->CT-e passa a ser lido da propria
+    fatura: a linha da fatura traz viewCtrcs('<id>'), que chama
+    /consultafatura?acao=obter_ctrcs&id=<id>. De la saem numero, serie e a
+    FILIAL REAL de cada CT-e — melhor que a filial do cadastro, que ja tinha
+    dado problema antes (a 014878 esta na Filial BA, nao na MATRIZ).
+    A busca de CT-e depois roda por s.numero, que funciona.
+
+    Devolve [{'numero': '000538', 'serie': '5', 'filial': 'Filial BA'}, ...].
+    Lista vazia = a fatura nao foi encontrada ou nao tem CT-e.
+    """
+    # zfill so na BASE: "7647.1" -> "007647.1" (zfill direto daria "7647.1",
+    # que nao casa com o "007647.1/2026" da tela).
+    _base, _ponto, _suf = numero_fatura.split("/")[0].strip().partition(".")
+    num = _base.zfill(6) + (f".{_suf}" if _ponto and _suf else "")
+    await _safe_goto(page, f"{BASE_GW}/consultafatura?acao=iniciar",
+                     wait_until="load", timeout=60000, log=log)
+    try:
+        await page.locator('select[name="campoDeConsulta"]').wait_for(
+            state="visible", timeout=20000)
+    except Exception:
+        raise Exception(
+            f"Tela de faturas do GW nao carregou ao buscar os CT-es da fatura "
+            f"{numero_fatura} (select 'campoDeConsulta' ausente). "
+            f"Titulo: '{await page.title()}'."
+        )
+
+    # "numromaneio" = "No Fatura / Ano" — e' o campo que casa numero + ano.
+    # Nao confundir com "numero_pre_fatura" ("Numero Pre Fatura"), que e' outra coisa.
+    await page.evaluate("""() => {
+        const c = document.querySelector('select[name="campoDeConsulta"]');
+        if (c) { c.value = 'numromaneio'; c.dispatchEvent(new Event('change', {bubbles: true})); }
+        for (const [n, rx] of [['finalizada', /todas/i], ['filialId', /todas/i]]) {
+            const s = document.querySelector(`select[name="${n}"]`);
+            if (!s) continue;
+            const t = [...s.options].find(o => rx.test(o.text));
+            if (t) { s.value = t.value; s.dispatchEvent(new Event('change', {bubbles: true})); }
+        }
+        const l = document.querySelector('select[name="limiteResultados"]');
+        if (l) { l.value = '200'; l.dispatchEvent(new Event('change', {bubbles: true})); }
+    }""")
+    await page.wait_for_timeout(900)
+
+    # Numero e ano por ultimo e conferidos: os selects desta tela disparam JS
+    # que limpa os inputs (mesmo motivo do bloco "CAMPO E DATAS POR ULTIMO"
+    # em _core_baixar_faturas_pdf).
+    lido = await page.evaluate("""(d) => {
+        const ins = [...document.querySelectorAll('input[type=text]')].filter(i => i.offsetParent);
+        if (ins[0]) { ins[0].value = d.n; ins[0].dispatchEvent(new Event('input', {bubbles: true})); }
+        if (ins[1]) { ins[1].value = d.a; ins[1].dispatchEvent(new Event('input', {bubbles: true})); }
+        const c = document.querySelector('select[name="campoDeConsulta"]');
+        return {campo: c ? c.value : null,
+                v1: ins[0] ? ins[0].value : null,
+                v2: ins[1] ? ins[1].value : null};
+    }""", {"n": num, "a": ano})
+    if lido.get("campo") != "numromaneio" or lido.get("v1") != num:
+        log(f"    [AVISO] tela de fatura nao aceitou os filtros: {lido}")
+
+    await page.evaluate("""() => {
+        const b = [...document.querySelectorAll('input,button,a')]
+            .find(e => /pesquis/i.test((e.value || '') + (e.innerText || '') + (e.id || '')));
+        if (b) b.click();
+    }""")
+
+    # O Pesquisar desta tela faz navegacao completa: o contexto JS morre no
+    # meio do polling ("Execution context was destroyed"). Espera o load e
+    # tolera o erro a cada volta, em vez de abortar a fatura.
+    try:
+        await page.wait_for_load_state("load", timeout=60000)
+    except Exception:
+        pass
+
+    # A tela pode trazer VARIAS linhas pro mesmo numero: faturas parceladas
+    # aparecem como "007647.1/2026", "007647.2/2026", ... e o Excel apaga o
+    # sufixo (excel_processor normaliza "007647.1/2026" -> "007647"). Pegar a
+    # primeira linha mandaria os CT-es da parcela errada pra factory, entao
+    # desempatamos por vencimento / emissao / valor, que vem do mesmo Excel.
+    cands = []
+    for _ in range(40):
+        await asyncio.sleep(1.0)
+        try:
+            cands = await page.evaluate(r"""(n) => {
+                const norm = t => (t || '').replace(/\s+/g, ' ').trim();
+                const achados = [];
+                for (const t of document.querySelectorAll('table')) {
+                    const cab = t.rows[0] ? [...t.rows[0].cells].map(c => norm(c.innerText).toLowerCase()) : [];
+                    const col = rx => cab.findIndex(c => rx.test(c));
+                    const iFat = col(/^fatura$/), iEmi = col(/emiss/),
+                          iVen = col(/vencim/), iVal = col(/^valor$/);
+                    if (iFat < 0) continue;
+                    for (const r of t.rows) {
+                        const cels = [...r.cells].map(c => norm(c.innerText));
+                        const cFat = cels[iFat] || '';
+                        const base = cFat.split('/')[0];
+                        if (base !== n && base.indexOf(n + '.') !== 0) continue;
+                        let id = null;
+                        for (const img of r.querySelectorAll('img')) {
+                            const m = (img.getAttribute('onclick') || '').match(/viewCtrcs\('(\d+)'\)/);
+                            if (m) { id = m[1]; break; }
+                        }
+                        if (!id) continue;
+                        achados.push({id, fatura: cFat,
+                                      emissao: iEmi >= 0 ? cels[iEmi] : '',
+                                      vencimento: iVen >= 0 ? cels[iVen] : '',
+                                      valor: iVal >= 0 ? cels[iVal] : ''});
+                    }
+                }
+                return achados;
+            }""", num)
+        except Exception:
+            continue
+        if cands:
+            break
+
+    if not cands:
+        log(f"    [AVISO] fatura {numero_fatura} nao apareceu na tela de faturas "
+            f"(buscada como '{num}' / '{ano}')")
+        return []
+
+    if len(cands) == 1:
+        fid = cands[0]["id"]
+    else:
+        def _val(v):
+            return re.sub(r"[^\d]", "", str(v or ""))
+        restantes = cands
+        for campo, esperado in (("vencimento", fatura.get("vencimento")),
+                                ("emissao", fatura.get("emissao")),
+                                ("valor", fatura.get("valor"))):
+            if not esperado or len(restantes) == 1:
+                continue
+            alvo = _val(esperado)
+            if not alvo:
+                continue
+            filtrado = [c for c in restantes if _val(c.get(campo)) == alvo]
+            if filtrado:
+                restantes = filtrado
+        if len(restantes) != 1:
+            opcoes = ", ".join(f"{c['fatura']} (venc {c['vencimento']}, "
+                               f"R$ {c['valor']})" for c in cands)
+            raise Exception(
+                f"A fatura {numero_fatura} tem {len(cands)} parcelas no GW e os dados "
+                f"da planilha nao identificam qual: {opcoes}. O numero no Excel vem "
+                f"sem o sufixo de parcela — informe a fatura como '{num}.1', '{num}.2' "
+                f"etc. para desambiguar."
+            )
+        fid = restantes[0]["id"]
+        log(f"    Parcela escolhida: {restantes[0]['fatura']} "
+            f"(venc {restantes[0]['vencimento']}, R$ {restantes[0]['valor']})")
+
+    dados = await page.evaluate(r"""async (id) => {
+        const r = await fetch('/consultafatura?acao=obter_ctrcs&id=' + id,
+                              {credentials: 'same-origin'});
+        if (!r.ok) return {erro: 'HTTP ' + r.status};
+        const html = await r.text();
+        const doc = new DOMParser().parseFromString('<table>' + html + '</table>', 'text/html');
+        const saida = [];
+        for (const tr of doc.querySelectorAll('tr')) {
+            const cels = [...tr.cells].map(c => (c.innerText || '').trim());
+            const cNum = cels.find(c => /^\d{4,8}-\d+$/.test(c));
+            if (!cNum) continue;
+            const cFil = cels.find(c => /^(matriz|filial\b|fl\b)/i.test(c));
+            const [n, s] = cNum.split('-');
+            saida.push({numero: n, serie: s, filial: cFil || ''});
+        }
+        return {itens: saida};
+    }""", fid)
+
+    if dados.get("erro"):
+        raise Exception(
+            f"GW recusou a lista de CT-es da fatura {numero_fatura} "
+            f"(obter_ctrcs id={fid}): {dados['erro']}"
+        )
+    itens = dados.get("itens") or []
+    if not itens:
+        log(f"    [AVISO] fatura {numero_fatura} (id {fid}) voltou sem nenhum CT-e")
+    return itens
+
+
 async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
     """Loop de factories reutilizavel. Assume `page` ja logada no GW.
     Usado tanto pelo fluxo original quanto pelo modo agente (CDP attach)."""
@@ -1383,23 +1580,63 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
 
                 log(f"📋 CTes — {nome_factory} ({len(faturas)} fatura(s))...")
 
+                # Monta o plano antes de abrir a tela de CT-e: para cada fatura,
+                # pergunta a propria fatura quais CT-es sao dela (ver
+                # _ctrcs_da_fatura — a busca por "Numero Fatura" do GW morreu).
+                # Uma fatura pode ter CT-es em mais de uma filial, e a numeracao
+                # de CT-e reinicia por filial/serie; por isso um job por FILIAL,
+                # nunca uma busca so misturando tudo.
+                jobs: list[dict] = []
                 for fatura in faturas:
                     numero = fatura["numero"]
-                    # GW exige 6 dígitos com zeros: "005148"
-                    numero_busca = numero.split("/")[0].strip().zfill(6)
                     emissao = fatura.get("emissao", "")
                     ano_busca = emissao.split("/")[-1] if emissao and "/" in emissao else _ano_atual()
-                    # Filial: preferimos o valor REAL da fatura (vindo do Excel/API do GW).
-                    # Se nao vier, cai no mapeamento _FILIAL_CTE por sistema como fallback.
-                    # Cuidado: hardcode "SP se nao matriz" era bug — quebrava pra Filial CE/PE.
-                    filial_real = str(fatura.get("filial") or "").strip()
-                    if filial_real:
-                        # Ex: "MATRIZ", "Filial SP", "Filial CE" — usar como veio no cadastro
-                        filial_label = filial_real
-                    else:
-                        filial_label = _FILIAL_CTE.get(sistema, "MATRIZ")
+                    try:
+                        ctrcs = await _ctrcs_da_fatura(page, numero, ano_busca, fatura, log)
+                    except Exception as e:
+                        log(f"  ❌ Fatura {numero}: {e}")
+                        ctes_info.append({"numero": numero, "ok": False, "qtd": 0,
+                                          "motivo": f"lista de CT-es indisponivel: {str(e)[:120]}"})
+                        continue
+                    if not ctrcs:
+                        log(f"  ⚠️ Nenhum CT-e vinculado à fatura {numero}")
+                        ctes_info.append({"numero": numero, "ok": False, "qtd": 0,
+                                          "motivo": "fatura sem CT-e"})
+                        continue
+                    por_filial: dict[str, list[str]] = {}
+                    for c in ctrcs:
+                        fil = (c.get("filial") or "").strip() or                             str(fatura.get("filial") or "").strip() or                             _FILIAL_CTE.get(sistema, "MATRIZ")
+                        por_filial.setdefault(fil, []).append(c["numero"])
+                    resumo_fil = ", ".join(f"{f}: {len(v)}" for f, v in por_filial.items())
+                    log(f"  🔍 Fatura {numero} → {len(ctrcs)} CT-e(s) [{resumo_fil}]")
+                    # A busca vai por GET com os numeros na query. MEDIDO em
+                    # 28/10/2026 numa fatura de 784 CT-es: 400 numeros (2.799
+                    # chars de lista) -> HTTP 502 do GW; 300 (2.099) passa.
+                    # 200 deixa folga pro resto da query (~570 chars).
+                    MAX_POR_BUSCA = 200
+                    lotes = []
+                    for fil, nums in por_filial.items():
+                        uniq = sorted(set(nums))
+                        for i in range(0, len(uniq), MAX_POR_BUSCA):
+                            lotes.append((fil, uniq[i:i + MAX_POR_BUSCA]))
+                    for idx, (fil, nums) in enumerate(lotes, 1):
+                        jobs.append({"fatura": fatura, "numero": numero, "ano": ano_busca,
+                                     "filial": fil, "numeros": nums,
+                                     "parte": idx, "partes": len(lotes)})
 
-                    log(f"  🔍 Fatura {numero} → '{numero_busca}' / '{ano_busca}' / '{filial_label}'")
+                for job in jobs:
+                    fatura = job["fatura"]
+                    numero = job["numero"]
+                    ano_busca = job["ano"]
+                    filial_label = job["filial"]
+                    numeros_cte = job["numeros"]
+                    # Operador 13 do GW = "Igual a palavra/frase (Varios Separados
+                    # por Virgula)": uma busca so para todos os CT-es da fatura.
+                    numero_busca = ",".join(numeros_cte)
+                    sufixo_parte = (f" — parte {job['parte']}/{job['partes']} ({filial_label})"
+                                    if job["partes"] > 1 else "")
+                    log(f"  📑 Fatura {numero}{sufixo_parte}: buscando "
+                        f"{len(numeros_cte)} CT-e(s) por número em '{filial_label}'")
 
                     try:
                         # 1. Navega para CT-e — load é mais estável que networkidle no GW.
@@ -1427,35 +1664,51 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                                 + (f" | screenshot: {shot}" if shot else "")
                             )
 
-                        # 2. Filtro = "Número Fatura"
-                        await page.locator("#campo_consulta").select_option(label="Número Fatura")
-
-                        # 3. Aguarda campos dinâmicos (aparecem só após passo 2)
-                        await page.locator("#valor_consulta").wait_for(state="visible", timeout=10000)
-                        await page.locator("#valor_consulta2").wait_for(state="visible", timeout=10000)
-
-                        # 4. Operador = "Igual ao número" (ope=4)
-                        await page.evaluate("""() => {
-                            const sels = [...document.querySelectorAll('select')];
-                            const opSel = sels.find(s =>
-                                [...s.options].some(o => /palavra|frase/i.test(o.text))
-                            );
-                            if (!opSel) return;
-                            const opt4 = [...opSel.options].find(o => o.value === '4');
-                            if (opt4) {
-                                opSel.value = '4';
-                                opSel.dispatchEvent(new Event('change', {bubbles: true}));
+                        # 2-6. Busca por NUMERO DE CT-E, nao por numero de fatura.
+                        #
+                        # O filtro "Numero Fatura" (ft.numero) do GW parou de
+                        # funcionar — devolve 0 para qualquer valor, em qualquer
+                        # filial (medicao completa em _ctrcs_da_fatura). Os
+                        # numeros dos CT-es agora vem da propria fatura, e aqui
+                        # procuramos por "Numero CT-e" (s.numero), que funciona,
+                        # com o operador 13 ("Varios Separados por Virgula").
+                        _sel = await page.evaluate("""(d) => {
+                            const r = {campo: null, operador: null};
+                            const campo = document.querySelector('select[name="campo_consulta"]');
+                            if (campo) {
+                                const alvo = [...campo.options].find(o => o.value === 's.numero');
+                                if (alvo) {
+                                    campo.value = alvo.value;
+                                    campo.dispatchEvent(new Event('change', {bubbles: true}));
+                                    r.campo = alvo.value;
+                                }
                             }
-                        }""")
+                            const op = document.querySelector('select[name="operador_consulta"]');
+                            if (op) {
+                                // 13 = varios separados por virgula; 4 = igual (1 CT-e so)
+                                const q = d.varios ? '13' : '4';
+                                const alvo = [...op.options].find(o => o.value === q)
+                                    || [...op.options].find(o => o.value === '4');
+                                if (alvo) {
+                                    op.value = alvo.value;
+                                    op.dispatchEvent(new Event('change', {bubbles: true}));
+                                    r.operador = alvo.value;
+                                }
+                            }
+                            return r;
+                        }""", {"varios": len(numeros_cte) > 1})
+                        if _sel.get("campo") != "s.numero":
+                            raise Exception(
+                                "Nao achei a opcao 'Numero CT-e' (s.numero) no filtro da tela "
+                                "de CT-e. A tela do GW mudou — ver _core_baixar_ctes_pdf em "
+                                "services/documentos.py."
+                            )
 
-                        # 5. Preenche número da fatura e ano
+                        await page.locator("#valor_consulta").wait_for(state="visible", timeout=10000)
                         await page.locator("#valor_consulta").fill(numero_busca)
-                        await page.locator("#valor_consulta2").fill(ano_busca)
 
-                        # 6. Demais filtros
                         await page.locator("#statusCte").select_option(label="Confirmado")
                         await page.locator("#tipoTransporte").select_option(label="Todos")
-                        # #limite: busca por texto parcial (label pode ser "1000 resultados")
                         await page.evaluate("""() => {
                             const s = document.querySelector('#limite');
                             if (!s) return;
@@ -1466,20 +1719,31 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                         if _fl:
                             filial_label = _fl
 
-                        # 6b. LIMPA filtros de data — busca é por número de FATURA, não por
-                        # data de emissão do CT-e (CT-es da fatura podem ter sido emitidos
-                        # em outros dias). O GW pré-preenche com hoje, então tem que zerar.
-                        await page.evaluate("""() => {
-                            const ids = ['dtemissao1','dtemissao2','dataEmissao1','dataEmissao2'];
-                            for (const id of ids) {
+                        # Intervalo de emissao LARGO, por ultimo.
+                        # MEDIDO em 28/10/2026: dtemissao1/dtemissao2 sao inputs
+                        # OCULTOS pre-preenchidos com HOJE, e a funcao consulta()
+                        # do GW os envia em toda busca — mesmo quando o campo
+                        # pesquisado nao e' data. Sem alargar, so acha CT-e
+                        # emitido hoje. Mexer na filial dispara AJAX que repoe o
+                        # formulario, entao as datas vao depois dela e sao
+                        # conferidas por leitura de volta.
+                        datas = await page.evaluate("""() => {
+                            const r = {};
+                            for (const [id, v] of [['dtemissao1', '01/01/2000'],
+                                                   ['dtemissao2', '31/12/2099']]) {
                                 const el = document.getElementById(id);
                                 if (el) {
-                                    el.value = '';
+                                    el.value = v;
                                     el.dispatchEvent(new Event('change', {bubbles: true}));
+                                    r[id] = el.value;
                                 }
                             }
+                            return r;
                         }""")
-                        log(f"    ✓ Filtros configurados (filial={filial_label}, sem filtro de data)")
+                        if datas.get("dtemissao1") != "01/01/2000":
+                            log(f"    [AVISO] intervalo de emissao nao aceito: {datas}")
+                        log(f"    ✓ Filtros: s.numero op={_sel.get('operador')} "
+                            f"filial={filial_label} emissao={datas.get('dtemissao1')}→{datas.get('dtemissao2')}")
 
                         # 7. Captura texto atual das ocorrências para detectar mudança
                         occ_antes = await page.evaluate(
@@ -1489,23 +1753,30 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                         # 8. Pesquisa — chama consulta() diretamente, bypassa session_test.jsp
                         #    (tryRequestToServer verifica session_test.jsp que retorna vazio em
                         #     contexto automatizado e cancela silenciosamente a busca)
+                        # valor_consulta2 (o "/ano") so existe quando a busca e'
+                        # por fatura. Buscando por numero de CT-e ele some, e o
+                        # acesso direto quebrava o evaluate inteiro — por isso
+                        # todos os campos sao lidos por uma funcao que tolera
+                        # ausencia.
                         await page.evaluate("""() => {
+                            const v = (id, padrao) => {
+                                const e = document.getElementById(id);
+                                return e ? e.value : padrao;
+                            };
                             if (typeof consulta === 'function') {
                                 consulta(
-                                    document.getElementById('campo_consulta').value,
-                                    document.getElementById('operador_consulta') ?
-                                        document.getElementById('operador_consulta').value : '4',
-                                    document.getElementById('valor_consulta').value,
-                                    document.getElementById('limite').value,
+                                    v('campo_consulta', 's.numero'),
+                                    v('operador_consulta', '4'),
+                                    v('valor_consulta', ''),
+                                    v('limite', '1000'),
                                     'pesquisar',
-                                    document.getElementById('ordenacao') ?
-                                        document.getElementById('ordenacao').value : 'numero',
-                                    document.getElementById('tipo_ordenacao') ?
-                                        document.getElementById('tipo_ordenacao').value : 'ASC',
-                                    document.getElementById('valor_consulta2').value
+                                    v('ordenacao', 'numero'),
+                                    v('tipo_ordenacao', 'ASC'),
+                                    v('valor_consulta2', '')
                                 );
                             } else {
-                                document.getElementById('pesquisar').click();
+                                const p = document.getElementById('pesquisar');
+                                if (p) p.click();
                             }
                         }""")
 
@@ -1728,7 +1999,14 @@ async def _core_baixar_ctes_pdf(page, context, faturas_por_factory, status):
                             ctes_info.append({"numero": numero, "ok": False, "qtd": total_ctes, "motivo": "PDF não capturado"})
                             continue
 
-                        nome_arquivo = f"CTe - Fatura {numero}.pdf"
+                        # Uma fatura pode render varios PDFs (lotes de 200 CT-es,
+                        # ou filiais diferentes). Sem o sufixo, o segundo
+                        # sobrescrevia o primeiro dentro do ZIP.
+                        if job["partes"] > 1:
+                            nome_arquivo = (f"CTe - Fatura {numero} "
+                                            f"({job['parte']} de {job['partes']}).pdf")
+                        else:
+                            nome_arquivo = f"CTe - Fatura {numero}.pdf"
                         # Não adiciona individualmente a arquivos — será incluído no ZIP da factory
                         pdfs_desta_factory.append((nome_arquivo, pdf_bytes))
 

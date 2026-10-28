@@ -769,13 +769,25 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
     df1["emissao_fmt"]    = df1["emissao"].apply(_fmt_data)
     df1["vencimento_fmt"] = df1["vencimento"].apply(_fmt_data)
 
-    # Normaliza número: "005049/2026" → "005049", "5049.0" → "005049"
-    df1["numero"] = (
-        df1["numero"].astype(str).str.strip()
-        .str.split("/").str[0]      # remove "/2026"
-        .str.split(".").str[0]      # remove ".0" de float
-        .str.zfill(6)
-    )
+    # Normaliza numero: "005049/2026" -> "005049", "5049.0" -> "005049",
+    # "007647.1/2026" -> "007647.1"
+    #
+    # O sufixo depois do ponto E' PARTE DO NUMERO quando nao e' ".0".
+    # MEDIDO no GW em 28/10/2026: "007647/2026" (id 23893) e "007647.1/2026"
+    # (id 30938) sao faturas DIFERENTES, com CT-es diferentes — nao sao
+    # parcelas da mesma. A busca do GW por "No Fatura / Ano" e' exata, entao
+    # jogar o sufixo fora fazia a automacao consultar a fatura errada.
+    # O split(".") antigo existia so pra limpar o ".0" de valor lido como
+    # float; agora so esse caso e' descartado.
+    def _num_fatura(v) -> str:
+        s = str(v).strip().split("/")[0].strip()
+        if s.endswith(".0"):        # artefato de leitura como float
+            s = s[:-2]
+        base, ponto, sufixo = s.partition(".")
+        base = base.zfill(6)
+        return f"{base}.{sufixo}" if ponto and sufixo else base
+
+    df1["numero"] = df1["numero"].apply(_num_fatura)
 
     # Lê Excel 2 – chaves de acesso (Complemento Operações)
     # dtype=str garante que a chave de 44 dígitos não seja truncada para notação científica
@@ -826,12 +838,10 @@ def processar_dataframes(path1: Path, path2: Path) -> list[dict]:
                 df2_work = df2[[chave_col, numero_col]].copy()
                 df2_work.columns = ["chave", "numero_fatura"]
                 df2_work["chave"] = df2_work["chave"].astype(str).str.strip()
-                df2_work["numero_fatura"] = (
-                    df2_work["numero_fatura"].astype(str).str.strip()
-                    .str.split("/").str[0]   # remove "/2026"
-                    .str.split(".").str[0]   # remove ".0" de float
-                    .str.zfill(6)
-                )
+                # MESMA normalizacao do df1 (_num_fatura): o merge e' por
+                # este campo, e se um lado virar "007647" e o outro
+                # "007647.1" a chave de acesso se perde em silencio.
+                df2_work["numero_fatura"] = df2_work["numero_fatura"].apply(_num_fatura)
                 df2_work = df2_work[df2_work["chave"].str.len() == 44]
                 _debug_complemento.append(f"Chaves válidas (44 dígitos): {len(df2_work)}")
 
