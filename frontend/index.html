@@ -2525,18 +2525,28 @@ function _setOpRodando(rodando) {
 // Padrões: "CT-e(s) fatura NNNN — …" (documentos) e "Salvo: Fatura - NNN.pdf"
 // (boleto individual). Também aceita "fatura NNNN" isolado em resumo.
 function _contarFaturasProcessadas(status) {
-  const logs = (status && status.logs) || [];
   const seen = new Set();
-  const patterns = [
-    /CT-e\(s\)\s*fatura\s*(\d{4,7})/i,
-    /Salvo:\s*Fatura\s*-\s*(\d{4,7})/i,
-    /PDF via nova aba/i,          // sinal fraco — n/a pra number
-  ];
-  for (const l of logs) {
-    for (const p of patterns) {
-      const m = String(l).match(p);
-      if (m && m[1]) seen.add(String(parseInt(m[1], 10)));
+
+  // FONTE PRINCIPAL: o resumo que o backend monta, que lista as faturas por
+  // numero. Antes isto saia de regex nos logs, e contava errado: o log do PDF
+  // agrupado e' "Salvo: Fatura - GC SP - 28-10-2026.pdf" — tem o nome da
+  // FACTORY onde o padrao esperava o numero da fatura. Resultado: quando os
+  // CT-es falhavam, o painel mostrava "0 de 3 faturas processada" ao lado de
+  // "Operação concluída", mesmo com as faturas salvas.
+  const resumo = (status && status.resumo_documentos) || {};
+  for (const sis of Object.values(resumo)) {
+    const fp = (sis && sis.fatura_pdf) || {};
+    for (const n of (fp.faturas_marcadas || [])) seen.add(String(parseInt(n, 10)));
+    for (const c of (sis && sis.ctes) || []) {
+      if (c && c.ok && c.numero) seen.add(String(parseInt(c.numero, 10)));
     }
+  }
+  if (seen.size) return seen.size;
+
+  // FALLBACK: operacoes antigas, sem resumo no status.
+  for (const l of (status && status.logs) || []) {
+    const m = String(l).match(/CT-e\(s\)\s*fatura\s*(\d{4,7})/i);
+    if (m) seen.add(String(parseInt(m[1], 10)));
   }
   return seen.size;
 }
