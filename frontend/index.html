@@ -2791,7 +2791,7 @@ async function fazerLogin() {
     _authUser  = data.user;
     localStorage.setItem('auth_token', _authToken);
     localStorage.setItem('auth_user', JSON.stringify(_authUser));
-    esconderLogin();
+    _aposLogin();
   } catch (e) {
     erroEl.textContent = e.message;
     erroEl.style.display = 'block';
@@ -2857,33 +2857,65 @@ async function _bootstrapAuth() {
     const u = await r.json();
     _authUser = u;
     localStorage.setItem('auth_user', JSON.stringify(u));
-    esconderLogin();
-    _popularToolbarUI(); // popula botões e empty states com ícones
-    _mostrarEtapaWizard('start'); // wizard sempre começa no botão inicial
-    _bootstrapAgente();  // após login, checa se modo agente está ativo
+    _aposLogin();
   } catch (_) {
     fazerLogout();
   }
+}
+
+// Tudo que precisa acontecer DEPOIS de autenticar, num lugar so.
+//
+// Antes isto vivia solto dentro de _bootstrapAuth(), que so roda no
+// DOMContentLoaded. Quem entrava pelo FORMULARIO de login passava por
+// fazerLogin(), que chamava apenas esconderLogin() — e entao
+// _bootstrapAgente() nunca rodava, AGENTE_ATIVO ficava false e o painel
+// avisava "Modo Agente desligado, avise o suporte" mesmo com o agente
+// ligado e a flag ligada no servidor. Dava certo so depois de um F5 (ai
+// _bootstrapAuth roda de novo), e era esse o "as vezes funciona".
+function _aposLogin() {
+  esconderLogin();
+  _popularToolbarUI(); // popula botões e empty states com ícones
+  _mostrarEtapaWizard('start'); // wizard sempre começa no botão inicial
+  _bootstrapAgente();  // checa se modo agente está ativo
 }
 document.addEventListener('DOMContentLoaded', _bootstrapAuth);
 
 // ─── AGENTE LOCAL (modo opcional, atrás da flag AGENTE_ATIVO) ─────
 window.AGENTE_ATIVO = false;
+// Ja conseguimos LER a configuracao do painel? Sem isto, "false" significava
+// duas coisas diferentes — "o modo agente esta desligado" e "nao consegui
+// perguntar" — e o painel acusava o suporte nas duas.
+window.AGENTE_CONFIG_LIDA = false;
 window.AGENTE_ONLINE = false;
 let _agentePollId = null;
 
-async function _bootstrapAgente() {
-  try {
-    const r = await fetch(`${API}/config`);
-    if (!r.ok) return;
-    const cfg = await r.json();
-    window.AGENTE_ATIVO = !!cfg.agente_ativo;
-    if (window.AGENTE_ATIVO) {
-      _pingAgente();
-      if (_agentePollId) clearInterval(_agentePollId);
-      _agentePollId = setInterval(_pingAgente, 10000);
-    }
-  } catch (_) { /* ignora */ }
+async function _bootstrapAgente(tentativas = 5) {
+  // /api/config exige login. Um 401 de corrida logo apos autenticar, um
+  // cold start do Railway ou uma oscilacao de rede derrubavam esta leitura
+  // — e, como nao havia nova tentativa, AGENTE_ATIVO ficava false ate a
+  // pagina recarregar. Agora insiste antes de desistir.
+  for (let i = 0; i < tentativas; i++) {
+    try {
+      const r = await fetch(`${API}/config`);
+      if (r.ok) {
+        const cfg = await r.json();
+        window.AGENTE_ATIVO = !!cfg.agente_ativo;
+        window.AGENTE_CONFIG_LIDA = true;
+        if (window.AGENTE_ATIVO) {
+          _pingAgente();
+          if (_agentePollId) clearInterval(_agentePollId);
+          _agentePollId = setInterval(_pingAgente, 10000);
+        }
+        return true;
+      }
+      // 401 aqui ja derrubou a sessao pelo wrapper do fetch — insistir nao
+      // ajuda e so empilha pedido.
+      if (r.status === 401 || r.status === 403) return false;
+    } catch (_) { /* rede oscilou — tenta de novo */ }
+    await new Promise(res => setTimeout(res, 1000 * Math.pow(2, i)));
+  }
+  console.warn('[agente] nao consegui ler /api/config apos varias tentativas');
+  return false;
 }
 
 async function _pingAgente() {
@@ -3504,14 +3536,42 @@ async function carregarFaturas(dataInicial, dataFinal) {
       // do GW. Quando a flag do modo agente sumiu, o painel caiu aqui sem
       // avisar e o usuario recebeu "Timeout waiting for #login", que nao tem
       // relacao com a causa. Agora o modo fica explicito no log.
-      const _box = document.getElementById('progresso-carregar');
-      if (_box) {
-        _box.textContent = '⚠️ Modo Agente DESLIGADO — tentando pelo servidor. '
-          + 'Em produção isso não funciona; o suporte precisa ligar AGENTE_ATIVO.';
+      // Duas situacoes MUITO diferentes caiam nesta mesma mensagem:
+      // o modo estar realmente desligado no servidor, e o painel nao ter
+      // conseguido perguntar. A segunda nao e' problema do suporte — e'
+      // so recarregar — e mandar o usuario "avisar o suporte" nesse caso
+      // mandava gente atras de um problema que nao existia.
+      if (!window.AGENTE_CONFIG_LIDA) {
+        // Ultima tentativa antes de desistir: se a config vier agora e o
+        // modo estiver ligado, refaz o carregamento pelo caminho certo.
+        const leu = await _bootstrapAgente(2);
+        if (leu && window.AGENTE_ATIVO) {
+          // Para o poll que esta invocacao abriu antes de recomecar, senao
+          // ficariam dois intervalos escrevendo no mesmo box de progresso.
+          _pararPollingCarregar();
+          btn.disabled = false;
+          btn.innerHTML = labelOriginal;
+          return carregarFaturas(dataInicial, dataFinal);
+        }
       }
-      notifyWarn('O painel está com o Modo Agente desligado e vai tentar carregar '
-        + 'pelo servidor, o que não funciona em produção. Avise o suporte.',
-        'Modo Agente desligado');
+      const _box = document.getElementById('progresso-carregar');
+      if (!window.AGENTE_CONFIG_LIDA) {
+        if (_box) {
+          _box.textContent = '⚠️ Não consegui confirmar a configuração do painel. '
+            + 'Recarregue a página (F5) e tente de novo.';
+        }
+        notifyWarn('Não consegui confirmar a configuração do painel — isso costuma '
+          + 'ser oscilação de rede. Recarregue a página (F5) e tente de novo.',
+          'Configuração não confirmada');
+      } else {
+        if (_box) {
+          _box.textContent = '⚠️ Modo Agente DESLIGADO — tentando pelo servidor. '
+            + 'Em produção isso não funciona; o suporte precisa ligar AGENTE_ATIVO.';
+        }
+        notifyWarn('O painel está com o Modo Agente desligado e vai tentar carregar '
+          + 'pelo servidor, o que não funciona em produção. Avise o suporte.',
+          'Modo Agente desligado');
+      }
       try {
         const qs = new URLSearchParams({ data_inicial: dataInicial, data_final: dataFinal }).toString();
         const resp = await fetch(`${API}/faturas?${qs}`);
